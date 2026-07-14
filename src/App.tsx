@@ -333,11 +333,16 @@ function App() {
         >
           <summary>Move log</summary>
           <div className="log" ref={logRef}>
-            {game.moveLog.map((m, i) => (
-              <div key={i}>
-                {i + 1}. {m}
-              </div>
-            ))}
+            {game.moveLog
+              .filter((_, i) => i % 2 === 0)
+              .map((white, n) => {
+                const black = game.moveLog[n * 2 + 1];
+                return (
+                  <div key={n}>
+                    {n + 1}. {white}{black ? ` ${black}` : ""}
+                  </div>
+                );
+              })}
           </div>
         </details>
         <div className="controls">

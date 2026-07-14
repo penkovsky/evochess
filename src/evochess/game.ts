@@ -188,7 +188,7 @@ export class EvoChessGame {
         this.chess.remove(to);
         this.chess.put({ type: minorPromo as PieceSymbol, color }, to);
         this.minorRights[color] -= 1;
-        note += ` (minor-promo->${minorPromo.toUpperCase()}@${to})`;
+        note = note.replace(/[+#]$/, "") + `=${minorPromo.toUpperCase()}`;
       } else if (rookPromo) {
         if (this.rookRights[color] <= 0) {
           this.chess.undo();
@@ -202,19 +202,15 @@ export class EvoChessGame {
         this.chess.remove(to);
         this.chess.put({ type: "r", color }, to);
         this.rookRights[color] -= 1;
-        note += ` (rook-promo->R@${to})`;
+        note = note.replace(/[+#]$/, "") + "=R";
       }
 
       // an evolutionary promotion can change whether the opponent is now in
       // check/checkmate, so refresh the SAN's +/# suffix
       if (minorPromo !== undefined || rookPromo) {
-        const parenIdx = note.indexOf(" (");
-        let base = parenIdx >= 0 ? note.slice(0, parenIdx) : note;
-        const suffix = parenIdx >= 0 ? note.slice(parenIdx) : "";
-        base = base.replace(/[+#]$/, "");
-        if (this.chess.isCheckmate()) base += "#";
-        else if (this.chess.isCheck()) base += "+";
-        note = base + suffix;
+        note = note.replace(/[+#]$/, "");
+        if (this.chess.isCheckmate()) note += "#";
+        else if (this.chess.isCheck()) note += "+";
       }
     }
 
