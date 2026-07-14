@@ -1,0 +1,103 @@
+ The EvoChess Game
+ =================
+
+ == EvoChess rules
+
+ 0. === Chess-Based Rules
+    - In general, the pieces move and the Pawns are promoted similarly to chess.
+    - During the promotion, only the pieces of the same color are available.
+    - The first long Pawn move is allowed and is counted as a single move.
+    - En passant is defined as in chess.
+    - Checks, mates, and stalemates are defined by the standard chess rules.
+
+ 1. === EvoChess Starting Position
+    The game starts only with 8 Pawns and a King of each color
+    on their standard chess positions.
+
+ 2. === The First Evolutionary Addendum aka "To Minor Piece Promotion"
+    In addition to chess rules, Pawns may be promoted to minor pieces
+    under the following conditions. After every N = 3 Pawn moves,
+    the player gains the right to promote to a minor piece (a Knight or a Bishop)
+    the last Pawn that moved.
+
+ 3. === The Second Evolutionary Addendum aka "To Rook Promotion"
+    After every M = 3 moves made by a player's own minor pieces (Knights
+    and Bishops), that player gains the right to promote to a Rook the last
+    minor piece that moved. This fully mirrors the Pawn rule: just as the
+    "To Minor Piece Promotion" right promotes the last Pawn that moved, the
+    "To Rook Promotion" right promotes the last minor piece that moved.
+    Captures play no part in the "To Rook Promotion" right.
+
+ 4. === Clarifications
+    - The promotion rights, both for Pawns and minor pieces, are accumulated
+      indefinitely.
+
+      ==== Consider the white Pawns promotion example
+
+           | Move # | Comment
+      ======================================================================
+      e4   | 1      | A Pawn moves.
+      ..   |        |
+      d4   | 3      | Another Pawn moves.
+      ..   |        |
+      d5   | 5      | The same Pawn moves again, and the "To Minor Piece Promotion"
+           |        | right is obtained. No promotion is obligatory.
+      ..   |        |
+      d6   | 7      | A Pawn moves without promotion.
+           |        | The player's "To Minor Piece Promotion" right from the
+           |        | previous moves is preserved.
+      ..   |        |
+      b4=N | 9      | A Pawn moves and is promoted to a minor piece.
+      ..   |        |
+      Nd5  | 11     | The minor piece moves. No evolution.
+      ..   |        |
+      a4=B | 13     | The 6th Pawn move counts towards regaining the
+           |        | "To Minor Piece Promotion" right. The Pawn gets promoted.
+
+      Remark: The next N - 1 = 2 Pawn moves, Pawns have no evochess promotion
+              rights unless the 8th rank was reached.
+
+      Remark: The 8th rank Pawn promotion is obligatory as in standard chess
+              and is also counted towards the Pawn moves.
+
+    - A move by a minor piece counts towards "To Rook Promotion" whether or
+      not it is a capture. Pawn moves (including Pawn captures) count towards
+      "To Minor Piece Promotion" only, never towards "To Rook Promotion".
+
+    - A Pawn move on which the Pawn evolves into a minor piece (via the
+      "To Minor Piece Promotion" right) is counted as a Pawn move: it counts
+      towards "To Minor Piece Promotion" and never towards "To Rook Promotion",
+      because the piece that moved was a Pawn. The freshly created minor piece
+      only begins counting towards "To Rook Promotion" on its own later moves.
+
+    - A promotion is available only in the end of the player's move.
+
+    - Both evolutionary promotions apply to the piece that just moved: the
+      "To Minor Piece Promotion" right may only be spent on the Pawn that
+      just moved, and the "To Rook Promotion" right may only be spent on the
+      minor piece that just moved. Consequently a rook-promotion right can
+      only be exercised on a turn on which a minor piece moves, just as a
+      minor-promotion right can only be exercised on a turn on which a Pawn
+      moves. Unused rights are preserved for a later such turn.
+
+    - Only one piece at a time can be promoted even if several rights are
+      accumulated (e.g. an unused Pawn-promotion right together with an unused
+      minor-piece-promotion right).
+
+    - If the 8th rank is reached by a Pawn, the Pawn promotion is obligatory.
+      No other promotions are possible at that move.
+
+    - Castling is not defined.
+
+
+September 2017, Bogdan Penkovsky
+
+Revised July 2026: the "To Rook Promotion" right was changed from being earned
+by non-Pawn captures (K = 2) to being earned by minor-piece moves (M = 3),
+making it structurally symmetric with the Pawn rule and rewarding activity
+rather than captures.
+
+Revised July 2026: the "To Rook Promotion" right was further narrowed so that
+it promotes only the last minor piece that moved (rather than any minor piece
+on the board), completing the symmetry with the "To Minor Piece Promotion"
+right, which promotes only the last Pawn that moved.
