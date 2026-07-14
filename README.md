@@ -1,4 +1,4 @@
-# EvoChess (web)
+# EvoChess
 
 A standalone, backend-free browser port of [EvoChess](./rules.txt) — a chess
 variant where the game starts with only Pawns and Kings, and pieces evolve
