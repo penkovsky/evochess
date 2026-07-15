@@ -1,7 +1,7 @@
-import type { Color } from "chess.js";
+import type { Color, Square } from "chess.js";
 import { EvoChessGame } from "./game";
 
-const STORAGE_KEY = "evochess-save-v2";
+const STORAGE_KEY = "evochess-save-v3";
 
 export interface SavedState {
   fen: string;
@@ -10,6 +10,10 @@ export interface SavedState {
   pawnMoveProgress: Record<Color, number>;
   minorMoveProgress: Record<Color, number>;
   moveLog: string[];
+  // rookCharges keyed by square, as a plain object (Map isn't JSON-serializable).
+  rookCharges: Record<string, number>;
+  // rookLocked squares, as an array (Set isn't JSON-serializable).
+  rookLocked: string[];
   mode: "human-ai" | "human-human";
   aiColor: Color;
   depth: number;
@@ -43,6 +47,8 @@ export function saveGame(
     pawnMoveProgress: game.pawnMoveProgress,
     minorMoveProgress: game.minorMoveProgress,
     moveLog: game.moveLog,
+    rookCharges: Object.fromEntries(game.rookCharges),
+    rookLocked: [...game.rookLocked],
     mode,
     aiColor,
     depth,
@@ -75,6 +81,8 @@ export function loadGame(): {
     game.pawnMoveProgress = saved.pawnMoveProgress;
     game.minorMoveProgress = saved.minorMoveProgress;
     game.moveLog = saved.moveLog;
+    game.rookCharges = new Map(Object.entries(saved.rookCharges ?? {})) as Map<Square, number>;
+    game.rookLocked = new Set((saved.rookLocked ?? []) as Square[]);
     return {
       game,
       mode: saved.mode,

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Chessboard } from "react-chessboard";
 import type { Color, Square } from "chess.js";
-import { EvoChessGame, EvoChessError, N_MINOR, M_ROOK, type ApplyMoveOptions, type ForcedPromo, type MinorPromo } from "./evochess/game";
+import { EvoChessGame, EvoChessError, N_MINOR, M_ROOK, ROOK_CHARGES, type ApplyMoveOptions, type ForcedPromo, type MinorPromo } from "./evochess/game";
 import { chooseMove } from "./evochess/ai";
 import { saveGame, loadGame, clearSavedGame } from "./evochess/persistence";
 import "./App.css";
@@ -11,7 +11,7 @@ type Mode = "human-ai" | "human-human";
 interface PromoModalState {
   from: Square;
   to: Square;
-  kind: "forced" | "optional";
+  kind: "forced" | "optional" | "downgrade";
   canMinor: boolean;
   canRook: boolean;
 }
@@ -208,10 +208,30 @@ function App() {
     if (!piece) return false;
 
     const isPawn = piece.type === "p";
+    const isRook = piece.type === "r";
     const reachesLastRank = isPawn && (to[1] === "8" || to[1] === "1");
 
     if (reachesLastRank) {
       setModal({ from, to, kind: "forced", canMinor: false, canRook: false });
+      return true;
+    }
+
+    if (isRook) {
+      const remaining = (game.rookCharges.get(from) ?? ROOK_CHARGES) - 1;
+      // Validate legality on a scratch copy first (a dummy downgrade choice
+      // is only needed to get past the mandatory-downgrade check; it isn't
+      // applied to the real game).
+      const scratch = game.copy();
+      try {
+        scratch.applyMove(from, to, remaining <= 0 ? { downgradeTo: "n" } : {});
+      } catch {
+        return false;
+      }
+      if (remaining <= 0) {
+        setModal({ from, to, kind: "downgrade", canMinor: false, canRook: false });
+      } else {
+        applyAndAdvance(from, to, {});
+      }
       return true;
     }
 
@@ -294,6 +314,17 @@ function App() {
           options={{
             position: game.chess.fen(),
             onPieceDrop,
+            squareRenderer: ({ square, children }) => {
+              const charges = game.rookCharges.get(square as Square);
+              return (
+                <div style={{ width: "100%", height: "100%", position: "relative" }}>
+                  {children}
+                  {charges !== undefined && (
+                    <span className={`rook-charge-badge ${charges === 1 ? "low" : ""}`}>{charges}</span>
+                  )}
+                </div>
+              );
+            },
             boardOrientation:
               mode === "human-human"
                 ? autoFlip && game.turn === "b"
@@ -320,6 +351,7 @@ function App() {
             <li>Every 3 Pawn moves earns a right to promote the last Pawn that moved to a Knight or Bishop.</li>
             <li>Every 3 minor-piece (Knight/Bishop) moves earns a right to promote the last minor piece that moved to a Rook.</li>
             <li>Rights accumulate and carry over until used; only one promotion may be spent per turn.</li>
+            <li>A Rook has 5 charges, spent only when it moves; at 0 it downgrades to a Knight or Bishop (owner's choice) and can never become a Rook again. Capturing a Rook is a normal capture — it never triggers a downgrade.</li>
             <li>Reaching the 8th rank still forces a standard Pawn promotion, as in chess.</li>
             <li>Castling is not defined.</li>
           </ul>
@@ -442,7 +474,17 @@ function App() {
       {modal && (
         <div className="modal-backdrop">
           <div className="modal">
-            {modal.kind === "forced" ? (
+            {modal.kind === "downgrade" ? (
+              <>
+                <p>Rook charges exhausted — it must downgrade:</p>
+                <button onClick={() => finishModalMove({ downgradeTo: "n" as MinorPromo })}>
+                  Downgrade to Knight
+                </button>
+                <button onClick={() => finishModalMove({ downgradeTo: "b" as MinorPromo })}>
+                  Downgrade to Bishop
+                </button>
+              </>
+            ) : modal.kind === "forced" ? (
               <>
                 <p>Pawn reaches the last rank — choose promotion:</p>
                 {(["q", "r", "b", "n"] as ForcedPromo[]).map((p) => (

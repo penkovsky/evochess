@@ -232,3 +232,23 @@
   padding: 8px;
   cursor: pointer;
 }
+
+.rook-charge-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  min-width: 14px;
+  padding: 0 2px;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 7px;
+  background: #2a7;
+  color: #fff;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.rook-charge-badge.low {
+  background: #d98c00;
+}

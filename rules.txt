@@ -89,6 +89,36 @@
 
     - Castling is not defined.
 
+ 5. === The Third Evolutionary Addendum aka "Rook Charges"
+    A Rook is a one-shot power spike, not a permanent fixture. Every Rook
+    carries 5 charges, starting from the moment it is created (whether by
+    the "To Rook Promotion" right or by a standard 8th-rank Pawn promotion
+    to Rook).
+
+    - A charge is spent only when the Rook itself moves. Moves by other
+      pieces do not affect a Rook's charges.
+
+    - When a Rook move brings its charges to 0, the Rook immediately
+      downgrades, on the same square and the same turn, into a minor piece
+      (a Knight or a Bishop, the owner's choice). This downgrade is
+      mandatory: a Rook move that would exhaust its last charge cannot be
+      completed without it.
+
+    - The downgraded minor piece begins a fresh "To Rook Promotion" counter
+      at zero, like any other minor piece, but it can never again be
+      promoted to a Rook: once downgraded, a piece is permanently locked
+      out of the "To Rook Promotion" right, even if it later earns one.
+
+    - Capturing a Rook is a normal capture: the Rook and its remaining
+      charges are simply removed from the game. Capture never triggers a
+      downgrade — downgrade only ever results from the Rook's own move
+      exhausting its own charges.
+
+    - Because a downgrade can remove the very piece giving check (or bring
+      a new piece into a checking position), check, checkmate, and
+      stalemate are judged only after the downgrade is resolved, not on
+      the intermediate position immediately after the Rook's move.
+
 
 September 2017, Bogdan Penkovsky
 
@@ -101,3 +131,10 @@ Revised July 2026: the "To Rook Promotion" right was further narrowed so that
 it promotes only the last minor piece that moved (rather than any minor piece
 on the board), completing the symmetry with the "To Minor Piece Promotion"
 right, which promotes only the last Pawn that moved.
+
+Revised July 2026: added "Rook Charges" (rule 5), so that a Rook is a scarce,
+temporary asset rather than a permanent fixture once earned. Charges are
+spent per Rook move, not per turn, so developing other pieces costs a Rook
+nothing. The permanent lock-out on re-promotion (rather than allowing a
+downgraded piece to become a Rook again) keeps Rooks a burst of power to be
+timed rather than a piece that cycles indefinitely.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { EvoChessGame, EvoChessError, START_FEN } from "../game";
+import { EvoChessGame, EvoChessError, START_FEN, ROOK_CHARGES } from "../game";
 import type { Square } from "chess.js";
 
 function push(game: EvoChessGame, uci: string, options = {}) {
@@ -144,6 +144,117 @@ describe("rook promotion rights", () => {
     expect(game.chess.get("e1")?.type).toBe("k"); // move rolled back
     expect(game.chess.get("d1")).toBeUndefined();
     expect(game.rookRights.w).toBe(1); // right not consumed
+  });
+});
+
+describe("rook charges", () => {
+  it("grants ROOK_CHARGES charges on evolutionary promotion", () => {
+    const game = new EvoChessGame();
+    game.chess.load("4k3/8/1n6/3N4/8/8/8/4K3 w - - 0 1");
+    game.rookRights.w = 1;
+    push(game, "d5b6", { rookPromo: true });
+    expect(game.rookCharges.get("b6" as Square)).toBe(ROOK_CHARGES);
+  });
+
+  it("grants ROOK_CHARGES charges on a forced 8th-rank promotion to rook", () => {
+    const game = new EvoChessGame();
+    game.chess.load("7k/4P3/8/8/8/8/8/K7 w - - 0 1");
+    push(game, "e7e8", { forcedPromo: "r" });
+    expect(game.rookCharges.get("e8" as Square)).toBe(ROOK_CHARGES);
+  });
+
+  it("spends one charge per rook move and the key follows the piece", () => {
+    const game = new EvoChessGame();
+    game.chess.load("4k3/8/8/8/8/8/8/R3K3 w - - 0 1");
+    game.rookCharges.set("a1" as Square, ROOK_CHARGES);
+    push(game, "a1a4");
+    expect(game.rookCharges.get("a4" as Square)).toBe(ROOK_CHARGES - 1);
+    expect(game.rookCharges.has("a1" as Square)).toBe(false);
+  });
+
+  it("treats a rook with no tracked charge entry as freshly-promoted", () => {
+    const game = new EvoChessGame();
+    game.chess.load("4k3/8/8/8/8/8/8/R3K3 w - - 0 1");
+    push(game, "a1a4");
+    expect(game.rookCharges.get("a4" as Square)).toBe(ROOK_CHARGES - 1);
+  });
+
+  it("requires a downgrade choice when a rook move would exhaust its last charge", () => {
+    const game = new EvoChessGame();
+    game.chess.load("4k3/8/8/8/8/8/8/R3K3 w - - 0 1");
+    game.rookCharges.set("a1" as Square, 1);
+    expect(() => push(game, "a1a4")).toThrow(EvoChessError);
+    expect(game.chess.get("a1")?.type).toBe("r"); // move rolled back
+    expect(game.rookCharges.get("a1" as Square)).toBe(1); // charge not consumed
+  });
+
+  it("rejects a downgrade choice when the rook still has charges left", () => {
+    const game = new EvoChessGame();
+    game.chess.load("4k3/8/8/8/8/8/8/R3K3 w - - 0 1");
+    game.rookCharges.set("a1" as Square, ROOK_CHARGES);
+    expect(() => push(game, "a1a4", { downgradeTo: "n" })).toThrow(EvoChessError);
+  });
+
+  it("rejects a downgrade choice for a move that isn't a rook move", () => {
+    const game = new EvoChessGame();
+    expect(() => push(game, "a2a3", { downgradeTo: "n" })).toThrow(EvoChessError);
+  });
+
+  it("downgrades to the chosen minor piece and logs an Rd4→Bd4-style note", () => {
+    const game = new EvoChessGame();
+    game.chess.load("4k3/8/8/8/8/8/8/R3K3 w - - 0 1");
+    game.rookCharges.set("a1" as Square, 1);
+    // Knight, not Bishop: a4 sits on the a4-e8 diagonal, which would put the
+    // black king in check and add an unwanted "+" to the expected note.
+    const note = push(game, "a1a4", { downgradeTo: "n" });
+    expect(game.chess.get("a4" as Square)?.type).toBe("n");
+    expect(game.rookCharges.has("a4" as Square)).toBe(false);
+    expect(game.rookLocked.has("a4" as Square)).toBe(true);
+    expect(note).toBe("Ra4→Na4");
+  });
+
+  it("permanently locks the downgraded piece out of ever becoming a rook again", () => {
+    const game = new EvoChessGame();
+    game.chess.load("4k3/8/8/8/8/8/8/R3K3 w - - 0 1");
+    game.rookCharges.set("a1" as Square, 1);
+    push(game, "a1a4", { downgradeTo: "n" }); // rook downgrades to knight on a4
+    push(game, "e8f8");
+    game.rookRights.w = 1;
+    expect(game.canRookPromote("w", "a4" as Square)).toBe(false);
+    expect(() => push(game, "a4b6", { rookPromo: true })).toThrow(EvoChessError);
+  });
+
+  it("discards a captured rook's charges without downgrading it", () => {
+    const game = new EvoChessGame();
+    game.chess.load("4k3/8/8/3r4/8/8/8/3RK3 w - - 0 1");
+    game.rookCharges.set("d1" as Square, ROOK_CHARGES);
+    game.rookCharges.set("d5" as Square, 1);
+    push(game, "d1d5"); // white rook captures black rook
+    expect(game.chess.get("d5" as Square)?.type).toBe("r");
+    expect(game.chess.get("d5" as Square)?.color).toBe("w");
+    expect(game.rookCharges.get("d5" as Square)).toBe(ROOK_CHARGES - 1);
+  });
+
+  it("re-evaluates checkmate after a downgrade, since the new piece attacks differently", () => {
+    const game = new EvoChessGame();
+    game.chess.load("6k1/5ppp/8/8/8/8/8/R6K w - - 0 1");
+    game.rookCharges.set("a1" as Square, 1);
+    push(game, "a1a8", { downgradeTo: "n" });
+    expect(game.chess.get("a8" as Square)?.type).toBe("n");
+    expect(game.chess.isCheck()).toBe(false);
+    expect(game.isGameOver()).toBe(false);
+  });
+
+  it("copy() clones rookCharges and rookLocked independently", () => {
+    const game = new EvoChessGame();
+    game.chess.load("4k3/8/8/8/8/8/8/R3K3 w - - 0 1");
+    game.rookCharges.set("a1" as Square, 3);
+    game.rookLocked.add("h1" as Square);
+    const copy = game.copy();
+    copy.rookCharges.set("a1" as Square, 1);
+    copy.rookLocked.add("g1" as Square);
+    expect(game.rookCharges.get("a1" as Square)).toBe(3);
+    expect(game.rookLocked.has("g1" as Square)).toBe(false);
   });
 });
 

@@ -4,7 +4,7 @@
  * evochess/ai.py.
  */
 import type { Color, Square, PieceSymbol } from "chess.js";
-import { EvoChessGame, type ApplyMoveOptions } from "./game";
+import { EvoChessGame, ROOK_CHARGES, type ApplyMoveOptions } from "./game";
 
 const PIECE_VALUES: Record<PieceSymbol, number> = {
   p: 1,
@@ -49,6 +49,7 @@ function candidateTurns(game: EvoChessGame): CandidateTurn[] {
     const piece = game.chess.get(from);
     const isPawnMove = piece?.type === "p";
     const isMinorMove = piece?.type === "n" || piece?.type === "b";
+    const isRookMove = piece?.type === "r";
     const reachesLastRank = isPawnMove && (to[1] === "8" || to[1] === "1");
 
     if (reachesLastRank) {
@@ -56,6 +57,16 @@ function candidateTurns(game: EvoChessGame): CandidateTurn[] {
         candidates.push({ from, to, options: { forcedPromo: forced } });
       }
       continue;
+    }
+
+    if (isRookMove) {
+      const remaining = (game.rookCharges.get(from) ?? ROOK_CHARGES) - 1;
+      if (remaining <= 0) {
+        for (const minor of ["n", "b"] as const) {
+          candidates.push({ from, to, options: { downgradeTo: minor } });
+        }
+        continue;
+      }
     }
 
     candidates.push({ from, to, options: {} });
