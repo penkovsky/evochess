@@ -365,3 +365,65 @@ describe("standard chess rules still apply", () => {
     expect(game.resultString()).toBe("Stalemate - draw");
   });
 });
+
+describe("en passant interaction with evolutionary promotion", () => {
+  it("remains available when the pawn evolves on the same move as its double push", () => {
+    const game = new EvoChessGame();
+    game.chess.load("7k/8/8/8/1p6/8/P3K3/8 w - - 0 1");
+    game.minorRights.w = 1;
+    push(game, "a2a4", { minorPromo: "n" });
+    expect(game.chess.get("a4" as Square)?.type).toBe("n"); // the pawn evolved
+    // chess.js cannot represent this capture (its en passant assumes a pawn
+    // victim), so the engine tracks it itself and legalMoves() is the only
+    // source of truth. Asserting against chess.chess.moves() here would be
+    // asserting the corrupting `_epSquare` hack that used to back it.
+    const ep = game.legalMoves().filter((m) => m.evolvedEp);
+    expect(ep).toHaveLength(1);
+    expect(ep[0]).toMatchObject({ from: "b4", to: "a3", captured: "n" });
+  });
+
+  it("does not let a read-only fen() revert the evolution", () => {
+    // Regression: chess.js's en-passant undo hardcodes restoring a PAWN, so
+    // pointing its `_epSquare` at an evolved piece let any legality trial
+    // inside fen()/moves() silently rewrite the knight back into a pawn.
+    const game = new EvoChessGame();
+    game.chess.load("7k/8/8/8/1p6/8/P3K3/8 w - - 0 1");
+    game.minorRights.w = 1;
+    push(game, "a2a4", { minorPromo: "n" });
+    expect(game.chess.get("a4" as Square)?.type).toBe("n");
+    game.chess.fen();
+    game.chess.moves({ verbose: true });
+    expect(game.chess.get("a4" as Square)?.type).toBe("n");
+    // and the board must survive the fen() round-trip that copy() performs
+    expect(game.copy().chess.get("a4" as Square)?.type).toBe("n");
+  });
+
+  it("captures en passant and removes the evolved piece, not just a pawn", () => {
+    const game = new EvoChessGame();
+    game.chess.load("7k/8/8/8/1p6/8/P3K3/8 w - - 0 1");
+    game.minorRights.w = 1;
+    push(game, "a2a4", { minorPromo: "n" }); // white pawn evolves into a knight on a4
+    push(game, "b4a3"); // black captures en passant
+    expect(game.chess.get("a4" as Square)).toBeUndefined(); // the knight is gone, not just a pawn
+    expect(game.chess.get("a3" as Square)?.type).toBe("p");
+    expect(game.chess.get("a3" as Square)?.color).toBe("b");
+  });
+
+  it("still expires after one ply even when the pawn evolved", () => {
+    const game = new EvoChessGame();
+    game.chess.load("7k/8/8/8/1p6/8/P3K3/8 w - - 0 1");
+    game.minorRights.w = 1;
+    push(game, "a2a4", { minorPromo: "n" });
+    push(game, "h8g8"); // black declines the capture and plays something else
+    expect(game.epEvolved).toBeNull();
+    expect(game.legalMoves().some((m) => m.evolvedEp)).toBe(false);
+  });
+
+  it("does not affect a plain double push with no evolution", () => {
+    const game = new EvoChessGame();
+    game.chess.load("7k/8/8/8/1p6/8/P3K3/8 w - - 0 1");
+    push(game, "a2a4");
+    const moves = game.chess.moves({ square: "b4" as Square, verbose: true });
+    expect(moves.some((m) => m.flags.includes("e"))).toBe(true);
+  });
+});

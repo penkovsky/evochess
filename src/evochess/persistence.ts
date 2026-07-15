@@ -1,5 +1,5 @@
 import type { Color, Square } from "chess.js";
-import { EvoChessGame } from "./game";
+import { EvoChessGame, type EvolvedEnPassant } from "./game";
 
 const STORAGE_KEY = "evochess-save-v3";
 
@@ -14,6 +14,10 @@ export interface SavedState {
   rookCharges: Record<string, number>;
   // rookLocked squares, as an array (Set isn't JSON-serializable).
   rookLocked: string[];
+  // A pending en passant capture of an evolved pawn. Optional for backward
+  // compatibility with saves written before it was tracked; it lives for one
+  // ply, so an older save simply has no pending capture to restore.
+  epEvolved?: EvolvedEnPassant | null;
   mode: "human-ai" | "human-human";
   aiColor: Color;
   depth: number;
@@ -49,6 +53,7 @@ export function saveGame(
     moveLog: game.moveLog,
     rookCharges: Object.fromEntries(game.rookCharges),
     rookLocked: [...game.rookLocked],
+    epEvolved: game.epEvolved,
     mode,
     aiColor,
     depth,
@@ -83,6 +88,7 @@ export function loadGame(): {
     game.moveLog = saved.moveLog;
     game.rookCharges = new Map(Object.entries(saved.rookCharges ?? {})) as Map<Square, number>;
     game.rookLocked = new Set((saved.rookLocked ?? []) as Square[]);
+    game.epEvolved = saved.epEvolved ?? null;
     return {
       game,
       mode: saved.mode,

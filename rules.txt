@@ -70,6 +70,16 @@
       because the piece that moved was a Pawn. The freshly created minor piece
       only begins counting towards "To Rook Promotion" on its own later moves.
 
+    - En passant is unaffected by an evolution on the same move. If a Pawn
+      makes its first long move and evolves into a minor piece at the end of
+      that move, the en passant capture is still available to the opponent on
+      the next move, exactly as if no evolution had taken place. The capturing
+      Pawn moves to the skipped square and removes the evolved piece, minor
+      piece or not. Rationale: the right to capture en passant is created by
+      the Pawn move, and the piece that moved was a Pawn; an evolution resolves
+      only at the end of that move and cannot retroactively undo it. Otherwise
+      spending a promotion right would double as an en passant immunity.
+
     - A promotion is available only in the end of the player's move.
 
     - Both evolutionary promotions apply to the piece that just moved: the
@@ -131,6 +141,11 @@ Revised July 2026: the "To Rook Promotion" right was further narrowed so that
 it promotes only the last minor piece that moved (rather than any minor piece
 on the board), completing the symmetry with the "To Minor Piece Promotion"
 right, which promotes only the last Pawn that moved.
+
+Revised July 2026: clarified that an evolution on a first long Pawn move does
+not cancel the opponent's en passant capture, resolving an ambiguity between
+"En passant is defined as in chess" (rule 0) and evolution changing the piece
+on the arrival square.
 
 Revised July 2026: added "Rook Charges" (rule 5), so that a Rook is a scarce,
 temporary asset rather than a permanent fixture once earned. Charges are
