@@ -151,7 +151,28 @@ export class EvoChessGame {
   }
 
   isGameOver(): boolean {
-    return this.chess.isGameOver();
+    if (this.chess.isCheckmate() || this.chess.isStalemate()) return true;
+    if (this.chess.isInsufficientMaterial()) return !this.hasPromotableMinor();
+    return this.chess.isDrawByFiftyMoves() || this.chess.isThreefoldRepetition();
+  }
+
+  /**
+   * Whether any minor piece on the board is still eligible to one day become
+   * a Rook (i.e. not permanently barred by a prior rook->minor downgrade).
+   * A lone minor piece isn't literal insufficient material yet, but it could
+   * still accumulate moves and promote, so the game shouldn't be declared
+   * drawn until every minor piece is locked out of that path.
+   */
+  private hasPromotableMinor(): boolean {
+    for (const row of this.chess.board()) {
+      for (const sq of row) {
+        if (!sq) continue;
+        if ((sq.type === "n" || sq.type === "b") && !this.rookLocked.has(sq.square)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   resultString(): string {
@@ -160,7 +181,9 @@ export class EvoChessGame {
       return `Checkmate - ${winner} wins`;
     }
     if (this.chess.isStalemate()) return "Stalemate - draw";
-    if (this.chess.isInsufficientMaterial()) return "Draw - insufficient material";
+    if (this.chess.isInsufficientMaterial() && !this.hasPromotableMinor()) {
+      return "Draw - insufficient material";
+    }
     if (this.chess.isDrawByFiftyMoves()) return "Draw - fifty-move rule";
     if (this.chess.isThreefoldRepetition()) return "Draw - repetition";
     return "Game in progress";

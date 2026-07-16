@@ -364,6 +364,23 @@ describe("standard chess rules still apply", () => {
     expect(game.isGameOver()).toBe(true);
     expect(game.resultString()).toBe("Stalemate - draw");
   });
+
+  it("does not declare insufficient material a draw while a minor piece could still become a rook", () => {
+    const game = new EvoChessGame();
+    game.chess.load("4k3/8/8/8/8/8/8/B3K3 w - - 0 1");
+    expect(game.chess.isInsufficientMaterial()).toBe(true);
+    expect(game.isGameOver()).toBe(false);
+    expect(game.resultString()).toBe("Game in progress");
+  });
+
+  it("declares insufficient material a draw once the lone minor piece is rook-locked", () => {
+    const game = new EvoChessGame();
+    game.chess.load("4k3/8/8/8/8/8/8/B3K3 w - - 0 1");
+    game.rookLocked.add("a1" as Square);
+    expect(game.chess.isInsufficientMaterial()).toBe(true);
+    expect(game.isGameOver()).toBe(true);
+    expect(game.resultString()).toBe("Draw - insufficient material");
+  });
 });
 
 describe("en passant interaction with evolutionary promotion", () => {
