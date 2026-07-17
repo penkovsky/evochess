@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Chessboard } from "react-chessboard";
 import type { Color, Square } from "chess.js";
 import { EvoChessGame, EvoChessError, N_MINOR, M_ROOK, ROOK_CHARGES, type ApplyMoveOptions, type ForcedPromo, type MinorPromo } from "./evochess/game";
-import { chooseMove } from "./evochess/ai";
+import { serializeGame } from "./evochess/serialize";
+import type { AiCandidate, AiSearchRequest, AiSearchResponse } from "./evochess/ai.worker";
 import { saveGame, loadGame, clearSavedGame } from "./evochess/persistence";
 import "./App.css";
 
@@ -49,6 +50,39 @@ function App() {
   // Lets small screens hide the side panel to give the board more room; the
   // toggle button itself is only shown below a width breakpoint (see CSS).
   const [hidePanel, setHidePanel] = useState(false);
+  // Click-to-move: square selected by tapping a piece, awaiting a target
+  // square tap. Cleared on every move attempt (successful or not).
+  const [selected, setSelected] = useState<Square | null>(null);
+  // Runs chooseMove off the main thread so the board stays responsive while
+  // the AI is thinking. searchIdRef tags each request so a stale response
+  // (e.g. after a takeback) can't be mistaken for the latest one.
+  const aiWorkerRef = useRef<Worker | null>(null);
+  const searchIdRef = useRef(0);
+
+  useEffect(() => {
+    const worker = new Worker(new URL("./evochess/ai.worker.ts", import.meta.url), { type: "module" });
+    aiWorkerRef.current = worker;
+    return () => worker.terminate();
+  }, []);
+
+  function searchInWorker(game: EvoChessGame, depth: number, seed: number): Promise<AiCandidate | null> {
+    return new Promise((resolve) => {
+      const worker = aiWorkerRef.current;
+      if (!worker) {
+        resolve(null);
+        return;
+      }
+      const id = ++searchIdRef.current;
+      const handleMessage = (e: MessageEvent<AiSearchResponse>) => {
+        if (e.data.id !== id) return;
+        worker.removeEventListener("message", handleMessage);
+        resolve(e.data.candidate);
+      };
+      worker.addEventListener("message", handleMessage);
+      const request: AiSearchRequest = { id, game: serializeGame(game), depth, seed };
+      worker.postMessage(request);
+    });
+  }
 
   function togglePanel(key: "rules" | "log", isOpen: boolean) {
     setOpenPanel((prev) => (isOpen ? key : prev === key ? null : prev));
@@ -129,12 +163,15 @@ function App() {
     if (game.isGameOver()) return;
     if (mode !== "human-ai") return;
     if (game.turn !== aiColor) return;
+    setSelected(null);
     setAiThinking(true);
     // Let the UI paint the "thinking" state before blocking the main
     // thread with the search.
     await new Promise((r) => setTimeout(r, 30));
-    const candidate = chooseMove(game, depth, Math.floor(Math.random() * 1_000_000));
-    if (candidate) {
+    const candidate = await searchInWorker(game, depth, Math.floor(Math.random() * 1_000_000));
+    // gameRef.current is reassigned (not mutated) by takeback/new game, so an
+    // identity check here catches a search that's now stale.
+    if (candidate && gameRef.current === game && !game.isGameOver() && game.turn === aiColor) {
       historyRef.current.push(game.copy());
       clockHistoryRef.current.push({ ...clockRef.current });
       game.applyMove(candidate.from, candidate.to, candidate.options);
@@ -185,6 +222,7 @@ function App() {
     if (!restored) return;
     gameRef.current = restored;
     setModal(null);
+    setSelected(null);
     setTimeUp(null);
     clockRef.current = restoredClock ?? { w: timerMinutes * 60, b: timerMinutes * 60 };
     rerender();
@@ -197,13 +235,16 @@ function App() {
 
   function onPieceDrop({ sourceSquare, targetSquare }: { sourceSquare: string; targetSquare: string | null }) {
     if (!targetSquare) return false;
+    setSelected(null);
+    return attemptMove(sourceSquare as Square, targetSquare as Square);
+  }
+
+  function attemptMove(from: Square, to: Square): boolean {
     const game = gameRef.current;
-    if (sourceSquare === targetSquare) return false;
+    if (from === to) return false;
     if (mode === "human-ai" && game.turn === aiColor) return false;
     if (game.isGameOver()) return false;
 
-    const from = sourceSquare as Square;
-    const to = targetSquare as Square;
     const piece = game.chess.get(from);
     if (!piece) return false;
 
@@ -263,6 +304,38 @@ function App() {
     return true;
   }
 
+  function onSquareClick({ square }: { square: string }) {
+    const game = gameRef.current;
+    const sq = square as Square;
+    const humanCanMove = !(mode === "human-ai" && game.turn === aiColor) && !game.isGameOver() && !modal;
+    if (!humanCanMove) {
+      setSelected(null);
+      return;
+    }
+    const piece = game.chess.get(sq);
+    const ownPiece = piece && piece.color === game.turn;
+
+    if (selected) {
+      if (sq === selected) {
+        setSelected(null);
+        return;
+      }
+      const isLegalTarget = game
+        .legalMoves()
+        .some((m) => m.from === selected && m.to === sq);
+      if (isLegalTarget) {
+        const from = selected;
+        setSelected(null);
+        attemptMove(from, sq);
+        return;
+      }
+      setSelected(ownPiece ? sq : null);
+      return;
+    }
+
+    if (ownPiece) setSelected(sq);
+  }
+
   function finishModalMove(options: ApplyMoveOptions) {
     if (!modal) return;
     const { from, to } = modal;
@@ -278,6 +351,7 @@ function App() {
     setAiColor(newAiColor);
     setDepth(newDepth);
     setModal(null);
+    setSelected(null);
     setTimeUp(null);
     resetClock(timerMinutes);
     clearSavedGame();
@@ -301,6 +375,19 @@ function App() {
   const rw = game.rightsFor("w");
   const rb = game.rightsFor("b");
 
+  const squareStyles: Record<string, CSSProperties> = {};
+  if (selected) {
+    squareStyles[selected] = { background: "rgba(255, 255, 0, 0.4)" };
+    for (const m of game.legalMoves()) {
+      if (m.from !== selected) continue;
+      squareStyles[m.to] = {
+        background: m.isCapture
+          ? "radial-gradient(circle, transparent 55%, rgba(0, 0, 0, 0.35) 55%)"
+          : "radial-gradient(circle, rgba(0, 0, 0, 0.35) 19%, transparent 20%)",
+      };
+    }
+  }
+
   return (
     <div className="layout">
       <div className="board-wrap">
@@ -314,10 +401,11 @@ function App() {
           options={{
             position: game.chess.fen(),
             onPieceDrop,
+            onSquareClick,
             squareRenderer: ({ square, children }) => {
               const charges = game.rookCharges.get(square as Square);
               return (
-                <div style={{ width: "100%", height: "100%", position: "relative" }}>
+                <div style={{ width: "100%", height: "100%", position: "relative", ...squareStyles[square] }}>
                   {children}
                   {charges !== undefined && (
                     <span className={`rook-charge-badge ${charges === 1 ? "low" : ""}`}>{charges}</span>

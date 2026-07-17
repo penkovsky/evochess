@@ -1,23 +1,10 @@
-import type { Color, Square } from "chess.js";
-import { EvoChessGame, type EvolvedEnPassant } from "./game";
+import type { Color } from "chess.js";
+import { EvoChessGame } from "./game";
+import { serializeGame, deserializeGame, type SerializedGame } from "./serialize";
 
 const STORAGE_KEY = "evochess-save-v3";
 
-export interface SavedState {
-  fen: string;
-  minorRights: Record<Color, number>;
-  rookRights: Record<Color, number>;
-  pawnMoveProgress: Record<Color, number>;
-  minorMoveProgress: Record<Color, number>;
-  moveLog: string[];
-  // rookCharges keyed by square, as a plain object (Map isn't JSON-serializable).
-  rookCharges: Record<string, number>;
-  // rookLocked squares, as an array (Set isn't JSON-serializable).
-  rookLocked: string[];
-  // A pending en passant capture of an evolved pawn. Optional for backward
-  // compatibility with saves written before it was tracked; it lives for one
-  // ply, so an older save simply has no pending capture to restore.
-  epEvolved?: EvolvedEnPassant | null;
+export interface SavedState extends SerializedGame {
   mode: "human-ai" | "human-human";
   aiColor: Color;
   depth: number;
@@ -45,15 +32,7 @@ export function saveGame(
   clock: Record<Color, number>
 ) {
   const saved: SavedState = {
-    fen: game.chess.fen(),
-    minorRights: game.minorRights,
-    rookRights: game.rookRights,
-    pawnMoveProgress: game.pawnMoveProgress,
-    minorMoveProgress: game.minorMoveProgress,
-    moveLog: game.moveLog,
-    rookCharges: Object.fromEntries(game.rookCharges),
-    rookLocked: [...game.rookLocked],
-    epEvolved: game.epEvolved,
+    ...serializeGame(game),
     mode,
     aiColor,
     depth,
@@ -79,18 +58,8 @@ export function loadGame(): {
   if (!raw) return null;
   try {
     const saved: SavedState = JSON.parse(raw);
-    const game = new EvoChessGame();
-    game.chess.load(saved.fen);
-    game.minorRights = saved.minorRights;
-    game.rookRights = saved.rookRights;
-    game.pawnMoveProgress = saved.pawnMoveProgress;
-    game.minorMoveProgress = saved.minorMoveProgress;
-    game.moveLog = saved.moveLog;
-    game.rookCharges = new Map(Object.entries(saved.rookCharges ?? {})) as Map<Square, number>;
-    game.rookLocked = new Set((saved.rookLocked ?? []) as Square[]);
-    game.epEvolved = saved.epEvolved ?? null;
     return {
-      game,
+      game: deserializeGame(saved),
       mode: saved.mode,
       aiColor: saved.aiColor,
       depth: saved.depth,
