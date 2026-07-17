@@ -59,8 +59,14 @@
   margin-bottom: 8px;
 }
 
+.board-status {
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
 .collapsible {
-  margin: 8px 0;
+  margin: 8px auto;
   padding: 8px;
   border: 1px solid #ccc;
   border-radius: 6px;
@@ -92,7 +98,7 @@
 }
 
 .rights {
-  margin: 8px 0;
+  margin: 8px auto;
   padding: 8px;
   border: 1px solid #ccc;
   border-radius: 6px;
@@ -191,23 +197,146 @@
 
 .controls label {
   display: block;
-  margin-top: 8px;
+  width: fit-content;
+  margin: 8px auto 0;
   font-size: 13px;
 }
 
 .controls-row {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 16px;
-}
-
-.controls-row label {
-  flex: 0 1 auto;
+  width: fit-content;
+  margin: 10px auto 0;
 }
 
 .controls button {
   margin-top: 10px;
   cursor: pointer;
+}
+
+.controls-row .toggle-btn {
+  margin-top: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: white;
+  color: #333;
+}
+
+.controls-row .toggle-btn.pressed {
+  background: #e2e2e2;
+  border-color: #999;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.controls-row .toggle-btn:disabled {
+  background: #f5f5f5;
+  border-color: #ccc;
+  color: #999;
+  cursor: default;
+  box-shadow: none;
+}
+
+.mode-picker,
+.color-picker,
+.level-picker,
+.action-picker {
+  display: flex;
+  width: 190px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.color-picker,
+.level-picker,
+.action-picker {
+  margin-top: 8px;
+}
+
+.action-picker {
+  gap: 8px;
+}
+
+.mode-picker button,
+.color-picker button,
+.level-picker button,
+.action-picker button {
+  flex: 1 1 0;
+  margin-top: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  background: #f5f5f5;
+  color: #333;
+  cursor: pointer;
+}
+
+.action-picker button {
+  border-radius: 6px;
+}
+
+.mode-picker button:not(:last-child),
+.color-picker button:not(:last-child),
+.level-picker button:not(:last-child) {
+  border-right: none;
+}
+
+.mode-picker button:first-child,
+.color-picker button:first-child,
+.level-picker button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.mode-picker button:last-child,
+.color-picker button:last-child,
+.level-picker button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.level-picker button.active {
+  background: #22aa77;
+  border-color: #22aa77;
+  color: white;
+}
+
+.mode-picker button.active {
+  background: #7b3ff2;
+  border-color: #7b3ff2;
+  color: white;
+}
+
+.color-picker button.active {
+  background: #d68910;
+  border-color: #d68910;
+  color: white;
+}
+
+.action-picker .takeback-btn {
+  background: white;
+  border-color: #ccc;
+  color: #333;
+}
+
+.action-picker .new-game-btn {
+  background: #1976d2;
+  border-color: #1976d2;
+  color: white;
+}
+
+.action-picker button:disabled {
+  background: #f5f5f5;
+  border-color: #ccc;
+  color: #999;
+  cursor: default;
+}
+
+.action-picker-below-board {
+  display: flex;
+  width: 100%;
+  margin-top: 8px;
 }
 
 .modal-backdrop {
@@ -220,6 +349,7 @@
 }
 
 .modal {
+  position: relative;
   background: white;
   color: #111;
   padding: 20px;
@@ -235,6 +365,70 @@
   margin: 6px 0;
   padding: 8px;
   cursor: pointer;
+}
+
+.modal p {
+  margin-top: 0;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal-header p {
+  margin: 0;
+}
+
+.modal .modal-close {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  color: #666;
+  cursor: pointer;
+}
+
+.modal .modal-close:hover {
+  color: #111;
+}
+
+.promo-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.modal .promo-icon {
+  display: block;
+  width: auto;
+  min-width: 56px;
+  margin: 0;
+  font-size: 28px;
+  line-height: 1;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background: #f4f4f4;
+  color: #111;
+  cursor: pointer;
+}
+
+.modal .promo-icon:hover {
+  background: #e6e6e6;
+}
+
+.modal .promo-icon.promo-none {
+  font-size: 14px;
+  min-width: 56px;
 }
 
 .rook-charge-badge {
@@ -255,4 +449,13 @@
 
 .rook-charge-badge.low {
   background: #d98c00;
+}
+
+@keyframes fireworks-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }

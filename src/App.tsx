@@ -5,6 +5,7 @@ import { EvoChessGame, EvoChessError, N_MINOR, M_ROOK, ROOK_CHARGES, type ApplyM
 import { serializeGame } from "./evochess/serialize";
 import type { AiCandidate, AiSearchRequest, AiSearchResponse } from "./evochess/ai.worker";
 import { saveGame, loadGame, clearSavedGame } from "./evochess/persistence";
+import { Fireworks } from "./Fireworks";
 import "./App.css";
 
 type Mode = "human-ai" | "human-human";
@@ -13,9 +14,15 @@ interface PromoModalState {
   from: Square;
   to: Square;
   kind: "forced" | "optional" | "downgrade";
+  color: Color;
   canMinor: boolean;
   canRook: boolean;
 }
+
+const PIECE_GLYPH: Record<Color, Record<"q" | "r" | "b" | "n", string>> = {
+  w: { q: "♕", r: "♖", b: "♗", n: "♘" },
+  b: { q: "♛", r: "♜", b: "♝", n: "♞" },
+};
 
 function App() {
   const [, forceRender] = useState(0);
@@ -33,6 +40,7 @@ function App() {
   const [modal, setModal] = useState<PromoModalState | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [showFireworks, setShowFireworks] = useState(false);
   // In human-vs-human, flip the board after every move so the side to move
   // sees their pieces at the bottom. Can be disabled by the user.
   const [autoFlip, setAutoFlip] = useState(true);
@@ -44,6 +52,7 @@ function App() {
   const [timeUp, setTimeUp] = useState<Color | null>(null);
   const clockRef = useRef<Record<Color, number>>({ w: 600, b: 600 });
   const logRef = useRef<HTMLDivElement>(null);
+  const boardWrapRef = useRef<HTMLDivElement>(null);
   // Rules summary and move log share panel space, so only one is expanded
   // at a time — opening one collapses the other.
   const [openPanel, setOpenPanel] = useState<"rules" | "log" | null>("log");
@@ -153,32 +162,57 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, timerEnabled, mode, modal, timeUp, gameRef.current.turn, gameRef.current.moveLog.length]);
 
+  // Fires the fireworks once when the human checkmates the AI. Keyed on the
+  // EvoChessGame instance so a new game / takeback (which reassigns
+  // gameRef.current) resets the trigger even if the win condition repeats.
+  useEffect(() => {
+    if (!loaded) return;
+    const game = gameRef.current;
+    if (mode === "human-ai" && game.isGameOver() && game.chess.isCheckmate() && game.turn === aiColor) {
+      setShowFireworks(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, mode, aiColor, gameRef.current, gameRef.current.moveLog.length]);
+
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   });
 
-  async function maybeAiMove() {
+  useEffect(() => {
+    if (!modal || modal.kind !== "optional") return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") finishModalMove({});
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modal]);
+
+  async function maybeAiMove(overrides?: { mode?: Mode; aiColor?: Color; depth?: number }) {
+    const effMode = overrides?.mode ?? mode;
+    const effAiColor = overrides?.aiColor ?? aiColor;
+    const effDepth = overrides?.depth ?? depth;
     const game = gameRef.current;
     if (game.isGameOver()) return;
-    if (mode !== "human-ai") return;
-    if (game.turn !== aiColor) return;
+    if (effMode !== "human-ai") return;
+    if (game.turn !== effAiColor) return;
     setSelected(null);
     setAiThinking(true);
     // Let the UI paint the "thinking" state before blocking the main
     // thread with the search.
     await new Promise((r) => setTimeout(r, 30));
-    const candidate = await searchInWorker(game, depth, Math.floor(Math.random() * 1_000_000));
+    const candidate = await searchInWorker(game, effDepth, Math.floor(Math.random() * 1_000_000));
     // gameRef.current is reassigned (not mutated) by takeback/new game, so an
     // identity check here catches a search that's now stale.
-    if (candidate && gameRef.current === game && !game.isGameOver() && game.turn === aiColor) {
+    if (candidate && gameRef.current === game && !game.isGameOver() && game.turn === effAiColor) {
       historyRef.current.push(game.copy());
       clockHistoryRef.current.push({ ...clockRef.current });
       game.applyMove(candidate.from, candidate.to, candidate.options);
     }
     setAiThinking(false);
     rerender();
-    setTimeout(maybeAiMove, 0);
+    setTimeout(() => maybeAiMove(overrides), 0);
   }
 
   function applyAndAdvance(from: Square, to: Square, options: ApplyMoveOptions) {
@@ -224,6 +258,7 @@ function App() {
     setModal(null);
     setSelected(null);
     setTimeUp(null);
+    setShowFireworks(false);
     clockRef.current = restoredClock ?? { w: timerMinutes * 60, b: timerMinutes * 60 };
     rerender();
     // Only reachable when taking back to the opening in an AI-plays-White
@@ -253,7 +288,7 @@ function App() {
     const reachesLastRank = isPawn && (to[1] === "8" || to[1] === "1");
 
     if (reachesLastRank) {
-      setModal({ from, to, kind: "forced", canMinor: false, canRook: false });
+      setModal({ from, to, kind: "forced", color: game.turn, canMinor: false, canRook: false });
       return true;
     }
 
@@ -269,7 +304,7 @@ function App() {
         return false;
       }
       if (remaining <= 0) {
-        setModal({ from, to, kind: "downgrade", canMinor: false, canRook: false });
+        setModal({ from, to, kind: "downgrade", color: game.turn, canMinor: false, canRook: false });
       } else {
         applyAndAdvance(from, to, {});
       }
@@ -300,7 +335,7 @@ function App() {
       return true;
     }
 
-    setModal({ from, to, kind: "optional", canMinor, canRook });
+    setModal({ from, to, kind: "optional", color, canMinor, canRook });
     return true;
   }
 
@@ -353,10 +388,11 @@ function App() {
     setModal(null);
     setSelected(null);
     setTimeUp(null);
+    setShowFireworks(false);
     resetClock(timerMinutes);
     clearSavedGame();
     rerender();
-    setTimeout(maybeAiMove, 0);
+    setTimeout(() => maybeAiMove({ mode: newMode, aiColor: newAiColor, depth: newDepth }), 0);
   }
 
   if (!loaded) return null;
@@ -375,6 +411,21 @@ function App() {
   const rw = game.rightsFor("w");
   const rb = game.rightsFor("b");
 
+  const renderActionPicker = (extraClass: string) => (
+    <div className={`action-picker ${extraClass}`}>
+      <button
+        className="takeback-btn"
+        onClick={takeback}
+        disabled={historyRef.current.length === 0 || aiThinking}
+      >
+        Takeback
+      </button>
+      <button className="new-game-btn" onClick={() => startNewGame(mode, aiColor, depth)}>
+        New Game
+      </button>
+    </div>
+  );
+
   const squareStyles: Record<string, CSSProperties> = {};
   if (selected) {
     squareStyles[selected] = { background: "rgba(255, 255, 0, 0.4)" };
@@ -390,13 +441,22 @@ function App() {
 
   return (
     <div className="layout">
-      <div className="board-wrap">
+      {showFireworks && (
+        <Fireworks
+          onDone={() => setShowFireworks(false)}
+          launchX={
+            boardWrapRef.current
+              ? boardWrapRef.current.getBoundingClientRect().left + boardWrapRef.current.getBoundingClientRect().width / 2
+              : undefined
+          }
+          launchY={boardWrapRef.current?.getBoundingClientRect().bottom}
+        />
+      )}
+      <div className="board-wrap" ref={boardWrapRef}>
         {mode === "human-human" && timerEnabled && (
           <ClockDisplay clock={clockRef.current} turn={game.turn} gameOver={gameOver} />
         )}
-        <button className="toggle-panel-btn" onClick={() => setHidePanel((v) => !v)}>
-          {hidePanel ? "Show widgets" : "Hide widgets"}
-        </button>
+        <div className="board-status">{status}</div>
         <Chessboard
           options={{
             position: game.chess.fen(),
@@ -424,10 +484,13 @@ function App() {
             allowDragging: !(mode === "human-ai" && game.turn === aiColor) && !gameOver,
           }}
         />
+        {renderActionPicker("action-picker-below-board")}
+        <button className="toggle-panel-btn" onClick={() => setHidePanel((v) => !v)}>
+          {hidePanel ? "Show widgets" : "Hide widgets"}
+        </button>
       </div>
       {!hidePanel && (
       <div className="panel">
-        <div className="status">{status}</div>
         <details
           className="collapsible rules-summary"
           open={openPanel === "rules"}
@@ -466,72 +529,108 @@ function App() {
           </div>
         </details>
         <div className="controls">
-          <label>
-            Mode:
-            <select
-              value={mode}
-              onChange={(e) => {
-                const newMode = e.target.value as Mode;
-                if (historyRef.current.length > 0) {
-                  // eslint-disable-next-line no-alert
-                  if (!window.confirm("Switch mode and end the current game?")) return;
-                  startNewGame(newMode, aiColor, depth);
-                } else {
-                  setMode(newMode);
-                }
-              }}
-            >
-              <option value="human-ai">Human vs AI</option>
-              <option value="human-human">Human vs Human</option>
-            </select>
-          </label>
+          <div className="mode-picker" role="group" aria-label="Mode">
+            {(
+              [
+                { label: "vs AI", value: "human-ai" },
+                { label: "vs Human", value: "human-human" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={mode === opt.value ? "active" : ""}
+                onClick={() => {
+                  const newMode = opt.value;
+                  if (newMode === mode) return;
+                  if (historyRef.current.length > 0) {
+                    // eslint-disable-next-line no-alert
+                    if (!window.confirm("Switch mode and end the current game?")) return;
+                    startNewGame(newMode, aiColor, depth);
+                  } else {
+                    setMode(newMode);
+                  }
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
           {mode === "human-ai" && (
-            <div className="controls-row">
-              <label>
-                AI plays:
-                <select value={aiColor} onChange={(e) => setAiColor(e.target.value as Color)}>
-                  <option value="b">Black</option>
-                  <option value="w">White</option>
-                </select>
-              </label>
-              <label>
-                AI depth:
-                <input
-                  type="number"
-                  min={1}
-                  max={4}
-                  value={depth}
-                  onChange={(e) => setDepth(Number(e.target.value))}
-                />
-              </label>
-            </div>
+            <>
+              <div className="color-picker" role="group" aria-label="Your color">
+                {(
+                  [
+                    { label: "White", value: "b" },
+                    { label: "Black", value: "w" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={aiColor === opt.value ? "active" : ""}
+                    onClick={() => {
+                      const newAiColor = opt.value;
+                      if (newAiColor === aiColor) return;
+                      if (historyRef.current.length > 0) {
+                        // eslint-disable-next-line no-alert
+                        if (!window.confirm("Switch colors and start a new game?")) return;
+                        startNewGame(mode, newAiColor, depth);
+                      } else {
+                        setAiColor(newAiColor);
+                      }
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <div className="level-picker" role="group" aria-label="AI level">
+                {(
+                  [
+                    { label: "Easy", value: 2 },
+                    { label: "Norm", value: 3 },
+                    { label: "Zen", value: 4 },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={depth === opt.value ? "active" : ""}
+                    onClick={() => setDepth(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
           {mode === "human-human" && (
             <div className="controls-row">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={autoFlip}
-                  onChange={(e) => setAutoFlip(e.target.checked)}
-                />
+              <button
+                type="button"
+                className={`toggle-btn ${autoFlip ? "pressed" : ""}`}
+                aria-pressed={autoFlip}
+                onClick={() => setAutoFlip((v) => !v)}
+              >
                 Flip board
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={timerEnabled}
-                  disabled={historyRef.current.length > 0}
-                  onChange={(e) => {
-                    const enabled = e.target.checked;
-                    setTimerEnabled(enabled);
-                    if (enabled) {
-                      setTimeUp(null);
-                      resetClock(timerMinutes);
-                    }
-                  }}
-                />
+              </button>
+              <button
+                type="button"
+                className={`toggle-btn ${timerEnabled ? "pressed" : ""}`}
+                aria-pressed={timerEnabled}
+                disabled={historyRef.current.length > 0}
+                onClick={() => {
+                  const enabled = !timerEnabled;
+                  setTimerEnabled(enabled);
+                  if (enabled) {
+                    setTimeUp(null);
+                    resetClock(timerMinutes);
+                  }
+                }}
+              >
                 Clock
-              </label>
+              </button>
             </div>
           )}
           {mode === "human-human" && timerEnabled && (
@@ -551,10 +650,6 @@ function App() {
               />
             </label>
           )}
-          <button onClick={takeback} disabled={historyRef.current.length === 0 || aiThinking}>
-            Takeback
-          </button>
-          <button onClick={() => startNewGame(mode, aiColor, depth)}>New Game</button>
         </div>
       </div>
       )}
@@ -575,31 +670,63 @@ function App() {
             ) : modal.kind === "forced" ? (
               <>
                 <p>Pawn reaches the last rank — choose promotion:</p>
-                {(["q", "r", "b", "n"] as ForcedPromo[]).map((p) => (
-                  <button key={p} onClick={() => finishModalMove({ forcedPromo: p })}>
-                    {p.toUpperCase()}
-                  </button>
-                ))}
+                <div className="promo-icons">
+                  {(["q", "r", "b", "n"] as ForcedPromo[]).map((p) => (
+                    <button
+                      key={p}
+                      className="promo-icon"
+                      title={p.toUpperCase()}
+                      onClick={() => finishModalMove({ forcedPromo: p })}
+                    >
+                      {PIECE_GLYPH[modal.color][p]}
+                    </button>
+                  ))}
+                </div>
               </>
             ) : (
               <>
-                <p>Optional evolutionary promotion this turn:</p>
-                <button onClick={() => finishModalMove({})}>No promotion</button>
-                {modal.canMinor && (
-                  <>
-                    <button onClick={() => finishModalMove({ minorPromo: "n" as MinorPromo })}>
-                      Promote moved pawn → Knight
-                    </button>
-                    <button onClick={() => finishModalMove({ minorPromo: "b" as MinorPromo })}>
-                      Promote moved pawn → Bishop
-                    </button>
-                  </>
-                )}
-                {modal.canRook && (
-                  <button onClick={() => finishModalMove({ rookPromo: true })}>
-                    Promote moved minor piece → Rook
+                <div className="modal-header">
+                  <p>Promote (optional)</p>
+                  <button
+                    className="modal-close"
+                    aria-label="Close (no promotion)"
+                    onClick={() => finishModalMove({})}
+                  >
+                    ×
                   </button>
-                )}
+                </div>
+                <div className="promo-icons">
+                  {modal.canMinor && (
+                    <button
+                      className="promo-icon"
+                      title="Promote moved pawn → Knight"
+                      onClick={() => finishModalMove({ minorPromo: "n" as MinorPromo })}
+                    >
+                      {PIECE_GLYPH[modal.color].n}
+                    </button>
+                  )}
+                  {modal.canMinor && (
+                    <button
+                      className="promo-icon"
+                      title="Promote moved pawn → Bishop"
+                      onClick={() => finishModalMove({ minorPromo: "b" as MinorPromo })}
+                    >
+                      {PIECE_GLYPH[modal.color].b}
+                    </button>
+                  )}
+                  {modal.canRook && (
+                    <button
+                      className="promo-icon"
+                      title="Promote moved minor piece → Rook"
+                      onClick={() => finishModalMove({ rookPromo: true })}
+                    >
+                      {PIECE_GLYPH[modal.color].r}
+                    </button>
+                  )}
+                  <button className="promo-icon promo-none" title="No promotion" onClick={() => finishModalMove({})}>
+                    None
+                  </button>
+                </div>
               </>
             )}
           </div>
