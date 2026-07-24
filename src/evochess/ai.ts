@@ -6,6 +6,10 @@
  */
 import type { Color, Square, PieceSymbol } from "chess.js";
 import { EvoChessGame, ROOK_CHARGES, type ApplyMoveOptions } from "./game";
+import { evaluateNNUE, hasNnueWeights } from "./nnue";
+import { squareName } from "./bitboard";
+import { fromEvoGame, type EvoTurn } from "./evoBitboard";
+import { searchEvoTT, searchEvoTTTimed } from "./evoSearch";
 
 const PIECE_VALUES: Record<PieceSymbol, number> = {
   p: 1,
@@ -141,12 +145,18 @@ export function material(game: EvoChessGame): number {
 }
 
 /**
- * Full static evaluation, White-positive, in pawn units: material plus
- * piece-square tables. Only ever applied to quiet-ish positions (the search
- * resolves captures via quiescence first), and never to a finished game —
- * terminal scoring is the search's job, so that mate distance is preserved.
+ * Full static evaluation, White-positive, in pawn units. Uses the learned net
+ * when weights are loaded, else material plus piece-square tables. Only ever
+ * applied to quiet-ish positions (the search resolves captures via quiescence
+ * first), and never to a finished game — terminal scoring is the search's job,
+ * so that mate distance is preserved.
  */
 export function evaluate(game: EvoChessGame): number {
+  if (hasNnueWeights()) {
+    // The net is side-to-move-relative; evaluate() is White-positive.
+    const score = evaluateNNUE(game);
+    return game.chess.turn() === "w" ? score : -score;
+  }
   let score = material(game);
   for (const row of game.chess.board()) {
     for (const cell of row) {
@@ -158,7 +168,7 @@ export function evaluate(game: EvoChessGame): number {
   return score;
 }
 
-interface CandidateTurn {
+export interface CandidateTurn {
   from: Square;
   to: Square;
   options: ApplyMoveOptions;
@@ -186,7 +196,7 @@ function candidateKey(c: CandidateTurn): string {
  * Like any FEN-keyed engine this cannot see repetition history, so a score
  * cached here may miss a threefold that the path to it would have forced.
  */
-function stateKey(game: EvoChessGame): string {
+export function stateKey(game: EvoChessGame): string {
   const charges = [...game.rookCharges].sort(([a], [b]) => (a < b ? -1 : 1));
   const locked = [...game.rookLocked].sort();
   return (
@@ -231,6 +241,22 @@ interface SearchContext {
   tt: Map<string, TTEntry>;
   killers: (CandidateTurn | null)[][];
   rng: () => number;
+  nodes: number;
+  /** Wall-clock deadline (Date.now()-based); undefined means no budget. */
+  deadline?: number;
+}
+
+/** Thrown to unwind a search that blew past `ctx.deadline` mid-iteration. */
+class SearchAborted extends Error {}
+
+// Checking Date.now() on every node would itself be a meaningful cost at NNUE
+// node rates, so only sample it periodically.
+const DEADLINE_CHECK_INTERVAL = 1024;
+
+function checkDeadline(ctx: SearchContext): void {
+  if (ctx.deadline === undefined) return;
+  if ((ctx.nodes & (DEADLINE_CHECK_INTERVAL - 1)) !== 0) return;
+  if (Date.now() >= ctx.deadline) throw new SearchAborted();
 }
 
 function candidateTurns(
@@ -358,6 +384,8 @@ function terminalScore(game: EvoChessGame, ply: number): number | null {
  * defended piece on the last ply and calls itself a piece up.
  */
 function quiesce(game: EvoChessGame, alpha: number, beta: number, ply: number, ctx: SearchContext): number {
+  ctx.nodes++;
+  checkDeadline(ctx);
   const terminal = terminalScore(game, ply);
   if (terminal !== null) return terminal;
 
@@ -386,6 +414,8 @@ function negamax(
   ply: number,
   ctx: SearchContext
 ): [number, CandidateTurn | null] {
+  ctx.nodes++;
+  checkDeadline(ctx);
   const terminal = terminalScore(game, ply);
   if (terminal !== null) return [terminal, null];
   if (depth === 0) return [quiesce(game, alpha, beta, ply, ctx), null];
@@ -454,12 +484,179 @@ function negamax(
  * re-searching the shallow plies.
  */
 export function chooseMove(game: EvoChessGame, depth: number, seed: number): CandidateTurn | null {
-  const ctx: SearchContext = { tt: new Map(), killers: [], rng: mulberry32(seed) };
+  return searchRoot(game, depth, seed).move;
+}
+
+export interface RootSearch {
+  move: CandidateTurn | null;
+  /**
+   * Score of the root position from the **side-to-move's** point of view, in
+   * pawn units (positive = good for the side to move). This is the negamax
+   * convention; White-positive callers must negate for Black.
+   */
+  score: number;
+  /** Positions visited (search + quiescence), for reporting search speed. */
+  nodes: number;
+  /** Wall-clock time spent searching, in milliseconds. */
+  timeMs: number;
+  /** Static evaluation method the search used. */
+  method: "nnue" | "pst";
+}
+
+/**
+ * Like `chooseMove`, but also returns the root search score — the label the
+ * NNUE data generator needs. Iteratively deepens and reports the move and
+ * score from the deepest completed pass.
+ */
+/**
+ * Selects which search backend `searchRoot` (hence `chooseMove`) uses:
+ *   - "chessjs": the negamax over `EvoChessGame` in this file (default; the only
+ *     backend that supports the NNUE evaluation).
+ *   - "bitboard": the make/unmake bitboard search (`searchEvoTT`), PST eval only.
+ * A flag rather than a parameter so a single toggle A/B-tests the whole engine
+ * (self-play, data generation) without threading it through every call site.
+ */
+export type EngineBackend = "chessjs" | "bitboard";
+export const engineConfig: { backend: EngineBackend } = { backend: "chessjs" };
+
+/** Map a bitboard `EvoTurn` back to the `CandidateTurn` the game layer expects. */
+function evoTurnToCandidate(t: EvoTurn): CandidateTurn {
+  const options: ApplyMoveOptions = {};
+  if (t.forced) options.forcedPromo = t.forced;
+  if (t.minor) options.minorPromo = t.minor;
+  if (t.rook) options.rookPromo = true;
+  if (t.down) options.downgradeTo = t.down;
+  return { from: squareName(t.from) as Square, to: squareName(t.to) as Square, options };
+}
+
+export function searchRoot(game: EvoChessGame, depth: number, seed: number): RootSearch {
+  const start = performance.now();
+  if (engineConfig.backend === "bitboard") {
+    // Bitboard backend: PST integer-centipawn eval, own Zobrist TT + iterative
+    // deepening. `seed` drives a root tie-break so equal-value moves vary per
+    // game. Score is centipawns, side-to-move-relative → convert to pawn units.
+    const r = searchEvoTT(fromEvoGame(game), depth, seed);
+    return {
+      move: r.turn ? evoTurnToCandidate(r.turn) : null,
+      score: r.score / 100,
+      nodes: r.nodes,
+      timeMs: performance.now() - start,
+      method: "pst",
+    };
+  }
+
+  const ctx: SearchContext = { tt: new Map(), killers: [], rng: mulberry32(seed), nodes: 0 };
   let best: CandidateTurn | null = null;
+  let score = 0;
 
   for (let d = 1; d <= depth; d++) {
-    const [, candidate] = negamax(game, d, -Infinity, Infinity, 0, ctx);
-    if (candidate) best = candidate;
+    const [s, candidate] = negamax(game, d, -Infinity, Infinity, 0, ctx);
+    if (candidate) {
+      best = candidate;
+      score = s;
+    }
   }
-  return best;
+  return {
+    move: best,
+    score,
+    nodes: ctx.nodes,
+    timeMs: performance.now() - start,
+    method: hasNnueWeights() ? "nnue" : "pst",
+  };
+}
+
+/**
+ * Iterative-deepening search under a wall-clock budget rather than a fixed
+ * depth. Deepens until `timeMs` elapses, returning the best move and score from
+ * the deepest pass that *completed* — so a slower evaluation (the net) simply
+ * reaches a shallower depth in the same time, which is exactly what an
+ * equal-time strength match is meant to expose. A depth may overshoot the
+ * budget by up to its own duration; both engines overshoot alike, so the
+ * comparison stays fair.
+ */
+export function searchRootTimed(
+  game: EvoChessGame,
+  timeMs: number,
+  seed: number,
+  maxDepth = 64
+): RootSearch & { depth: number } {
+  const start = performance.now();
+  if (engineConfig.backend === "bitboard") {
+    const r = searchEvoTTTimed(fromEvoGame(game), timeMs, maxDepth, seed);
+    return {
+      move: r.turn ? evoTurnToCandidate(r.turn) : null,
+      score: r.score / 100,
+      depth: r.depth,
+      nodes: r.nodes,
+      timeMs: performance.now() - start,
+      method: "pst",
+    };
+  }
+
+  const deadline = Date.now() + timeMs;
+  const ctx: SearchContext = { tt: new Map(), killers: [], rng: mulberry32(seed), nodes: 0, deadline };
+  let best: CandidateTurn | null = null;
+  let score = 0;
+  let depth = 0;
+
+  for (let d = 1; d <= maxDepth; d++) {
+    let s: number, candidate: CandidateTurn | null;
+    try {
+      [s, candidate] = negamax(game, d, -Infinity, Infinity, 0, ctx);
+    } catch (e) {
+      // Blew the budget mid-iteration: keep the previous (fully-searched)
+      // depth's result rather than reporting a partial, unreliable one.
+      if (e instanceof SearchAborted) break;
+      throw e;
+    }
+    if (candidate) {
+      best = candidate;
+      score = s;
+      depth = d;
+    }
+    // A mate is found; deeper search cannot improve on it.
+    if (Math.abs(s) >= MATE_THRESHOLD) break;
+    if (Date.now() >= deadline) break;
+  }
+  return {
+    move: best,
+    score,
+    depth,
+    nodes: ctx.nodes,
+    timeMs: performance.now() - start,
+    method: hasNnueWeights() ? "nnue" : "pst",
+  };
+}
+
+/** UI difficulty level. Easy/Zen are fixed-depth PST; Fun is time-budgeted NNUE. */
+export type AiLevel = "easy" | "zen" | "fun";
+
+// Difficulty → search policy, the single source of truth for what each level
+// does: Easy/Zen are fixed-depth PST on the fast bitboard backend; Fun is a
+// time-budgeted NNUE search, which falls back to a time-budgeted PST search
+// when no net is loaded (e.g. weights are still fetching in the worker).
+const LEVEL_DEPTH: Record<"easy" | "zen", number> = { easy: 4, zen: 5 };
+const FUN_TIME_MS = 800;
+
+// Includes `depth`: the fixed depth for Easy/Zen, or the deepest completed
+// iteration for Fun's timed search — reported in the search-speed console log.
+export function searchLevel(game: EvoChessGame, level: AiLevel, seed: number): RootSearch & { depth: number } {
+  if (level === "fun") {
+    engineConfig.backend = hasNnueWeights() ? "chessjs" : "bitboard";
+    return searchRootTimed(game, FUN_TIME_MS, seed);
+  }
+  engineConfig.backend = "bitboard";
+  const depth = LEVEL_DEPTH[level];
+  return { ...searchRoot(game, depth, seed), depth };
+}
+
+/**
+ * Every legal compound turn (base move plus any evolutionary-promotion choice)
+ * for the side to move, unordered. Reuses the search's own candidate generator
+ * so the data generator's random moves cover exactly the same move space the
+ * engine searches — including evolved en passant and mandatory downgrades.
+ */
+export function legalTurns(game: EvoChessGame): CandidateTurn[] {
+  const ctx: SearchContext = { tt: new Map(), killers: [], rng: () => 0, nodes: 0 };
+  return candidateTurns(game, ctx, 0, null).map(({ from, to, options }) => ({ from, to, options }));
 }

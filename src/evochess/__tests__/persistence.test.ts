@@ -13,7 +13,7 @@ const store = new Map<string, string>();
 };
 
 const save = (game: EvoChessGame) =>
-  saveGame(game, "human-ai", "b", 3, false, false, 5, { w: 0, b: 0 });
+  saveGame(game, "human-ai", "b", "zen", false, false, 5, { w: 0, b: 0 });
 
 describe("persistence of the evolved en passant", () => {
   beforeEach(() => {

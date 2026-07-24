@@ -4,6 +4,7 @@ import type { Color, Square } from "chess.js";
 import { EvoChessGame, EvoChessError, N_MINOR, M_ROOK, ROOK_CHARGES, type ApplyMoveOptions, type ForcedPromo, type MinorPromo } from "./evochess/game";
 import { serializeGame } from "./evochess/serialize";
 import type { AiCandidate, AiSearchRequest, AiSearchResponse } from "./evochess/ai.worker";
+import type { AiLevel } from "./evochess/ai";
 import { saveGame, loadGame, clearSavedGame } from "./evochess/persistence";
 import { Fireworks } from "./Fireworks";
 import "./App.css";
@@ -36,7 +37,7 @@ function App() {
   const clockHistoryRef = useRef<Record<Color, number>[]>([]);
   const [mode, setMode] = useState<Mode>("human-ai");
   const [aiColor, setAiColor] = useState<Color>("b");
-  const [depth, setDepth] = useState(3);
+  const [level, setLevel] = useState<AiLevel>("zen");
   const [modal, setModal] = useState<PromoModalState | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -74,7 +75,7 @@ function App() {
     return () => worker.terminate();
   }, []);
 
-  function searchInWorker(game: EvoChessGame, depth: number, seed: number): Promise<AiCandidate | null> {
+  function searchInWorker(game: EvoChessGame, level: AiLevel, seed: number): Promise<AiCandidate | null> {
     return new Promise((resolve) => {
       const worker = aiWorkerRef.current;
       if (!worker) {
@@ -85,10 +86,16 @@ function App() {
       const handleMessage = (e: MessageEvent<AiSearchResponse>) => {
         if (e.data.id !== id) return;
         worker.removeEventListener("message", handleMessage);
-        resolve(e.data.candidate);
+        const r = e.data;
+        const nps = r.timeMs > 0 ? Math.round((r.nodes / r.timeMs) * 1000) : r.nodes;
+        console.log(
+          `[EvoChess AI] level=${level} method=${r.method} depth=${r.depth} nodes=${r.nodes} ` +
+            `time=${r.timeMs.toFixed(0)}ms speed=${nps.toLocaleString()} nodes/sec score=${r.score.toFixed(2)}`
+        );
+        resolve(r.candidate);
       };
       worker.addEventListener("message", handleMessage);
-      const request: AiSearchRequest = { id, game: serializeGame(game), depth, seed };
+      const request: AiSearchRequest = { id, game: serializeGame(game), level, seed };
       worker.postMessage(request);
     });
   }
@@ -109,7 +116,7 @@ function App() {
       gameRef.current = saved.game;
       setMode(saved.mode);
       setAiColor(saved.aiColor);
-      setDepth(saved.depth);
+      setLevel(saved.level);
       setAutoFlip(saved.autoFlip ?? true);
       setTimerEnabled(saved.timerEnabled ?? false);
       setTimerMinutes(saved.timerMinutes ?? 10);
@@ -122,7 +129,7 @@ function App() {
 
   useEffect(() => {
     if (!loaded) return;
-    saveGame(gameRef.current, mode, aiColor, depth, autoFlip, timerEnabled, timerMinutes, clockRef.current);
+    saveGame(gameRef.current, mode, aiColor, level, autoFlip, timerEnabled, timerMinutes, clockRef.current);
   });
 
   // Resumes an AI-to-move position on load (e.g. reloading mid-game with the
@@ -189,10 +196,10 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modal]);
 
-  async function maybeAiMove(overrides?: { mode?: Mode; aiColor?: Color; depth?: number }) {
+  async function maybeAiMove(overrides?: { mode?: Mode; aiColor?: Color; level?: AiLevel }) {
     const effMode = overrides?.mode ?? mode;
     const effAiColor = overrides?.aiColor ?? aiColor;
-    const effDepth = overrides?.depth ?? depth;
+    const effLevel = overrides?.level ?? level;
     const game = gameRef.current;
     if (game.isGameOver()) return;
     if (effMode !== "human-ai") return;
@@ -202,7 +209,7 @@ function App() {
     // Let the UI paint the "thinking" state before blocking the main
     // thread with the search.
     await new Promise((r) => setTimeout(r, 30));
-    const candidate = await searchInWorker(game, effDepth, Math.floor(Math.random() * 1_000_000));
+    const candidate = await searchInWorker(game, effLevel, Math.floor(Math.random() * 1_000_000));
     // gameRef.current is reassigned (not mutated) by takeback/new game, so an
     // identity check here catches a search that's now stale.
     if (candidate && gameRef.current === game && !game.isGameOver() && game.turn === effAiColor) {
@@ -378,13 +385,13 @@ function App() {
     applyAndAdvance(from, to, options);
   }
 
-  function startNewGame(newMode: Mode, newAiColor: Color, newDepth: number) {
+  function startNewGame(newMode: Mode, newAiColor: Color, newLevel: AiLevel) {
     gameRef.current = new EvoChessGame();
     historyRef.current = [];
     clockHistoryRef.current = [];
     setMode(newMode);
     setAiColor(newAiColor);
-    setDepth(newDepth);
+    setLevel(newLevel);
     setModal(null);
     setSelected(null);
     setTimeUp(null);
@@ -392,7 +399,7 @@ function App() {
     resetClock(timerMinutes);
     clearSavedGame();
     rerender();
-    setTimeout(() => maybeAiMove({ mode: newMode, aiColor: newAiColor, depth: newDepth }), 0);
+    setTimeout(() => maybeAiMove({ mode: newMode, aiColor: newAiColor, level: newLevel }), 0);
   }
 
   if (!loaded) return null;
@@ -420,7 +427,7 @@ function App() {
       >
         Takeback
       </button>
-      <button className="new-game-btn" onClick={() => startNewGame(mode, aiColor, depth)}>
+      <button className="new-game-btn" onClick={() => startNewGame(mode, aiColor, level)}>
         New Game
       </button>
     </div>
@@ -546,7 +553,7 @@ function App() {
                   if (historyRef.current.length > 0) {
                     // eslint-disable-next-line no-alert
                     if (!window.confirm("Switch mode and end the current game?")) return;
-                    startNewGame(newMode, aiColor, depth);
+                    startNewGame(newMode, aiColor, level);
                   } else {
                     setMode(newMode);
                   }
@@ -575,7 +582,7 @@ function App() {
                       if (historyRef.current.length > 0) {
                         // eslint-disable-next-line no-alert
                         if (!window.confirm("Switch colors and start a new game?")) return;
-                        startNewGame(mode, newAiColor, depth);
+                        startNewGame(mode, newAiColor, level);
                       } else {
                         setAiColor(newAiColor);
                       }
@@ -588,16 +595,16 @@ function App() {
               <div className="level-picker" role="group" aria-label="AI level">
                 {(
                   [
-                    { label: "Easy", value: 2 },
-                    { label: "Norm", value: 3 },
-                    { label: "Zen", value: 4 },
+                    { label: "Easy", value: "easy" },
+                    { label: "Zen", value: "zen" },
+                    { label: "Fun", value: "fun" },
                   ] as const
                 ).map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
-                    className={depth === opt.value ? "active" : ""}
-                    onClick={() => setDepth(opt.value)}
+                    className={level === opt.value ? "active" : ""}
+                    onClick={() => setLevel(opt.value)}
                   >
                     {opt.label}
                   </button>

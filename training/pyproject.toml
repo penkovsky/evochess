@@ -1,0 +1,16 @@
+[project]
+name = "evochess-nnue"
+version = "0.1.0"
+description = "NNUE training pipeline for EvoChess"
+requires-python = ">=3.11"
+dependencies = ["numpy"]
+
+[project.optional-dependencies]
+train = ["torch"]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["nnue*"]

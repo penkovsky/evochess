@@ -1,0 +1,265 @@
+[
+  {
+    "name": "start_white_to_move",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1"
+    }
+  },
+  {
+    "name": "start_black_to_move",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 b - - 0 1"
+    }
+  },
+  {
+    "name": "corner_piece_white",
+    "position": {
+      "fen": "4k3/8/8/8/8/8/8/N3K3 w - - 0 1"
+    }
+  },
+  {
+    "name": "corner_piece_black",
+    "position": {
+      "fen": "n3k3/8/8/8/8/8/8/4K3 b - - 0 1"
+    }
+  },
+  {
+    "name": "free_minors",
+    "position": {
+      "fen": "4k3/8/8/8/8/2N2B2/8/4K3 w - - 0 1"
+    }
+  },
+  {
+    "name": "locked_minors",
+    "position": {
+      "fen": "4k3/8/8/8/8/2N2B2/8/4K3 w - - 0 1",
+      "rookLocked": [
+        "c3",
+        "f3"
+      ]
+    }
+  },
+  {
+    "name": "queen_and_kings",
+    "position": {
+      "fen": "4k3/8/8/8/3Q4/8/8/4K3 w - - 0 1"
+    }
+  },
+  {
+    "name": "rook_charges_1",
+    "position": {
+      "fen": "4k3/8/8/8/8/8/8/R3K3 w - - 0 1",
+      "rookCharges": {
+        "a1": 1
+      }
+    }
+  },
+  {
+    "name": "rook_charges_2",
+    "position": {
+      "fen": "4k3/8/8/8/8/8/8/R3K3 w - - 0 1",
+      "rookCharges": {
+        "a1": 2
+      }
+    }
+  },
+  {
+    "name": "rook_charges_3",
+    "position": {
+      "fen": "4k3/8/8/8/8/8/8/R3K3 w - - 0 1",
+      "rookCharges": {
+        "a1": 3
+      }
+    }
+  },
+  {
+    "name": "rook_charges_4",
+    "position": {
+      "fen": "4k3/8/8/8/8/8/8/R3K3 w - - 0 1",
+      "rookCharges": {
+        "a1": 4
+      }
+    }
+  },
+  {
+    "name": "rook_charges_5",
+    "position": {
+      "fen": "4k3/8/8/8/8/8/8/R3K3 w - - 0 1",
+      "rookCharges": {
+        "a1": 5
+      }
+    }
+  },
+  {
+    "name": "rook_full_by_default",
+    "position": {
+      "fen": "4k3/8/8/8/8/8/8/R3K3 w - - 0 1"
+    }
+  },
+  {
+    "name": "minor_rights_0",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1"
+    }
+  },
+  {
+    "name": "minor_rights_1",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1",
+      "minorRights": [
+        1,
+        0
+      ]
+    }
+  },
+  {
+    "name": "minor_rights_2",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1",
+      "minorRights": [
+        2,
+        0
+      ]
+    }
+  },
+  {
+    "name": "minor_rights_3",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1",
+      "minorRights": [
+        3,
+        0
+      ]
+    }
+  },
+  {
+    "name": "minor_rights_4",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1",
+      "minorRights": [
+        4,
+        0
+      ]
+    }
+  },
+  {
+    "name": "minor_rights_7",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1",
+      "minorRights": [
+        7,
+        0
+      ]
+    }
+  },
+  {
+    "name": "rook_rights_both_sides",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1",
+      "rookRights": [
+        2,
+        3
+      ]
+    }
+  },
+  {
+    "name": "pawn_progress_0",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1",
+      "pawnMoveProgress": [
+        0,
+        1
+      ]
+    }
+  },
+  {
+    "name": "minor_progress_0",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1",
+      "minorMoveProgress": [
+        0,
+        2
+      ]
+    }
+  },
+  {
+    "name": "pawn_progress_1",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1",
+      "pawnMoveProgress": [
+        1,
+        2
+      ]
+    }
+  },
+  {
+    "name": "minor_progress_1",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1",
+      "minorMoveProgress": [
+        1,
+        0
+      ]
+    }
+  },
+  {
+    "name": "pawn_progress_2",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1",
+      "pawnMoveProgress": [
+        2,
+        0
+      ]
+    }
+  },
+  {
+    "name": "minor_progress_2",
+    "position": {
+      "fen": "4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1",
+      "minorMoveProgress": [
+        2,
+        1
+      ]
+    }
+  },
+  {
+    "name": "evolved_en_passant",
+    "position": {
+      "fen": "4k3/8/8/7N/6p1/8/8/4K3 b - - 0 1",
+      "epEvolved": [
+        "h6",
+        "h5",
+        "w"
+      ]
+    }
+  },
+  {
+    "name": "mixed_state",
+    "position": {
+      "fen": "4k3/pp3ppp/8/8/8/2N2B2/PP3PPP/R3K2r w - - 0 1",
+      "minorRights": [
+        2,
+        1
+      ],
+      "rookRights": [
+        1,
+        0
+      ],
+      "pawnMoveProgress": [
+        2,
+        1
+      ],
+      "minorMoveProgress": [
+        1,
+        2
+      ],
+      "rookCharges": {
+        "a1": 3,
+        "h1": 1
+      },
+      "rookLocked": [
+        "c3"
+      ]
+    }
+  }
+]

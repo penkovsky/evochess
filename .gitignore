@@ -27,3 +27,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+__pycache__
+*.pyc
+
+# Generated NNUE datasets
+training/data/
+training/gen.bundle.mjs
+training/checkpoints/
+training/match.bundle.mjs
+training/augment.bundle.mjs

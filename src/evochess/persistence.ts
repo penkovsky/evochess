@@ -1,5 +1,6 @@
 import type { Color } from "chess.js";
 import { EvoChessGame } from "./game";
+import type { AiLevel } from "./ai";
 import { serializeGame, deserializeGame, type SerializedGame } from "./serialize";
 
 const STORAGE_KEY = "evochess-save-v3";
@@ -7,7 +8,7 @@ const STORAGE_KEY = "evochess-save-v3";
 export interface SavedState extends SerializedGame {
   mode: "human-ai" | "human-human";
   aiColor: Color;
-  depth: number;
+  level: AiLevel;
   // Optional for backward compatibility with saves written before the
   // board-flip preference existed.
   autoFlip?: boolean;
@@ -25,7 +26,7 @@ export function saveGame(
   game: EvoChessGame,
   mode: "human-ai" | "human-human",
   aiColor: Color,
-  depth: number,
+  level: AiLevel,
   autoFlip: boolean,
   timerEnabled: boolean,
   timerMinutes: number,
@@ -35,7 +36,7 @@ export function saveGame(
     ...serializeGame(game),
     mode,
     aiColor,
-    depth,
+    level,
     autoFlip,
     timerEnabled,
     timerMinutes,
@@ -48,7 +49,7 @@ export function loadGame(): {
   game: EvoChessGame;
   mode: "human-ai" | "human-human";
   aiColor: Color;
-  depth: number;
+  level: AiLevel;
   autoFlip?: boolean;
   timerEnabled?: boolean;
   timerMinutes?: number;
@@ -62,7 +63,8 @@ export function loadGame(): {
       game: deserializeGame(saved),
       mode: saved.mode,
       aiColor: saved.aiColor,
-      depth: saved.depth,
+      // Default for saves written before difficulty was a named level.
+      level: saved.level ?? "zen",
       autoFlip: saved.autoFlip,
       timerEnabled: saved.timerEnabled,
       timerMinutes: saved.timerMinutes,

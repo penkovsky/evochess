@@ -1,0 +1,121 @@
+{
+  "seed": 20260716,
+  "featureSize": 1569,
+  "hidden1": 256,
+  "hidden2": 32,
+  "scale": 0.5,
+  "outputs": [
+    {
+      "name": "start_white_to_move",
+      "output": 3.0151549804789406
+    },
+    {
+      "name": "start_black_to_move",
+      "output": 3.0151549804789406
+    },
+    {
+      "name": "corner_piece_white",
+      "output": 5.0759750844580545
+    },
+    {
+      "name": "corner_piece_black",
+      "output": 5.0759750844580545
+    },
+    {
+      "name": "free_minors",
+      "output": 5.573332620743201
+    },
+    {
+      "name": "locked_minors",
+      "output": 6.9760285745209885
+    },
+    {
+      "name": "queen_and_kings",
+      "output": 5.803449146084817
+    },
+    {
+      "name": "rook_charges_1",
+      "output": 4.920531111037429
+    },
+    {
+      "name": "rook_charges_2",
+      "output": 6.336857792408164
+    },
+    {
+      "name": "rook_charges_3",
+      "output": 5.742715791501261
+    },
+    {
+      "name": "rook_charges_4",
+      "output": 6.856940887685146
+    },
+    {
+      "name": "rook_charges_5",
+      "output": 6.498729611957918
+    },
+    {
+      "name": "rook_full_by_default",
+      "output": 6.498729611957918
+    },
+    {
+      "name": "minor_rights_0",
+      "output": 3.0151549804789406
+    },
+    {
+      "name": "minor_rights_1",
+      "output": 3.3316871598858504
+    },
+    {
+      "name": "minor_rights_2",
+      "output": 2.0188021006449763
+    },
+    {
+      "name": "minor_rights_3",
+      "output": 2.673760066210194
+    },
+    {
+      "name": "minor_rights_4",
+      "output": 2.437547908629456
+    },
+    {
+      "name": "minor_rights_7",
+      "output": 2.437547908629456
+    },
+    {
+      "name": "rook_rights_both_sides",
+      "output": 4.67258380703487
+    },
+    {
+      "name": "pawn_progress_0",
+      "output": 2.427358880113321
+    },
+    {
+      "name": "minor_progress_0",
+      "output": 3.546369491332748
+    },
+    {
+      "name": "pawn_progress_1",
+      "output": 3.158172017512345
+    },
+    {
+      "name": "minor_progress_1",
+      "output": 2.629032090713993
+    },
+    {
+      "name": "pawn_progress_2",
+      "output": 2.4549739440697804
+    },
+    {
+      "name": "minor_progress_2",
+      "output": 2.2747174693253935
+    },
+    {
+      "name": "evolved_en_passant",
+      "output": 5.790101841316239
+    },
+    {
+      "name": "mixed_state",
+      "output": 5.181705268976494
+    }
+  ]
+}
