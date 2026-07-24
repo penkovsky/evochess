@@ -635,8 +635,8 @@ export type AiLevel = "easy" | "zen" | "fun";
 // does: Easy/Zen are fixed-depth PST on the fast bitboard backend; Fun is a
 // time-budgeted NNUE search, which falls back to a time-budgeted PST search
 // when no net is loaded (e.g. weights are still fetching in the worker).
-const LEVEL_DEPTH: Record<"easy" | "zen", number> = { easy: 4, zen: 5 };
-const FUN_TIME_MS = 800;
+const LEVEL_DEPTH: Record<"easy" | "zen", number> = { easy: 4, zen: 6 };
+const FUN_TIME_MS = 1300;
 
 // Includes `depth`: the fixed depth for Easy/Zen, or the deepest completed
 // iteration for Fun's timed search — reported in the search-speed console log.

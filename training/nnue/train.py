@@ -36,7 +36,7 @@ class TrainConfig:
     epochs: int = 20
     batch_size: int = 256
     lr: float = 1e-3
-    weight_decay: float = 0.0
+    weight_decay: float = 1e-4
     lam: float = DEFAULT_LAMBDA
     val_frac: float = 0.1
     seed: int = 0
