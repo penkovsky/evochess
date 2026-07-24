@@ -52,10 +52,15 @@ def is_trainable(position: Position) -> bool:
     """Whether a position carries a usable pawn-unit score label."""
     return position.score is not None and not is_mate_score(position.score)
 
+def stable_sigmoid(x):
+    x = np.asarray(x, dtype=np.float64)
+    z = np.exp(-np.abs(x))
+    return np.where(x >= 0, 1.0 / (1.0 + z), z / (1.0 + z))
 
-def sigmoid(x: np.ndarray | float) -> np.ndarray | float:
-    return 1.0 / (1.0 + np.exp(-np.asarray(x, dtype=np.float64)))
+# def sigmoid(x: np.ndarray | float) -> np.ndarray | float:
+#     return 1.0 / (1.0 + np.exp(-np.asarray(x, dtype=np.float64)))
 
+sigmoid = stable_sigmoid
 
 def fit_k(
     scores: Sequence[float],

@@ -19,8 +19,8 @@ echo "=== round 2, phase 2/2: material augmentation (60,000 positions, ${SHARDS}
 
 echo
 echo "=== round 2 complete ==="
-natural_total=$(zcat training/data/shard-*.jsonl.gz 2>/dev/null | wc -l)
-augment_total=$(zcat training/data/augment-shard-*.jsonl.gz 2>/dev/null | wc -l)
+natural_total=$(gunzip -c training/data/shard-*.jsonl.gz 2>/dev/null | wc -l)
+augment_total=$(gunzip -c training/data/augment-shard-*.jsonl.gz 2>/dev/null | wc -l)
 echo "natural (all shard-* files, round 1 + round 2):   ${natural_total}"
 echo "augmented (all augment-shard-* files, round 1+2): ${augment_total}"
 echo "grand total (raw, pre-dedup): $(( natural_total + augment_total ))"

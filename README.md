@@ -4,8 +4,8 @@ A standalone, backend-free browser port of [EvoChess](./rules.txt) — a chess
 variant where the game starts with only Pawns and Kings, and pieces evolve
 onto the board over time via accumulated promotion rights.
 
-This is a TypeScript/React port of the reference Python implementation. All
-game logic (rules engine + minimax AI) runs client-side; there is no server.
+Written in TypeScript/React. All game logic (rules engine + AI) runs
+client-side; there is no server.
 
 ## Rules
 
@@ -13,12 +13,12 @@ See [`rules.txt`](./rules.txt) for the full rule text.
 
 ## Stack
 
-- [chess.js](https://github.com/jhlywa/chess.js) for base chess legality
 - [react-chessboard](https://github.com/Clariity/react-chessboard) for the UI
 - Depth-limited minimax with alpha-beta pruning for the AI opponent
-  (`src/evochess/ai.ts`)
+  (`src/evochess/ai.ts`).
 - Game state persisted to `localStorage`, so a page refresh resumes the
-  current game
+  current game.
+- Initial version used [chess.js](https://github.com/jhlywa/chess.js) for base chess legality.
 
 ## Development
 
@@ -32,5 +32,66 @@ npm run build    # typecheck + production build
 ## Deployment
 
 Pushing to `main` builds and deploys to GitHub Pages via
-`.github/workflows/deploy.yml`. Enable Pages (Source: GitHub Actions) in the
-repo settings for this to take effect.
+`.github/workflows/deploy.yml`.
+
+## NNUE Training (optional)
+
+By default, the engine uses Piece-Square Table (PST), a hand-crafted positional
+evaluation technique. Alternatively, it also supports Efficiently‑Updated
+Neural Networks (called NNUE due to some Japanese translation issues).
+This section describes how to train such a neural network.
+
+### Step 1 - generate (or relabel) data
+
+```bash
+./more_data.sh
+```
+
+```bash
+training/relabel_batch.sh training/data training/data-relabel-pst5 5
+```
+
+### Step 1a - retrain on the relabeled data
+
+```bash
+python -m training.nnue.train \
+  --data training/data-relabel-pst5 --epochs 20 \
+  --out training/checkpoints/net-relabel-pst5.pt
+```
+
+Export to the JSON format the JS side loads:
+
+```bash
+python -m training.nnue.export \
+  --checkpoint training/checkpoints/net-relabel-pst5.pt \
+  --out training/checkpoints/net-relabel-pst5-weights.json
+```
+
+### Step 2 - ladder gate
+
+```bash
+npx esbuild training/ladder.ts --bundle --platform=node --format=esm --target=node20 \
+  --outfile=training/ladder.bundle.mjs
+node training/ladder.bundle.mjs --weights training/checkpoints/net-relabel-pst5-weights.json
+```
+
+### Step 3 - match vs. material+PST:
+
+```bash
+npx esbuild training/match.ts --bundle --platform=node --format=esm --target=node20 \
+  --outfile=training/match.bundle.mjs
+node training/match.bundle.mjs --weights training/checkpoints/net-relabel-pst5-weights.json --games 100
+```
+
+### Step 4 - match vs. another net (optional)
+
+Pass `--opponent-weights` to play the challenger against a second checkpoint
+instead of material+PST — e.g. to check a relabeled net against the net it's
+meant to replace:
+
+```bash
+node training/match.bundle.mjs \
+  --weights training/checkpoints/net-relabel-pst5-weights.json \
+  --opponent-weights training/checkpoints/net-weights.json --games 100
+```
+

@@ -9,19 +9,22 @@
  * resample" — the same reject-and-resample posture `sampler.ts` already uses
  * for structurally illegal positions.
  *
- * Used by `augment.ts` (one search per sampled position, score only) and by
+ * Used by `augment.ts` (one search per sampled position, score only), by
  * `gen.ts`'s seeded self-play plies (`--seed-frac`, which need the move too,
- * to actually play the game out).
+ * to actually play the game out), and by `relabel.ts` in both its PST-leaf
+ * and net-as-leaf modes.
  */
 import { Worker } from "node:worker_threads";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import type { EvoChessGame } from "../src/evochess/game";
 import { engineConfig, type RootSearch } from "../src/evochess/ai";
-import type { SearchRequest, SearchResponse } from "./searchWorker";
+import type { SerializedWeights } from "../src/evochess/nnue";
+import type { SearchRequest, SearchResponse, SearchWorkerData } from "./searchWorker";
 
 async function bundleWorkerEntry(): Promise<string> {
   const entry = fileURLToPath(new URL("./searchWorker.ts", import.meta.url));
@@ -43,21 +46,39 @@ interface Pending {
 
 export class SearchWorkerPool {
   private bundlePath: string;
+  private weights: SerializedWeights | null;
   private worker!: Worker;
   private pending = new Map<number, Pending>();
   private nextId = 0;
 
-  private constructor(bundlePath: string) {
+  private constructor(bundlePath: string, weights: SerializedWeights | null) {
     this.bundlePath = bundlePath;
+    this.weights = weights;
     this.spawn();
   }
 
-  static async create(): Promise<SearchWorkerPool> {
-    return new SearchWorkerPool(await bundleWorkerEntry());
+  /**
+   * `weightsPath` (net-as-leaf runs) points at the JSON `nnue.export` writes —
+   * the same file `ladder.ts`/`match.ts` take. It is read **once, here**, not
+   * per spawn: a bad path then throws on the main thread at startup instead of
+   * inside a worker, where the pool's `error` handler would quietly turn every
+   * search into a `null` (i.e. every position keeping its old score, a whole
+   * relabel run silently doing nothing). Holding the parsed net also means a
+   * respawn after a timeout can't pick up a different file mid-run.
+   */
+  static async create(weightsPath?: string | null): Promise<SearchWorkerPool> {
+    const weights: SerializedWeights | null = weightsPath
+      ? (JSON.parse(readFileSync(weightsPath, "utf8")) as SerializedWeights)
+      : null;
+    return new SearchWorkerPool(await bundleWorkerEntry(), weights);
   }
 
   private spawn(): void {
-    const worker = new Worker(this.bundlePath);
+    // Every spawn re-sends the net: `setNnueWeights` is module state, and a
+    // respawned worker is a fresh module instance that would otherwise come
+    // back up evaluating with PST.
+    const data: SearchWorkerData = { weights: this.weights };
+    const worker = new Worker(this.bundlePath, { workerData: data });
     worker.on("message", (msg: SearchResponse) => {
       const p = this.pending.get(msg.id);
       if (!p) return; // already timed out and resolved

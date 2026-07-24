@@ -510,14 +510,25 @@ export interface RootSearch {
  */
 /**
  * Selects which search backend `searchRoot` (hence `chooseMove`) uses:
- *   - "chessjs": the negamax over `EvoChessGame` in this file (default; the only
- *     backend that supports the NNUE evaluation).
- *   - "bitboard": the make/unmake bitboard search (`searchEvoTT`), PST eval only.
+ *   - "bitboard": the make/unmake bitboard search (`searchEvoTT`); the default.
+ *   - "chessjs": the negamax over `EvoChessGame` in this file; the reference
+ *     implementation the bitboard path's parity tests are written against.
+ * Both support both evaluations: each picks up the net whenever weights are
+ * loaded (bitboard through the incremental accumulator, `evoSearch.ts`'s
+ * `USE_NNUE`) and falls back to PST otherwise. Their scores agree at equal
+ * depth — see the cross-backend parity test in `nnueEvoAdapter.test.ts` —
+ * though bitboard computes in integer centipawns and chessjs in float pawn
+ * units, so the two are not bit-identical.
  * A flag rather than a parameter so a single toggle A/B-tests the whole engine
  * (self-play, data generation) without threading it through every call site.
  */
 export type EngineBackend = "chessjs" | "bitboard";
-export const engineConfig: { backend: EngineBackend } = { backend: "chessjs" };
+// Default "bitboard": it is 8-17× faster at equal depth and, since the
+// accumulator landed, evaluates identically with either PST or the net, so
+// there is no longer a reason for any caller to pay chessjs's cost by
+// default. "chessjs" remains the reference implementation — every backend
+// parity test is defined against it, and `--backend chessjs` opts back in.
+export const engineConfig: { backend: EngineBackend } = { backend: "bitboard" };
 
 /** Map a bitboard `EvoTurn` back to the `CandidateTurn` the game layer expects. */
 function evoTurnToCandidate(t: EvoTurn): CandidateTurn {
@@ -529,19 +540,35 @@ function evoTurnToCandidate(t: EvoTurn): CandidateTurn {
   return { from: squareName(t.from) as Square, to: squareName(t.to) as Square, options };
 }
 
-export function searchRoot(game: EvoChessGame, depth: number, seed: number): RootSearch {
+/**
+ * `useNnue` defaults to "use the net if one is loaded", matching what the
+ * chessjs backend's `evaluate()` does implicitly. Pass `false` to force PST
+ * even with weights loaded — `searchLevel` does this to keep Easy/Zen on the
+ * weaker evaluation. Note it currently gates the **bitboard** backend only
+ * (`searchEvoTT`'s own opt-in); the chessjs path always follows the loaded
+ * weights, so force-PST callers must also be on the bitboard backend.
+ */
+export function searchRoot(
+  game: EvoChessGame,
+  depth: number,
+  seed: number,
+  useNnue = hasNnueWeights()
+): RootSearch {
   const start = performance.now();
   if (engineConfig.backend === "bitboard") {
-    // Bitboard backend: PST integer-centipawn eval, own Zobrist TT + iterative
-    // deepening. `seed` drives a root tie-break so equal-value moves vary per
-    // game. Score is centipawns, side-to-move-relative → convert to pawn units.
-    const r = searchEvoTT(fromEvoGame(game), depth, seed);
+    // Bitboard backend: integer-centipawn eval (PST or, with `useNnue`, the
+    // accumulator), own Zobrist TT + iterative deepening. `seed` drives a root
+    // tie-break so equal-value moves vary per game. Score is centipawns,
+    // side-to-move-relative → convert to pawn units.
+    const r = searchEvoTT(fromEvoGame(game), depth, seed, useNnue);
     return {
       move: r.turn ? evoTurnToCandidate(r.turn) : null,
       score: r.score / 100,
       nodes: r.nodes,
       timeMs: performance.now() - start,
-      method: "pst",
+      // `beginNnueSearch` ands this with `hasNnueWeights()`, which the default
+      // argument already reflects — so this matches what actually evaluated.
+      method: useNnue ? "nnue" : "pst",
     };
   }
 
@@ -578,18 +605,19 @@ export function searchRootTimed(
   game: EvoChessGame,
   timeMs: number,
   seed: number,
-  maxDepth = 64
+  maxDepth = 64,
+  useNnue = hasNnueWeights()
 ): RootSearch & { depth: number } {
   const start = performance.now();
   if (engineConfig.backend === "bitboard") {
-    const r = searchEvoTTTimed(fromEvoGame(game), timeMs, maxDepth, seed);
+    const r = searchEvoTTTimed(fromEvoGame(game), timeMs, maxDepth, seed, useNnue);
     return {
       move: r.turn ? evoTurnToCandidate(r.turn) : null,
       score: r.score / 100,
       depth: r.depth,
       nodes: r.nodes,
       timeMs: performance.now() - start,
-      method: "pst",
+      method: useNnue ? "nnue" : "pst",
     };
   }
 
@@ -632,22 +660,26 @@ export function searchRootTimed(
 export type AiLevel = "easy" | "zen" | "fun";
 
 // Difficulty → search policy, the single source of truth for what each level
-// does: Easy/Zen are fixed-depth PST on the fast bitboard backend; Fun is a
-// time-budgeted NNUE search, which falls back to a time-budgeted PST search
-// when no net is loaded (e.g. weights are still fetching in the worker).
+// does. Every level now runs on the bitboard backend, which supports both
+// evaluations; the levels differ in budget and in evaluation. Easy/Zen are
+// fixed-depth and pass `useNnue: false` so they stay on PST even though the
+// worker has weights loaded — that weaker evaluation is the difficulty. Fun is
+// time-budgeted and takes the net when one is loaded, falling back to PST when
+// none is (e.g. weights are still fetching in the worker).
 const LEVEL_DEPTH: Record<"easy" | "zen", number> = { easy: 4, zen: 6 };
-const FUN_TIME_MS = 1300;
+const FUN_TIME_MS = 800;
 
 // Includes `depth`: the fixed depth for Easy/Zen, or the deepest completed
 // iteration for Fun's timed search — reported in the search-speed console log.
 export function searchLevel(game: EvoChessGame, level: AiLevel, seed: number): RootSearch & { depth: number } {
+  engineConfig.backend = "bitboard";
   if (level === "fun") {
-    engineConfig.backend = hasNnueWeights() ? "chessjs" : "bitboard";
+    // `useNnue` defaults to hasNnueWeights(), so Fun gets the net when the
+    // worker has finished fetching it and PST until then.
     return searchRootTimed(game, FUN_TIME_MS, seed);
   }
-  engineConfig.backend = "bitboard";
   const depth = LEVEL_DEPTH[level];
-  return { ...searchRoot(game, depth, seed), depth };
+  return { ...searchRoot(game, depth, seed, false), depth };
 }
 
 /**

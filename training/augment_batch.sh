@@ -63,6 +63,6 @@ for i in $(seq 1 "$SHARDS"); do
   tail -n 8 "training/data/logs/${OUT_PREFIX}-${i}.log"
 done
 
-total=$(zcat training/data/${OUT_PREFIX}-*.jsonl.gz | wc -l)
+total=$(gunzip -c training/data/${OUT_PREFIX}-*.jsonl.gz | wc -l)
 echo "=== done: ${total} augmented positions written across ${SHARDS} shards (fail=${fail}) ==="
 exit "$fail"

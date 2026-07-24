@@ -132,12 +132,13 @@ export function flushSink(sink: Writable): void {
 }
 
 /**
- * Dedup key for a written record. Rebuilds the engine's `stateKey()` from the
- * stored fields so two records of the same EvoChess position collide even when
- * their labels differ — exactly the key `stateKey()` produces, so dedup here
- * matches dedup anywhere else.
+ * Reconstruct a full `EvoChessGame` from a stored record — everything
+ * `searchRoot`/`evaluate` need (board, rights, progress, charges, locks, ep),
+ * but not `moveLog` (unused by search; only chess.js's own loaded FEN matters
+ * for legality/eval). Shared by `recordKey` below and by `relabel.ts`, which
+ * needs the live game object, not just its key.
  */
-export function recordKey(record: PositionRecord): string {
+export function gameFromRecord(record: PositionRecord): EvoChessGame {
   const game = new EvoChessGame();
   game.chess.load(record.fen);
   const [mw, mb] = record.minorRights ?? [0, 0];
@@ -158,5 +159,20 @@ export function recordKey(record: PositionRecord): string {
         index: 0,
       }
     : null;
+  return game;
+}
+
+/** Re-export of the engine's `stateKey()`, for callers that only import from here. */
+export function stateKeyOf(game: EvoChessGame): string {
   return stateKey(game);
+}
+
+/**
+ * Dedup key for a written record. Rebuilds the engine's `stateKey()` from the
+ * stored fields so two records of the same EvoChess position collide even when
+ * their labels differ — exactly the key `stateKey()` produces, so dedup here
+ * matches dedup anywhere else.
+ */
+export function recordKey(record: PositionRecord): string {
+  return stateKey(gameFromRecord(record));
 }

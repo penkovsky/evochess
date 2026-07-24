@@ -1,7 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// The app is served under Vite's base path (see vite.config.ts).
-const BASE_PATH = "/evochess-web/";
+// The app is served under Vite's base path — keep in sync with `base` in
+// vite.config.ts, or every navigation 404s.
+const BASE_PATH = "/evochess/";
 const PORT = 5173;
 
 export default defineConfig({

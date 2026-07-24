@@ -43,7 +43,15 @@
  * game early rather than block the run.
  */
 import { EvoChessGame } from "../src/evochess/game";
-import { legalTurns, material, searchRoot, type CandidateTurn, type RootSearch } from "../src/evochess/ai";
+import {
+  engineConfig,
+  legalTurns,
+  material,
+  searchRoot,
+  type CandidateTurn,
+  type EngineBackend,
+  type RootSearch,
+} from "../src/evochess/ai";
 import { sampleSeedPosition } from "./sampler";
 import { SearchWorkerPool } from "./searchWorkerPool";
 import {
@@ -82,6 +90,10 @@ interface Config {
   seedFrac: number;
   // Per-ply wall-clock budget for a seeded game's worker-isolated search.
   seedTimeoutMs: number;
+  // Which search produces the labels. Defaults to `engineConfig`'s own
+  // default; pass `--backend chessjs` to label with the reference search
+  // instead. Do not mix backends within one dataset.
+  backend: EngineBackend;
 }
 
 const DEFAULTS: Config = {
@@ -98,6 +110,7 @@ const DEFAULTS: Config = {
   capMargin: 2,
   seedFrac: 0,
   seedTimeoutMs: 5_000,
+  backend: engineConfig.backend,
 };
 
 // -- adjudication -----------------------------------------------------------
@@ -243,7 +256,13 @@ function parseArgs(argv: string[]): Config {
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
     if (key === "--out") cfg.out = args[++i];
-    else if (key in numeric) numeric[key](Number(args[++i]));
+    else if (key === "--backend") {
+      const v = args[++i];
+      if (v !== "chessjs" && v !== "bitboard") {
+        throw new Error(`--backend must be chessjs|bitboard, got ${v}`);
+      }
+      cfg.backend = v;
+    } else if (key in numeric) numeric[key](Number(args[++i]));
     else throw new Error(`unknown argument: ${key}`);
   }
   return cfg;
@@ -291,6 +310,9 @@ function format(counts: Record<string, number>): string {
 
 async function main(): Promise<void> {
   const cfg = parseArgs(process.argv.slice(2));
+  // Set before any search or pool creation: `search()` forwards this to the
+  // worker, which has no other way to learn it.
+  engineConfig.backend = cfg.backend;
   const rng = mulberry32(cfg.seed);
   // A separate, disjoint stream for search seeds keeps the search reproducible
   // without coupling it to the diversity draws.

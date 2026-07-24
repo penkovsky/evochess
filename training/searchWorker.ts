@@ -14,11 +14,19 @@
  * that nothing in the main loop could otherwise interrupt. Per the coverage
  * spec's non-goals, the search itself is not touched; this only adds an
  * external, generation-side timeout around it.
+ *
+ * The worker owns its own NNUE weights, exactly as the app's `ai.worker.ts`
+ * does and for the same reason: `setNnueWeights` writes module state, and a
+ * worker is a separate module instance the main thread's copy never reaches.
+ * `relabel.ts`'s net-as-leaf mode passes the serialized net through
+ * `workerData` (see `searchWorkerPool.ts`), which is what lets that mode get
+ * the same hard per-position timeout the PST mode has always had.
  */
-import { parentPort } from "node:worker_threads";
+import { parentPort, workerData } from "node:worker_threads";
 import type { Color, Square } from "chess.js";
 import { EvoChessGame, type ApplyMoveOptions, type EvolvedEnPassant } from "../src/evochess/game";
 import { searchRoot, engineConfig, type EngineBackend } from "../src/evochess/ai";
+import { loadWeights, setNnueWeights, type SerializedWeights } from "../src/evochess/nnue";
 
 export interface SearchRequest {
   id: number;
@@ -33,7 +41,8 @@ export interface SearchRequest {
   depth: number;
   seed: number;
   /** Which search backend to use; the main-thread flag doesn't reach here on
-   * its own (each worker has its own module instance), so it rides the request. */
+   * its own (each worker has its own module instance), so it rides the
+   * request. Omitted leaves the worker on `engineConfig`'s own default. */
   backend?: EngineBackend;
 }
 
@@ -46,9 +55,21 @@ export interface SearchResponse {
   score: number;
 }
 
+/** Set by `SearchWorkerPool`; `weights: null` is the PST-leaf default. */
+export interface SearchWorkerData {
+  weights: SerializedWeights | null;
+}
+
 if (!parentPort) {
   throw new Error("searchWorker.ts must be run as a worker_threads.Worker");
 }
+
+// Load before the first message is handled: `searchRoot` reads the net through
+// `evaluate()`'s `hasNnueWeights()` check, so a position searched before this
+// ran would silently get a PST label in a net-as-leaf run. Worker construction
+// and this module's evaluation both precede any `message` event, so it can't.
+const { weights } = (workerData ?? { weights: null }) as SearchWorkerData;
+if (weights) setNnueWeights(loadWeights(weights));
 
 parentPort.on("message", (req: SearchRequest) => {
   const game = new EvoChessGame();
@@ -61,7 +82,9 @@ parentPort.on("message", (req: SearchRequest) => {
   game.rookLocked = new Set(req.rookLocked);
   game.epEvolved = req.epEvolved;
 
-  engineConfig.backend = req.backend ?? "chessjs";
+  // Only override when the request names a backend; otherwise leave this
+  // worker's own module default in place, so the two can't drift apart.
+  if (req.backend) engineConfig.backend = req.backend;
   const { move, score } = searchRoot(game, req.depth, req.seed);
   const response: SearchResponse = { id: req.id, move, score };
   parentPort!.postMessage(response);

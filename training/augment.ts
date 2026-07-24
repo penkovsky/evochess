@@ -19,7 +19,7 @@
  * the K fit — see the pinned tests in `training/tests/test_target.py`.
  */
 import { EvoChessGame } from "../src/evochess/game";
-import { material, searchRoot } from "../src/evochess/ai";
+import { engineConfig, material, searchRoot, type EngineBackend } from "../src/evochess/ai";
 import { sampleSeedPosition } from "./sampler";
 import { SearchWorkerPool } from "./searchWorkerPool";
 import {
@@ -47,6 +47,10 @@ interface Config {
   // worse; past this budget the position is discarded and resampled rather
   // than let one pathological board stall the whole run.
   timeoutMs: number;
+  // Which search produces the labels. Defaults to `engineConfig`'s own
+  // default; pass `--backend chessjs` to label with the reference search
+  // instead. Do not mix backends within one dataset.
+  backend: EngineBackend;
 }
 
 const DEFAULTS: Config = {
@@ -56,6 +60,7 @@ const DEFAULTS: Config = {
   seed: 1,
   out: "training/data/augment.jsonl.gz",
   timeoutMs: 4_000,
+  backend: engineConfig.backend,
 };
 
 function parseArgs(argv: string[]): Config {
@@ -71,7 +76,13 @@ function parseArgs(argv: string[]): Config {
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
     if (key === "--out") cfg.out = args[++i];
-    else if (key in numeric) numeric[key](Number(args[++i]));
+    else if (key === "--backend") {
+      const v = args[++i];
+      if (v !== "chessjs" && v !== "bitboard") {
+        throw new Error(`--backend must be chessjs|bitboard, got ${v}`);
+      }
+      cfg.backend = v;
+    } else if (key in numeric) numeric[key](Number(args[++i]));
     else throw new Error(`unknown argument: ${key}`);
   }
   return cfg;
@@ -186,6 +197,9 @@ async function main(): Promise<void> {
   let seedState = cfg.seed ^ 0x9e3779b9;
   const searchSeed = () => (seedState = (seedState + 0x6d2b79f5) | 0);
 
+  // Set before the pool is created: `search()` forwards this to the worker,
+  // which has no other way to learn it.
+  engineConfig.backend = cfg.backend;
   const { sink, done } = openSink(cfg.out);
   const pool = await SearchWorkerPool.create();
   const seen = new Set<string>();
