@@ -12,12 +12,15 @@ import { pieceAt, bitAt, inCheck, lsbIndex, insufficientMaterial } from "./bitbo
 import {
   type EvoPos,
   type EvoTurn,
+  type EvoUndo,
   generateEvoTurns,
   applyEvoTurn,
   undoEvoTurn,
   turnKey,
 } from "./evoBitboard";
 import { PST, pstIndex } from "./bitboardSearch";
+import { applyAccum, createAcc, createAccStack, evalAcc, refresh, type Acc, type Perspective } from "./nnueAccum";
+import { hasNnueWeights, getNnueWeights, type NnueWeights } from "./nnue";
 
 const MATE = 100_000;
 const VALUE_CP = [100, 300, 300, 500, 900, 0]; // P N B R Q K
@@ -27,6 +30,29 @@ const fileOf = (sq: number): number => sq & 7;
 // A rook's centipawn value decays linearly with remaining charges, matching
 // ai.ts rookValue: 3 + 2*(charges/5) pawns → 300 + 40*charges centipawns.
 const rookCp = (charges: number): number => 300 + 40 * charges;
+
+// Whether the current search should evaluate with the net rather than PST.
+// Captured once per search entry (searchEvoTT / searchEvoTTTimed) into this
+// module-level boolean, per nnue-bitboard-port-spec.md §4: the PST path must
+// stay exactly as fast when NNUE is off, so `evalPos` below costs one boolean
+// load in that case, nothing more.
+let USE_NNUE = false;
+
+// The incremental accumulator stack (nnue-accumulator-spec.md §3, §8):
+// preallocated once per loaded net and reused across searches. Sized well
+// past any depth + quiescence extension this search realistically reaches;
+// `evalPos`'s fallback below covers the (not expected) case where it isn't.
+const ACC_STACK_SIZE = 256;
+let accStack: Acc[] | null = null;
+let accWeights: NnueWeights | null = null;
+
+function ensureAccStack(weights: NnueWeights): Acc[] {
+  if (accStack === null || accWeights !== weights) {
+    accStack = createAccStack(weights, ACC_STACK_SIZE);
+    accWeights = weights;
+  }
+  return accStack;
+}
 
 /** Static evaluation, White-positive, integer centipawns (with rook decay). */
 export function evalEvo(s: EvoPos): number {
@@ -139,19 +165,45 @@ const isDraw = (s: EvoPos): boolean =>
 
 let NODES = 0;
 
+// Side-to-move-relative centipawns: PST when NNUE is off (White-positive
+// evalEvo flipped by `sign`), the net's pawn score (via the incremental
+// accumulator, nnue-accumulator-spec.md §7) scaled to centipawns when it's
+// on — `evalAcc` is already side-to-move-relative, so no sign flip there
+// (matching `forwardActive`'s convention, nnue-bitboard-port-spec.md §4).
+function evalPos(s: EvoPos, ply: number): number {
+  if (USE_NNUE) {
+    const stack = accStack!, weights = accWeights!;
+    if (ply < stack.length) {
+      return Math.round(100 * evalAcc(stack[ply], s.pos.us as Perspective, weights));
+    }
+    // Defensive fallback for quiescence going deeper than ACC_STACK_SIZE
+    // (not expected in practice — a full refresh rather than an out-of-bounds read).
+    const acc = createAcc(weights);
+    refresh(acc, s, weights);
+    return Math.round(100 * evalAcc(acc, s.pos.us as Perspective, weights));
+  }
+  return (s.pos.us === 0 ? 1 : -1) * evalEvo(s);
+}
+
+// Update the accumulator stack for a child just reached at ply `p + 1`, iff
+// NNUE is on and within the preallocated stack (see the fallback above).
+function accumApply(p: number, s: EvoPos, t: EvoTurn, u: EvoUndo): void {
+  if (USE_NNUE && p + 1 < accStack!.length) applyAccum(accStack!, p, s, t, u, accWeights!);
+}
+
 function quiesce(s: EvoPos, alpha: number, beta: number, ply: number): number {
   NODES++;
   const turns = generateEvoTurns(s);
   if (turns.length === 0) return inCheck(s.pos) ? -(MATE - ply) : 0;
   if (isDraw(s)) return 0;
 
-  const sign = s.pos.us === 0 ? 1 : -1;
-  const standPat = sign * evalEvo(s);
+  const standPat = evalPos(s, ply);
   if (standPat >= beta) return beta;
   if (standPat > alpha) alpha = standPat;
 
   for (const t of orderTurns(s, turns.filter((tt) => isNoisy(s, tt)))) {
     const u = applyEvoTurn(s, t);
+    accumApply(ply, s, t, u);
     const score = -quiesce(s, -beta, -alpha, ply + 1);
     undoEvoTurn(s, u);
     if (score >= beta) return beta;
@@ -188,6 +240,7 @@ export interface EvoSearchResult {
 /** Fixed-depth negamax root over compound EvoChess turns. */
 export function searchEvo(s: EvoPos, depth: number): EvoSearchResult {
   NODES = 1;
+  USE_NNUE = false; // PST-only entry point; must not inherit a prior TT-search's flag
   let best = -Infinity, bestTurn: EvoTurn | null = null, alpha = -Infinity;
   for (const t of orderTurns(s, generateEvoTurns(s))) {
     const u = applyEvoTurn(s, t);
@@ -326,6 +379,7 @@ function negamaxTT(s: EvoPos, depth: number, alpha: number, beta: number, ply: n
   let best = -Infinity, bestTurn: EvoTurn | null = null;
   for (const t of orderTurnsHint(s, turns, ttMove)) {
     const u = applyEvoTurn(s, t);
+    accumApply(ply, s, t, u);
     const score = -negamaxTT(s, depth - 1, -beta, -alpha, ply + 1);
     undoEvoTurn(s, u);
     if (score > best) { best = score; bestTurn = t; }
@@ -354,6 +408,7 @@ function rootSearch(s: EvoPos, depth: number, hint: EvoTurn | null, rng?: () => 
   let best = -Infinity, bestTurn: EvoTurn | null = null, alpha = -Infinity;
   for (const t of ordered) {
     const u = applyEvoTurn(s, t);
+    accumApply(0, s, t, u); // root is implicitly ply 0
     const score = -negamaxTT(s, depth - 1, -Infinity, -alpha, 1);
     undoEvoTurn(s, u);
     if (score > best) { best = score; bestTurn = t; }
@@ -362,13 +417,30 @@ function rootSearch(s: EvoPos, depth: number, hint: EvoTurn | null, rng?: () => 
   return { score: best, turn: bestTurn, nodes: NODES };
 }
 
+// Set USE_NNUE for this search entry and, if on, (re)build the root
+// accumulator via a full refresh — every node below reads/writes off it.
+function beginNnueSearch(s: EvoPos, useNnue: boolean): void {
+  USE_NNUE = useNnue && hasNnueWeights();
+  if (USE_NNUE) {
+    const weights = getNnueWeights()!;
+    const stack = ensureAccStack(weights);
+    refresh(stack[0], s, weights);
+  }
+}
+
 /**
  * Iterative-deepening negamax with a Zobrist transposition table. Returns the
  * same root score as `searchEvo(s, maxDepth)` but visits far fewer nodes.
  */
-export function searchEvoTT(s: EvoPos, maxDepth: number, seed?: number): EvoSearchResult {
+export function searchEvoTT(
+  s: EvoPos,
+  maxDepth: number,
+  seed?: number,
+  useNnue = false
+): EvoSearchResult {
   GEN++;
   NODES = 1;
+  beginNnueSearch(s, useNnue);
   const rng = seed === undefined ? undefined : mulberry32(seed);
   let result: EvoSearchResult = { score: 0, turn: null, nodes: 0 };
   for (let d = 1; d <= maxDepth; d++) {
@@ -387,9 +459,16 @@ export interface EvoSearchTimedResult extends EvoSearchResult {
  * reported depth completed fully), or a mate is found. Mirrors `ai.ts`
  * `searchRootTimed` so the two backends can be A/B'd at equal time.
  */
-export function searchEvoTTTimed(s: EvoPos, timeMs: number, maxDepth = 64, seed?: number): EvoSearchTimedResult {
+export function searchEvoTTTimed(
+  s: EvoPos,
+  timeMs: number,
+  maxDepth = 64,
+  seed?: number,
+  useNnue = false
+): EvoSearchTimedResult {
   GEN++;
   NODES = 1;
+  beginNnueSearch(s, useNnue);
   const rng = seed === undefined ? undefined : mulberry32(seed);
   const deadline = Date.now() + timeMs;
   let best: EvoTurn | null = null, score = 0, depth = 0;

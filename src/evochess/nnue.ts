@@ -131,17 +131,24 @@ export function loadWeights(serialized: SerializedWeights): NnueWeights {
   };
 }
 
-/** Evaluate from active feature indices. Side-to-move pawn score. */
-export function forwardActive(weights: NnueWeights, active: number[]): number {
-  const { hidden1, hidden2, l1w, l1b, l2w, l2b, l3w, l3b } = weights;
+/**
+ * Layers 2 and 3, from a **pre-activation** (pre-clipped-ReLU) Layer-1 output.
+ * The shared tail both `forwardActive` (from-scratch) and the incremental
+ * accumulator's `evalAcc` (nnueAccum.ts, nnue-accumulator-spec.md §7) call —
+ * factored out so the two paths can never drift on Layers 2/3, only ever on
+ * how they arrive at `preH1`. Accepts either a `Float64Array` (the
+ * from-scratch path) or a `Float32Array` (the accumulator's storage type,
+ * §3 of that spec); indexed reads widen to double either way, so the layer-2
+ * math itself is unaffected by which one is passed.
+ */
+export function forwardFromPreactivation(weights: NnueWeights, preH1: Float64Array | Float32Array): number {
+  const { hidden1, hidden2, l2w, l2b, l3w, l3b } = weights;
 
-  // Layer 1: accumulate only the active input rows, then clipped ReLU.
-  const h1 = new Float64Array(l1b); // copy of biases
-  for (const j of active) {
-    const base = j * hidden1;
-    for (let o = 0; o < hidden1; o++) h1[o] += l1w[base + o];
+  const h1 = new Float64Array(hidden1);
+  for (let o = 0; o < hidden1; o++) {
+    const x = preH1[o];
+    h1[o] = x < 0 ? 0 : x > 1 ? 1 : x;
   }
-  for (let o = 0; o < hidden1; o++) h1[o] = h1[o] < 0 ? 0 : h1[o] > 1 ? 1 : h1[o];
 
   // Layer 2: dense, then ReLU.
   const h2 = new Float64Array(l2b);
@@ -157,6 +164,20 @@ export function forwardActive(weights: NnueWeights, active: number[]): number {
   let out = l3b;
   for (let o = 0; o < hidden2; o++) out += h2[o] * l3w[o];
   return out;
+}
+
+/** Evaluate from active feature indices. Side-to-move pawn score. */
+export function forwardActive(weights: NnueWeights, active: number[]): number {
+  const { hidden1, l1w, l1b } = weights;
+
+  // Layer 1: accumulate only the active input rows (pre-activation).
+  const preH1 = new Float64Array(l1b); // copy of biases
+  for (const j of active) {
+    const base = j * hidden1;
+    for (let o = 0; o < hidden1; o++) preH1[o] += l1w[base + o];
+  }
+
+  return forwardFromPreactivation(weights, preH1);
 }
 
 /**
@@ -181,6 +202,40 @@ export function setNnueWeights(weights: NnueWeights | null): void {
 
 export function hasNnueWeights(): boolean {
   return loadedWeights !== null;
+}
+
+/**
+ * The loaded net itself, or null. Callers that need to pass `NnueWeights`
+ * into their own eval path (the bitboard search's accumulator, `nnueAccum.ts`)
+ * rather than go through `evaluateNnuePosition`/`evaluateActive` use this;
+ * still the same module-state `loadedWeights` everything else reads.
+ */
+export function getNnueWeights(): NnueWeights | null {
+  return loadedWeights;
+}
+
+/**
+ * Evaluate `position` with the loaded net, from the side-to-move's point of
+ * view. The single accessor other backends (the bitboard search) go through,
+ * so there is one source of truth for "which net is loaded" — the worker's
+ * `setNnueWeights` feeds every caller of this function. Throws if no weights
+ * are loaded; check `hasNnueWeights()` first.
+ */
+export function evaluateNnuePosition(position: NnuePosition): number {
+  if (loadedWeights === null) throw new Error("no NNUE weights loaded");
+  return evaluatePosition(loadedWeights, position);
+}
+
+/**
+ * Evaluate a pre-built active-index list with the loaded net. The Option-B
+ * (bitboard-native indexer) counterpart of `evaluateNnuePosition`: callers
+ * that already have indices (no `NnuePosition`/FEN to build) go through this
+ * instead, still against the same module-state `loadedWeights`. Throws if no
+ * weights are loaded; check `hasNnueWeights()` first.
+ */
+export function evaluateActive(active: number[]): number {
+  if (loadedWeights === null) throw new Error("no NNUE weights loaded");
+  return forwardActive(loadedWeights, active);
 }
 
 /**

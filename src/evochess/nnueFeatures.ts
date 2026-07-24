@@ -93,7 +93,7 @@ export const DENSE_OFFSET = SPARSE_SIZE;
 export const FEATURE_SIZE = SPARSE_SIZE + DENSE_SIZE; // 1569
 
 // Start of each dense field within the full vector.
-const DENSE_OFFSETS = new Map<string, number>();
+export const DENSE_OFFSETS = new Map<string, number>();
 {
   let offset = DENSE_OFFSET;
   for (const [name, width] of DENSE_FIELDS) {
