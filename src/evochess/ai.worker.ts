@@ -131,16 +131,17 @@ let ttWarm = false;
 let ttEvalWasNnue: boolean | null = null;
 
 // The evaluator `searchLevel` will pick for this level, mirroring its own
-// derivation exactly: Fun defaults `useNnue` to `hasNnueWeights()`, Easy/Zen
-// pass `false` outright.
-const evalIsNnue = (level: AiLevel): boolean => level === "fun" && hasNnueWeights();
+// derivation exactly: Zen and Fun default `useNnue` to `hasNnueWeights()`,
+// Easy passes `false` outright.
+const evalIsNnue = (level: AiLevel): boolean => level !== "easy" && hasNnueWeights();
 
 // Whether a search at `level` may continue from the current table.
 // Two conditions, both necessary:
 //  - same evaluator, per `ttEvalWasNnue` above;
-//  - Fun only. §5.5: Easy and Zen are deliberately weak fixed-depth searches,
-//    so a warm TT there would make them stronger than intended, and §6.4
-//    requires them to stay bit-identical to pre-ponder behaviour.
+//  - Fun only. §5.5: pondering (and thus TT continuation) only ever happens
+//    at Fun — Easy and Zen never ponder, so a warm TT there would make them
+//    stronger than intended, and §6.4 requires them to stay bit-identical to
+//    pre-ponder behaviour.
 const mayKeepTT = (level: AiLevel): boolean =>
   level === "fun" && ttWarm && ttEvalWasNnue === evalIsNnue(level);
 

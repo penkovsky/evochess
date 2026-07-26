@@ -543,7 +543,7 @@ function evoTurnToCandidate(t: EvoTurn): CandidateTurn {
 /**
  * `useNnue` defaults to "use the net if one is loaded", matching what the
  * chessjs backend's `evaluate()` does implicitly. Pass `false` to force PST
- * even with weights loaded — `searchLevel` does this to keep Easy/Zen on the
+ * even with weights loaded — `searchLevel` does this to keep Easy on the
  * weaker evaluation. Note it currently gates the **bitboard** backend only
  * (`searchEvoTT`'s own opt-in); the chessjs path always follows the loaded
  * weights, so force-PST callers must also be on the bitboard backend.
@@ -660,33 +660,39 @@ export function searchRootTimed(
   };
 }
 
-/** UI difficulty level. Easy/Zen are fixed-depth PST; Fun is time-budgeted NNUE. */
+/**
+ * UI difficulty level. Easy is fixed-depth PST; Zen and Fun are both
+ * time-budgeted NNUE with the identical search policy — the only difference
+ * between them is that Fun ponders on the human's time and Zen doesn't
+ * (that gating lives in App.tsx's `maybeStartPonder`, keyed on `level === "fun"`).
+ */
 export type AiLevel = "easy" | "zen" | "fun";
 
 // Difficulty → search policy, the single source of truth for what each level
-// does. Every level now runs on the bitboard backend, which supports both
-// evaluations; the levels differ in budget and in evaluation. Easy/Zen are
-// fixed-depth and pass `useNnue: false` so they stay on PST even though the
-// worker has weights loaded — that weaker evaluation is the difficulty. Fun is
-// time-budgeted and takes the net when one is loaded, falling back to PST when
-// none is (e.g. weights are still fetching in the worker).
-const LEVEL_DEPTH: Record<"easy" | "zen", number> = { easy: 4, zen: 6 };
-const FUN_TIME_MS = 800;
+// does. Every level runs on the bitboard backend, which supports both
+// evaluations. Easy is fixed-depth and passes `useNnue: false` so it stays on
+// PST even though the worker has weights loaded — that weaker evaluation is
+// the difficulty. Zen and Fun are time-budgeted and take the net when one is
+// loaded, falling back to PST when none is (e.g. weights are still fetching
+// in the worker).
+const LEVEL_DEPTH: Record<"easy", number> = { easy: 4 };
+const TIMED_TIME_MS = 800;
 
-// Includes `depth`: the fixed depth for Easy/Zen, or the deepest completed
-// iteration for Fun's timed search — reported in the search-speed console log.
+// Includes `depth`: the fixed depth for Easy, or the deepest completed
+// iteration for Zen/Fun's timed search — reported in the search-speed console log.
 //
 // `opts.keepTT` (ponder-spec.md §4.1/§5.4) threads down to the bitboard TT to
 // suppress its generation bump, so a search can continue from a warm cache
-// left by a prior ponder. `opts.timeMs` overrides Fun's `FUN_TIME_MS` budget —
-// this is what lets a 60ms ponder slice run through the same function as the
-// real 800ms search (ponder-spec.md §5.2) — and, when present, also arms the
-// in-search abort deadline (§4.2) so a single deep iterative-deepening pass
-// can't blow through the slice; when absent, the deadline stays unarmed and
-// the real search's timing is untouched. Both default away so every existing
-// caller is unaffected. Deliberately excludes `useNnue`: that stays derived
-// from `hasNnueWeights()` inside `searchRoot`/`searchRootTimed` so no caller —
-// ponder included — can make it diverge from the real search's evaluation.
+// left by a prior ponder. `opts.timeMs` overrides the timed levels'
+// `TIMED_TIME_MS` budget — this is what lets a 60ms ponder slice run through
+// the same function as the real 800ms search (ponder-spec.md §5.2) — and,
+// when present, also arms the in-search abort deadline (§4.2) so a single
+// deep iterative-deepening pass can't blow through the slice; when absent,
+// the deadline stays unarmed and the real search's timing is untouched. Both
+// default away so every existing caller is unaffected. Deliberately excludes
+// `useNnue`: that stays derived from `hasNnueWeights()` inside
+// `searchRoot`/`searchRootTimed` so no caller — ponder included — can make it
+// diverge from the real search's evaluation.
 export function searchLevel(
   game: EvoChessGame,
   level: AiLevel,
@@ -695,9 +701,9 @@ export function searchLevel(
 ): RootSearch & { depth: number } {
   engineConfig.backend = "bitboard";
   const keepTT = opts.keepTT ?? false;
-  if (level === "fun") {
-    // `useNnue` defaults to hasNnueWeights(), so Fun gets the net when the
-    // worker has finished fetching it and PST until then.
+  if (level === "zen" || level === "fun") {
+    // `useNnue` defaults to hasNnueWeights(), so these levels get the net when
+    // the worker has finished fetching it and PST until then.
     if (opts.timeMs !== undefined) {
       const timeMs = opts.timeMs;
       armPonderDeadline(Date.now() + timeMs);
@@ -707,7 +713,7 @@ export function searchLevel(
         disarmPonderDeadline();
       }
     }
-    return searchRootTimed(game, FUN_TIME_MS, seed, undefined, undefined, keepTT);
+    return searchRootTimed(game, TIMED_TIME_MS, seed, undefined, undefined, keepTT);
   }
   const depth = LEVEL_DEPTH[level];
   return { ...searchRoot(game, depth, seed, false, keepTT), depth };
