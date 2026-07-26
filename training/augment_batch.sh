@@ -32,20 +32,22 @@ SHARDS="${3:-8}"
 TIMEOUT_MS="${4:-4000}"
 OUT_PREFIX="${5:-augment-shard}"
 SEED_BASE="${6:-2000}"
+# Where the shards land; see gen_batch.sh for why this is overridable.
+DATA_DIR="${DATA_DIR:-training/data}"
 PER=$(( (TOTAL + SHARDS - 1) / SHARDS ))
 BUNDLE="training/augment.bundle.mjs"
-mkdir -p training/data training/data/logs
+mkdir -p "$DATA_DIR" "$DATA_DIR/logs"
 
 echo "bundling augment.ts ..."
 npx esbuild training/augment.ts --bundle --platform=node --format=esm --target=node20 \
   --external:esbuild --outfile="$BUNDLE" >/dev/null
 
-echo "generating ${TOTAL} augmented positions at depth ${DEPTH} across ${SHARDS} shards (${PER} each, seed-base ${SEED_BASE})"
+echo "generating ${TOTAL} augmented positions at depth ${DEPTH} across ${SHARDS} shards into ${DATA_DIR} (${PER} each, seed-base ${SEED_BASE})"
 pids=()
 for i in $(seq 1 "$SHARDS"); do
   seed=$(( SEED_BASE + i ))
-  out="training/data/${OUT_PREFIX}-${i}.jsonl.gz"
-  log="training/data/logs/${OUT_PREFIX}-${i}.log"
+  out="${DATA_DIR}/${OUT_PREFIX}-${i}.jsonl.gz"
+  log="${DATA_DIR}/logs/${OUT_PREFIX}-${i}.log"
   node "$BUNDLE" \
     --positions "$PER" --depth "$DEPTH" --seed "$seed" --timeout-ms "$TIMEOUT_MS" --out "$out" \
     >"$log" 2>&1 &
@@ -60,9 +62,9 @@ done
 echo "=== per-shard summaries ==="
 for i in $(seq 1 "$SHARDS"); do
   echo "--- shard ${i} ---"
-  tail -n 8 "training/data/logs/${OUT_PREFIX}-${i}.log"
+  tail -n 8 "${DATA_DIR}/logs/${OUT_PREFIX}-${i}.log"
 done
 
-total=$(gunzip -c training/data/${OUT_PREFIX}-*.jsonl.gz | wc -l)
+total=$(gunzip -c "$DATA_DIR"/${OUT_PREFIX}-*.jsonl.gz | wc -l)
 echo "=== done: ${total} augmented positions written across ${SHARDS} shards (fail=${fail}) ==="
 exit "$fail"

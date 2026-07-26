@@ -60,22 +60,6 @@ LOG_TSV="${DATA_DIR}/scale-log.tsv"
 
 mkdir -p "$DATA_DIR" "$CKPT_DIR"
 
-# The batch scripts hardcode training/data/ as their output directory, so each
-# round generates there and is then staged into DATA_DIR. Prefixes are unique
-# per round, so the move can never catch another round's (or an unrelated run's)
-# shards.
-stage_into_data_dir() {
-  local prefix="$1"
-  shopt -s nullglob
-  local produced=(training/data/${prefix}-*.jsonl.gz)
-  shopt -u nullglob
-  if [ ${#produced[@]} -eq 0 ]; then
-    echo "ERROR: batch produced no shards for prefix ${prefix}" >&2
-    return 1
-  fi
-  mv "${produced[@]}" "$DATA_DIR/"
-}
-
 count_positions() {
   shopt -s nullglob
   local files=("$DATA_DIR"/*.jsonl.gz)
@@ -122,15 +106,16 @@ for r in $(seq 0 $((MAX_ROUNDS - 1))); do
     # streams, adding near-duplicate games instead of new diversity.
     seed_base=$((20000 + r * 3000))
 
+    # DATA_DIR sends the batch scripts' output straight here instead of the
+    # shared training/data/, so a run that dies mid-batch leaves nothing behind
+    # for a later `train.py --data training/data` to pick up by accident.
     echo "--- round ${r}: generating ${need} positions (3 x ${third}) ---"
-    ./training/gen_batch.sh "$third" "$DEPTH" "$SHARDS" 120 0 "scale-r${r}-nat" "$seed_base"
-    stage_into_data_dir "scale-r${r}-nat"
-
-    ./training/augment_batch.sh "$third" "$DEPTH" "$SHARDS" 4000 "scale-r${r}-aug" "$((seed_base + 1000))"
-    stage_into_data_dir "scale-r${r}-aug"
-
-    ./training/gen_batch.sh "$third" "$DEPTH" "$SHARDS" 120 0.5 "scale-r${r}-seed" "$((seed_base + 2000))"
-    stage_into_data_dir "scale-r${r}-seed"
+    DATA_DIR="$DATA_DIR" ./training/gen_batch.sh \
+      "$third" "$DEPTH" "$SHARDS" 120 0 "scale-r${r}-nat" "$seed_base"
+    DATA_DIR="$DATA_DIR" ./training/augment_batch.sh \
+      "$third" "$DEPTH" "$SHARDS" 4000 "scale-r${r}-aug" "$((seed_base + 1000))"
+    DATA_DIR="$DATA_DIR" ./training/gen_batch.sh \
+      "$third" "$DEPTH" "$SHARDS" 120 0.5 "scale-r${r}-seed" "$((seed_base + 2000))"
   else
     echo "--- round ${r}: already at ${current} positions, no generation needed ---"
   fi
@@ -151,7 +136,13 @@ for r in $(seq 0 $((MAX_ROUNDS - 1))); do
   if ! node training/ladder.bundle.mjs --weights "$weights"; then
     ladder_status=FAIL
     echo
-    echo "!!! round ${r}: LADDER FAILED — stopping. Keep round $((r - 1))'s net."
+    if [ "$r" -eq 0 ]; then
+      echo "!!! round 0: LADDER FAILED — stopping. There is no previous net to keep."
+      echo "    At round 0 this usually means the base size or epoch count is too"
+      echo "    small to learn anything, rather than a scaling result."
+    else
+      echo "!!! round ${r}: LADDER FAILED — stopping. Keep round $((r - 1))'s net."
+    fi
     printf '%s\t%s\t%s\t%s\t%s\t\t\t\t\tladder-fail\n' \
       "$r" "$target" "$actual" "$ckpt" "$ladder_status" >>"$LOG_TSV"
     exit 1

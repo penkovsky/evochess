@@ -35,20 +35,26 @@ CAP="${4:-120}"
 SEED_FRAC="${5:-0}"
 OUT_PREFIX="${6:-shard}"
 SEED_BASE="${7:-1000}"
+# Where the shards land. Defaults to the shared training/data/ that the Python
+# side reads; override so a self-contained experiment (scale_loop.sh) keeps its
+# shards out of the main dataset entirely, rather than writing here and moving
+# them afterwards -- a run that dies mid-batch would otherwise strand shards in
+# training/data/ where the next training run would silently pick them up.
+DATA_DIR="${DATA_DIR:-training/data}"
 PER=$(( (TOTAL + SHARDS - 1) / SHARDS ))
 BUNDLE="training/gen.bundle.mjs"
-mkdir -p training/data training/data/logs
+mkdir -p "$DATA_DIR" "$DATA_DIR/logs"
 
 echo "bundling gen.ts ..."
 npx esbuild training/gen.ts --bundle --platform=node --format=esm --target=node20 \
   --external:esbuild --outfile="$BUNDLE" >/dev/null
 
-echo "generating ${TOTAL} positions at depth ${DEPTH} across ${SHARDS} shards (${PER} each, seed-frac ${SEED_FRAC}, seed-base ${SEED_BASE})"
+echo "generating ${TOTAL} positions at depth ${DEPTH} across ${SHARDS} shards into ${DATA_DIR} (${PER} each, seed-frac ${SEED_FRAC}, seed-base ${SEED_BASE})"
 pids=()
 for i in $(seq 1 "$SHARDS"); do
   seed=$(( SEED_BASE + i ))
-  out="training/data/${OUT_PREFIX}-${i}.jsonl.gz"
-  log="training/data/logs/${OUT_PREFIX}-${i}.log"
+  out="${DATA_DIR}/${OUT_PREFIX}-${i}.jsonl.gz"
+  log="${DATA_DIR}/logs/${OUT_PREFIX}-${i}.log"
   node "$BUNDLE" \
     --positions "$PER" --depth "$DEPTH" --seed "$seed" --cap "$CAP" \
     --seed-frac "$SEED_FRAC" --out "$out" \
@@ -64,9 +70,9 @@ done
 echo "=== per-shard summaries ==="
 for i in $(seq 1 "$SHARDS"); do
   echo "--- shard ${i} ---"
-  tail -n 8 "training/data/logs/${OUT_PREFIX}-${i}.log"
+  tail -n 8 "${DATA_DIR}/logs/${OUT_PREFIX}-${i}.log"
 done
 
-total=$(gunzip -c training/data/${OUT_PREFIX}-*.jsonl.gz | wc -l)
+total=$(gunzip -c "$DATA_DIR"/${OUT_PREFIX}-*.jsonl.gz | wc -l)
 echo "=== done: ${total} positions written across ${SHARDS} shards (fail=${fail}) ==="
 exit "$fail"
