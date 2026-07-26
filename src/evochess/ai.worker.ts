@@ -55,6 +55,29 @@ export interface AiSearchResponse {
   depth: number;
 }
 
+// Fired once (from the `nnueReady` settle below) so the main thread can
+// reflect NNUE availability in the UI — the weights live only in this
+// worker's module instance, so it's the only place that knows.
+export interface NnueStatusMessage {
+  kind: "nnue-status";
+  ready: boolean;
+}
+export type WorkerMessage = AiSearchResponse | NnueStatusMessage;
+
+// DedicatedWorkerGlobalScope.postMessage(data) takes one argument; jsdom (used
+// by tests) has no worker global scope, so `self` there is a plain Window,
+// whose postMessage requires a second `targetOrigin` argument. Branch on
+// `self.window` (present only on Window) so both real workers and jsdom tests
+// get a call shape they accept.
+const post = (data: WorkerMessage): void => {
+  const g = self as unknown as {
+    postMessage(data: WorkerMessage, targetOrigin: string): void;
+    window?: unknown;
+  };
+  if (typeof g.window !== "undefined") g.postMessage(data, "*");
+  else g.postMessage(data, undefined as unknown as string);
+};
+
 // Fetch the net once, best-effort. A failure (missing file, offline) simply
 // leaves Fun on the PST fallback — the game stays fully playable either way.
 // `nnueSettled` gates pondering (§6.1): starting a ponder chain before the
@@ -72,6 +95,8 @@ export const nnueReady: Promise<void> = fetch(`${import.meta.env.BASE_URL}net-we
   .catch(() => setNnueWeights(null))
   .finally(() => {
     nnueSettled = true;
+    const msg: NnueStatusMessage = { kind: "nnue-status", ready: hasNnueWeights() };
+    post(msg);
   });
 
 // Ponder tuning (ponder-spec.md §5.2/§9 milestone 5). `SLICE_MS` bounds a
@@ -215,7 +240,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
         method: r.method,
         depth: r.depth,
       };
-      (self as unknown as { postMessage(data: AiSearchResponse): void }).postMessage(response);
+      post(response);
       return;
     }
   }

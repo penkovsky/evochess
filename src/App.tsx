@@ -3,7 +3,7 @@ import { Chessboard } from "react-chessboard";
 import type { Color, Square } from "chess.js";
 import { EvoChessGame, EvoChessError, N_MINOR, M_ROOK, ROOK_CHARGES, type ApplyMoveOptions, type ForcedPromo, type MinorPromo } from "./evochess/game";
 import { serializeGame } from "./evochess/serialize";
-import type { AiCandidate, AiSearchRequest, AiSearchResponse, WorkerRequest } from "./evochess/ai.worker";
+import type { AiCandidate, AiSearchRequest, AiSearchResponse, NnueStatusMessage, WorkerRequest } from "./evochess/ai.worker";
 import type { AiLevel } from "./evochess/ai";
 import { saveGame, loadGame, clearSavedGame } from "./evochess/persistence";
 import { Fireworks } from "./Fireworks";
@@ -42,6 +42,10 @@ function App() {
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [showFireworks, setShowFireworks] = useState(false);
+  // Reflects the AI worker's NNUE weights fetch, purely for the status
+  // underline color — the worker owns the weights and posts this once its
+  // own `nnueReady` promise settles (see ai.worker.ts).
+  const [nnueReady, setNnueReady] = useState(false);
   // In human-vs-human, flip the board after every move so the side to move
   // sees their pieces at the bottom. Can be disabled by the user.
   const [autoFlip, setAutoFlip] = useState(true);
@@ -77,7 +81,15 @@ function App() {
   useEffect(() => {
     const worker = new Worker(new URL("./evochess/ai.worker.ts", import.meta.url), { type: "module" });
     aiWorkerRef.current = worker;
-    return () => worker.terminate();
+    const handleStatus = (e: MessageEvent<NnueStatusMessage | unknown>) => {
+      const data = e.data as { kind?: string; ready?: boolean };
+      if (data?.kind === "nnue-status") setNnueReady(!!data.ready);
+    };
+    worker.addEventListener("message", handleStatus);
+    return () => {
+      worker.removeEventListener("message", handleStatus);
+      worker.terminate();
+    };
   }, []);
 
   function searchInWorker(game: EvoChessGame, level: AiLevel, seed: number): Promise<AiCandidate | null> {
@@ -529,6 +541,11 @@ function App() {
           <ClockDisplay clock={clockRef.current} turn={game.turn} gameOver={gameOver} />
         )}
         <div className="board-status">{status}</div>
+        <div
+          className={`board-status-underline${
+            aiThinking ? " thinking" : level === "easy" ? " easy" : nnueReady ? " nnue-ready" : ""
+          }`}
+        />
         <Chessboard
           options={{
             position: game.chess.fen(),

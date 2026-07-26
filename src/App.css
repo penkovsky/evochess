@@ -62,7 +62,26 @@
 .board-status {
   font-weight: bold;
   text-align: center;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
+}
+
+.board-status-underline {
+  width: 80px;
+  height: 2px;
+  margin: 0 auto 8px;
+  background: #2f6feb;
+}
+
+.board-status-underline.nnue-ready {
+  background: #2fa84f;
+}
+
+.board-status-underline.easy {
+  background: #e6c229;
+}
+
+.board-status-underline.thinking {
+  background: #c4c4c4;
 }
 
 .collapsible {
