@@ -33,7 +33,10 @@ __pycache__
 
 # Generated NNUE datasets
 training/data/
-training/gen.bundle.mjs
 training/checkpoints/
-training/match.bundle.mjs
-training/augment.bundle.mjs
+
+# esbuild bundles — generated from the sibling .ts, never edited by hand
+training/*.mjs
+
+# Benchmark bundles (see bench/README.md); the .ts sources are tracked
+bench/*.mjs
