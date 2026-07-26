@@ -3,7 +3,7 @@ import { Chessboard } from "react-chessboard";
 import type { Color, Square } from "chess.js";
 import { EvoChessGame, EvoChessError, N_MINOR, M_ROOK, ROOK_CHARGES, type ApplyMoveOptions, type ForcedPromo, type MinorPromo } from "./evochess/game";
 import { serializeGame } from "./evochess/serialize";
-import type { AiCandidate, AiSearchRequest, AiSearchResponse } from "./evochess/ai.worker";
+import type { AiCandidate, AiSearchRequest, AiSearchResponse, WorkerRequest } from "./evochess/ai.worker";
 import type { AiLevel } from "./evochess/ai";
 import { saveGame, loadGame, clearSavedGame } from "./evochess/persistence";
 import { Fireworks } from "./Fireworks";
@@ -37,7 +37,7 @@ function App() {
   const clockHistoryRef = useRef<Record<Color, number>[]>([]);
   const [mode, setMode] = useState<Mode>("human-ai");
   const [aiColor, setAiColor] = useState<Color>("b");
-  const [level, setLevel] = useState<AiLevel>("zen");
+  const [level, setLevel] = useState<AiLevel>("fun");
   const [modal, setModal] = useState<PromoModalState | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -50,6 +50,11 @@ function App() {
   // state, since it changes many times per second.
   const [timerEnabled, setTimerEnabled] = useState(false);
   const [timerMinutes, setTimerMinutes] = useState(10);
+  // Let the AI keep searching the current position in the background while
+  // it's the human's turn, warming the TT for its next real search
+  // (docs/ponder-spec.md). Only takes effect at Fun level; persisted like the
+  // other settings, default on.
+  const [ponderEnabled, setPonderEnabled] = useState(true);
   const [timeUp, setTimeUp] = useState<Color | null>(null);
   const clockRef = useRef<Record<Color, number>>({ w: 600, b: 600 });
   const logRef = useRef<HTMLDivElement>(null);
@@ -95,9 +100,53 @@ function App() {
         resolve(r.candidate);
       };
       worker.addEventListener("message", handleMessage);
-      const request: AiSearchRequest = { id, game: serializeGame(game), level, seed };
+      const request: AiSearchRequest = { kind: "search", id, game: serializeGame(game), level, seed };
       worker.postMessage(request);
     });
+  }
+
+  // Every discontinuity in game state (new game, takeback, mode/color/level
+  // change, loading a save) must invalidate the worker's ponder TT — stale
+  // analysis from a position that no longer exists on this board must never
+  // be reused (ponder-spec.md §5.3, §6.2).
+  function resetPonder() {
+    const req: WorkerRequest = { kind: "reset" };
+    aiWorkerRef.current?.postMessage(req);
+  }
+
+  // Ends a running ponder chain but keeps its warm TT — the human has
+  // committed to something, so the analysis is still valid and reusable.
+  function stopPonder() {
+    const req: WorkerRequest = { kind: "stop" };
+    aiWorkerRef.current?.postMessage(req);
+  }
+
+  // Starts a ponder chain if this is a position worth pondering: the human is
+  // on move against the AI at Fun level, with the setting on (§5.5). Called
+  // both when the AI's move lands and when a move the human attempted turned
+  // out to be illegal — in the latter case the position is unchanged, so the
+  // chain we stopped on the way in should resume.
+  // `overrides` exists for callers holding a value React state hasn't caught
+  // up to yet — the same pattern (and reason) as `maybeAiMove`'s.
+  function maybeStartPonder(
+    game: EvoChessGame,
+    overrides?: { mode?: Mode; aiColor?: Color; level?: AiLevel; ponderEnabled?: boolean }
+  ) {
+    const effMode = overrides?.mode ?? mode;
+    const effAiColor = overrides?.aiColor ?? aiColor;
+    const effLevel = overrides?.level ?? level;
+    const effPonder = overrides?.ponderEnabled ?? ponderEnabled;
+    if (
+      effMode === "human-ai" &&
+      effLevel === "fun" &&
+      effPonder &&
+      gameRef.current === game &&
+      game.turn !== effAiColor &&
+      !game.isGameOver()
+    ) {
+      const req: WorkerRequest = { kind: "ponder", game: serializeGame(game) };
+      aiWorkerRef.current?.postMessage(req);
+    }
   }
 
   function togglePanel(key: "rules" | "log", isOpen: boolean) {
@@ -121,6 +170,8 @@ function App() {
       setTimerEnabled(saved.timerEnabled ?? false);
       setTimerMinutes(saved.timerMinutes ?? 10);
       clockRef.current = saved.clock ?? { w: (saved.timerMinutes ?? 10) * 60, b: (saved.timerMinutes ?? 10) * 60 };
+      setPonderEnabled(saved.ponderEnabled ?? true);
+      resetPonder(); // loading a save (ponder-spec.md §5.3, §6.2)
     }
     setLoaded(true);
     rerender();
@@ -129,7 +180,7 @@ function App() {
 
   useEffect(() => {
     if (!loaded) return;
-    saveGame(gameRef.current, mode, aiColor, level, autoFlip, timerEnabled, timerMinutes, clockRef.current);
+    saveGame(gameRef.current, mode, aiColor, level, autoFlip, timerEnabled, timerMinutes, clockRef.current, ponderEnabled);
   });
 
   // Resumes an AI-to-move position on load (e.g. reloading mid-game with the
@@ -219,10 +270,18 @@ function App() {
     }
     setAiThinking(false);
     rerender();
+    // The AI just moved and it's now the human's turn: start pondering the
+    // position the human is looking at (ponder-spec.md §3, §5.3).
+    maybeStartPonder(game, { mode: effMode, aiColor: effAiColor, level: effLevel });
     setTimeout(() => maybeAiMove(overrides), 0);
   }
 
   function applyAndAdvance(from: Square, to: Square, options: ApplyMoveOptions) {
+    // Must land before the historyRef push and well before the 30ms UI-paint
+    // delay in maybeAiMove — the whole point is getting the worker off the
+    // CPU at the earliest instant we know the human has committed to a move
+    // (ponder-spec.md §5.3's overriding priority, §1).
+    stopPonder();
     const game = gameRef.current;
     const snapshot = game.copy();
     try {
@@ -233,6 +292,10 @@ function App() {
         alert("Illegal move: " + e.message);
       }
       rerender();
+      // The move never applied, so it's still the human's turn on the same
+      // position — resume the chain we stopped above rather than leaving the
+      // rest of their thinking time unpondered.
+      maybeStartPonder(game);
       return;
     }
     // Only record the snapshot once the move actually applied.
@@ -262,6 +325,7 @@ function App() {
     }
     if (!restored) return;
     gameRef.current = restored;
+    resetPonder(); // takeback discards game state (ponder-spec.md §5.3, §6.2)
     setModal(null);
     setSelected(null);
     setTimeUp(null);
@@ -389,6 +453,7 @@ function App() {
     gameRef.current = new EvoChessGame();
     historyRef.current = [];
     clockHistoryRef.current = [];
+    resetPonder(); // new game discards the old position (ponder-spec.md §5.3, §6.2)
     setMode(newMode);
     setAiColor(newAiColor);
     setLevel(newLevel);
@@ -555,6 +620,7 @@ function App() {
                     if (!window.confirm("Switch mode and end the current game?")) return;
                     startNewGame(newMode, aiColor, level);
                   } else {
+                    resetPonder(); // mode change (ponder-spec.md §5.3, §6.2)
                     setMode(newMode);
                   }
                 }}
@@ -584,6 +650,7 @@ function App() {
                         if (!window.confirm("Switch colors and start a new game?")) return;
                         startNewGame(mode, newAiColor, level);
                       } else {
+                        resetPonder(); // side change (ponder-spec.md §5.3, §6.2)
                         setAiColor(newAiColor);
                       }
                     }}
@@ -604,7 +671,10 @@ function App() {
                     key={opt.value}
                     type="button"
                     className={level === opt.value ? "active" : ""}
-                    onClick={() => setLevel(opt.value)}
+                    onClick={() => {
+                      resetPonder(); // level change (ponder-spec.md §5.3, §6.2)
+                      setLevel(opt.value);
+                    }}
                   >
                     {opt.label}
                   </button>

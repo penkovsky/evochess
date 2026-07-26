@@ -13,7 +13,7 @@ const store = new Map<string, string>();
 };
 
 const save = (game: EvoChessGame) =>
-  saveGame(game, "human-ai", "b", "zen", false, false, 5, { w: 0, b: 0 });
+  saveGame(game, "human-ai", "b", "zen", false, false, 5, { w: 0, b: 0 }, true);
 
 describe("persistence of the evolved en passant", () => {
   beforeEach(() => {
@@ -45,5 +45,11 @@ describe("persistence of the evolved en passant", () => {
     const restored = loadGame()!.game;
     expect(restored.epEvolved).toBeNull();
     expect(restored.legalMoves().some((m) => m.evolvedEp)).toBe(false);
+  });
+
+  it("round-trips ponderEnabled", () => {
+    const game = new EvoChessGame();
+    saveGame(game, "human-ai", "b", "fun", false, false, 5, { w: 0, b: 0 }, false);
+    expect(loadGame()!.ponderEnabled).toBe(false);
   });
 });

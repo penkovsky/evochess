@@ -20,6 +20,9 @@ export interface SavedState extends SerializedGame {
   // Optional for backward compatibility with saves written before the clock's
   // remaining time was persisted (it used to reset to timerMinutes on reload).
   clock?: Record<Color, number>;
+  // Optional for backward compatibility with saves written before pondering
+  // existed (ponder-spec.md §5.5). Defaults to on when absent.
+  ponderEnabled?: boolean;
 }
 
 export function saveGame(
@@ -30,7 +33,8 @@ export function saveGame(
   autoFlip: boolean,
   timerEnabled: boolean,
   timerMinutes: number,
-  clock: Record<Color, number>
+  clock: Record<Color, number>,
+  ponderEnabled: boolean
 ) {
   const saved: SavedState = {
     ...serializeGame(game),
@@ -41,6 +45,7 @@ export function saveGame(
     timerEnabled,
     timerMinutes,
     clock,
+    ponderEnabled,
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
 }
@@ -54,6 +59,7 @@ export function loadGame(): {
   timerEnabled?: boolean;
   timerMinutes?: number;
   clock?: Record<Color, number>;
+  ponderEnabled?: boolean;
 } | null {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return null;
@@ -64,11 +70,12 @@ export function loadGame(): {
       mode: saved.mode,
       aiColor: saved.aiColor,
       // Default for saves written before difficulty was a named level.
-      level: saved.level ?? "zen",
+      level: saved.level ?? "fun",
       autoFlip: saved.autoFlip,
       timerEnabled: saved.timerEnabled,
       timerMinutes: saved.timerMinutes,
       clock: saved.clock,
+      ponderEnabled: saved.ponderEnabled,
     };
   } catch {
     return null;

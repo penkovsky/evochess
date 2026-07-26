@@ -9,7 +9,7 @@ import { EvoChessGame, ROOK_CHARGES, type ApplyMoveOptions } from "./game";
 import { evaluateNNUE, hasNnueWeights } from "./nnue";
 import { squareName } from "./bitboard";
 import { fromEvoGame, type EvoTurn } from "./evoBitboard";
-import { searchEvoTT, searchEvoTTTimed } from "./evoSearch";
+import { searchEvoTT, searchEvoTTTimed, armPonderDeadline, disarmPonderDeadline } from "./evoSearch";
 
 const PIECE_VALUES: Record<PieceSymbol, number> = {
   p: 1,
@@ -552,15 +552,18 @@ export function searchRoot(
   game: EvoChessGame,
   depth: number,
   seed: number,
-  useNnue = hasNnueWeights()
+  useNnue = hasNnueWeights(),
+  keepTT = false
 ): RootSearch {
   const start = performance.now();
   if (engineConfig.backend === "bitboard") {
     // Bitboard backend: integer-centipawn eval (PST or, with `useNnue`, the
     // accumulator), own Zobrist TT + iterative deepening. `seed` drives a root
     // tie-break so equal-value moves vary per game. Score is centipawns,
-    // side-to-move-relative → convert to pawn units.
-    const r = searchEvoTT(fromEvoGame(game), depth, seed, useNnue);
+    // side-to-move-relative → convert to pawn units. `keepTT` (ponder-spec.md
+    // §4.1) is the bitboard TT's own opt-in; the chessjs path below builds a
+    // fresh `Map` per search regardless, so it has nothing to keep.
+    const r = searchEvoTT(fromEvoGame(game), depth, seed, useNnue, keepTT);
     return {
       move: r.turn ? evoTurnToCandidate(r.turn) : null,
       score: r.score / 100,
@@ -606,11 +609,12 @@ export function searchRootTimed(
   timeMs: number,
   seed: number,
   maxDepth = 64,
-  useNnue = hasNnueWeights()
+  useNnue = hasNnueWeights(),
+  keepTT = false
 ): RootSearch & { depth: number } {
   const start = performance.now();
   if (engineConfig.backend === "bitboard") {
-    const r = searchEvoTTTimed(fromEvoGame(game), timeMs, maxDepth, seed, useNnue);
+    const r = searchEvoTTTimed(fromEvoGame(game), timeMs, maxDepth, seed, useNnue, keepTT);
     return {
       move: r.turn ? evoTurnToCandidate(r.turn) : null,
       score: r.score / 100,
@@ -671,15 +675,42 @@ const FUN_TIME_MS = 800;
 
 // Includes `depth`: the fixed depth for Easy/Zen, or the deepest completed
 // iteration for Fun's timed search — reported in the search-speed console log.
-export function searchLevel(game: EvoChessGame, level: AiLevel, seed: number): RootSearch & { depth: number } {
+//
+// `opts.keepTT` (ponder-spec.md §4.1/§5.4) threads down to the bitboard TT to
+// suppress its generation bump, so a search can continue from a warm cache
+// left by a prior ponder. `opts.timeMs` overrides Fun's `FUN_TIME_MS` budget —
+// this is what lets a 60ms ponder slice run through the same function as the
+// real 800ms search (ponder-spec.md §5.2) — and, when present, also arms the
+// in-search abort deadline (§4.2) so a single deep iterative-deepening pass
+// can't blow through the slice; when absent, the deadline stays unarmed and
+// the real search's timing is untouched. Both default away so every existing
+// caller is unaffected. Deliberately excludes `useNnue`: that stays derived
+// from `hasNnueWeights()` inside `searchRoot`/`searchRootTimed` so no caller —
+// ponder included — can make it diverge from the real search's evaluation.
+export function searchLevel(
+  game: EvoChessGame,
+  level: AiLevel,
+  seed: number,
+  opts: { timeMs?: number; keepTT?: boolean } = {}
+): RootSearch & { depth: number } {
   engineConfig.backend = "bitboard";
+  const keepTT = opts.keepTT ?? false;
   if (level === "fun") {
     // `useNnue` defaults to hasNnueWeights(), so Fun gets the net when the
     // worker has finished fetching it and PST until then.
-    return searchRootTimed(game, FUN_TIME_MS, seed);
+    if (opts.timeMs !== undefined) {
+      const timeMs = opts.timeMs;
+      armPonderDeadline(Date.now() + timeMs);
+      try {
+        return searchRootTimed(game, timeMs, seed, undefined, undefined, keepTT);
+      } finally {
+        disarmPonderDeadline();
+      }
+    }
+    return searchRootTimed(game, FUN_TIME_MS, seed, undefined, undefined, keepTT);
   }
   const depth = LEVEL_DEPTH[level];
-  return { ...searchRoot(game, depth, seed, false), depth };
+  return { ...searchRoot(game, depth, seed, false, keepTT), depth };
 }
 
 /**

@@ -165,6 +165,37 @@ const isDraw = (s: EvoPos): boolean =>
 
 let NODES = 0;
 
+// In-search abort for pondering (ponder-spec.md §4.2). `PONDER_DEADLINE` is
+// Infinity for every search that never arms it, so the deadline check below
+// costs one comparison against Infinity — always false — and `ABORT` never
+// flips; the real (non-ponder) search path is bit-identical to before this
+// was added. Polled every 2048 nodes rather than every node, since Date.now()
+// is not free and node counts run into the millions.
+let PONDER_DEADLINE = Infinity;
+let ABORT = false;
+
+function checkAbort(): boolean {
+  if (!ABORT && (NODES & 2047) === 0 && Date.now() >= PONDER_DEADLINE) ABORT = true;
+  return ABORT;
+}
+
+/**
+ * Arms the in-search abort deadline for the *next* search entry point called
+ * (`searchEvoTT`/`searchEvoTTTimed`) — `negamaxTT`/`quiesce` will unwind
+ * within ~2048 nodes of `deadlineMs` passing. Exported for the ponder
+ * slicing loop (ponder-spec.md §5.2, later milestones) and for direct testing
+ * here; unarmed by default, so ordinary callers are unaffected.
+ */
+export function armPonderDeadline(deadlineMs: number): void {
+  PONDER_DEADLINE = deadlineMs;
+}
+
+/** Disarms a deadline set by `armPonderDeadline`, restoring the untimed,
+ * unabortable behaviour every non-ponder search relies on. */
+export function disarmPonderDeadline(): void {
+  PONDER_DEADLINE = Infinity;
+}
+
 // Side-to-move-relative centipawns: PST when NNUE is off (White-positive
 // evalEvo flipped by `sign`), the net's pawn score (via the incremental
 // accumulator, nnue-accumulator-spec.md §7) scaled to centipawns when it's
@@ -193,6 +224,7 @@ function accumApply(p: number, s: EvoPos, t: EvoTurn, u: EvoUndo): void {
 
 function quiesce(s: EvoPos, alpha: number, beta: number, ply: number): number {
   NODES++;
+  if (checkAbort()) return 0;
   const turns = generateEvoTurns(s);
   if (turns.length === 0) return inCheck(s.pos) ? -(MATE - ply) : 0;
   if (isDraw(s)) return 0;
@@ -240,6 +272,7 @@ export interface EvoSearchResult {
 /** Fixed-depth negamax root over compound EvoChess turns. */
 export function searchEvo(s: EvoPos, depth: number): EvoSearchResult {
   NODES = 1;
+  ABORT = false; // a prior aborted search must not leak into this one
   USE_NNUE = false; // PST-only entry point; must not inherit a prior TT-search's flag
   let best = -Infinity, bestTurn: EvoTurn | null = null, alpha = -Infinity;
   for (const t of orderTurns(s, generateEvoTurns(s))) {
@@ -355,6 +388,7 @@ function orderTurnsHint(s: EvoPos, turns: EvoTurn[], hint: EvoTurn | null): EvoT
 
 function negamaxTT(s: EvoPos, depth: number, alpha: number, beta: number, ply: number): number {
   NODES++;
+  if (checkAbort()) return 0;
   if (depth === 0) return quiesce(s, alpha, beta, ply);
 
   const h = hashEvo(s);
@@ -382,14 +416,16 @@ function negamaxTT(s: EvoPos, depth: number, alpha: number, beta: number, ply: n
     accumApply(ply, s, t, u);
     const score = -negamaxTT(s, depth - 1, -beta, -alpha, ply + 1);
     undoEvoTurn(s, u);
+    if (ABORT) break; // subtree cut short: `best` here may not reflect all moves
     if (score > best) { best = score; bestTurn = t; }
     if (best > alpha) alpha = best;
     if (alpha >= beta) break;
   }
 
-  // Cache exact bounds, but never mate scores: their value is ply-dependent, so
-  // caching them across transpositions at different plies could skew the result.
-  if (best < MATE_THRESHOLD && best > -MATE_THRESHOLD) {
+  // Cache exact bounds, but never mate scores (see above), and never a node
+  // whose children were not all searched — an aborted subtree's `best` is a
+  // lower bound at best, not the value the position actually resolves to.
+  if (!ABORT && best < MATE_THRESHOLD && best > -MATE_THRESHOLD) {
     ttKey[i] = h;
     ttScore[i] = best;
     ttDepth[i] = depth;
@@ -411,6 +447,14 @@ function rootSearch(s: EvoPos, depth: number, hint: EvoTurn | null, rng?: () => 
     accumApply(0, s, t, u); // root is implicitly ply 0
     const score = -negamaxTT(s, depth - 1, -Infinity, -alpha, 1);
     undoEvoTurn(s, u);
+    // Same guard as `negamaxTT`'s move loop: an aborted child returns a
+    // placeholder (0, or -Infinity if it aborted before scoring its own first
+    // move, arriving here as +Infinity), which would make a garbage move look
+    // best. Pairs with — and must not be removed independently of — the
+    // `if (ABORT) break` in each iterative-deepening loop below: that one
+    // discards this whole pass, which is what keeps the *returned* result
+    // sane. Without it, this guard alone turns a garbage move into a null one.
+    if (ABORT) break;
     if (score > best) { best = score; bestTurn = t; }
     if (best > alpha) alpha = best;
   }
@@ -436,15 +480,23 @@ export function searchEvoTT(
   s: EvoPos,
   maxDepth: number,
   seed?: number,
-  useNnue = false
+  useNnue = false,
+  keepTT = false
 ): EvoSearchResult {
-  GEN++;
+  if (!keepTT) GEN++;
   NODES = 1;
+  ABORT = false; // a prior aborted search must not leak into this one
   beginNnueSearch(s, useNnue);
   const rng = seed === undefined ? undefined : mulberry32(seed);
   let result: EvoSearchResult = { score: 0, turn: null, nodes: 0 };
   for (let d = 1; d <= maxDepth; d++) {
-    result = rootSearch(s, d, result.turn, rng);
+    const r = rootSearch(s, d, result.turn, rng);
+    // An aborted pass searched only a prefix of the root moves, so its move
+    // and score are not comparable to a completed pass's; keep the last
+    // complete one. (`ABORT` can only be set by an armed ponder deadline, so
+    // this is unreachable on the move-playing path.)
+    if (ABORT) break;
+    result = r;
   }
   return { score: result.score, turn: result.turn, nodes: NODES };
 }
@@ -464,16 +516,23 @@ export function searchEvoTTTimed(
   timeMs: number,
   maxDepth = 64,
   seed?: number,
-  useNnue = false
+  useNnue = false,
+  keepTT = false
 ): EvoSearchTimedResult {
-  GEN++;
+  if (!keepTT) GEN++;
   NODES = 1;
+  ABORT = false; // a prior aborted search must not leak into this one
   beginNnueSearch(s, useNnue);
   const rng = seed === undefined ? undefined : mulberry32(seed);
   const deadline = Date.now() + timeMs;
   let best: EvoTurn | null = null, score = 0, depth = 0;
   for (let d = 1; d <= maxDepth; d++) {
     const r = rootSearch(s, d, best, rng);
+    // Keep the last *completed* iteration: an aborted pass's move and score
+    // are placeholders (see `rootSearch`), and `depth` is the number both
+    // the ponder's saturation cap and ponder-spec.md §7's mean-depth metric
+    // read, so reporting an unfinished pass would overstate it by a ply.
+    if (ABORT) break;
     best = r.turn; score = r.score; depth = d;
     if (score >= MATE_THRESHOLD || score <= -MATE_THRESHOLD) break; // mate found
     if (Date.now() >= deadline) break;
