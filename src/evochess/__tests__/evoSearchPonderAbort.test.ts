@@ -1,6 +1,6 @@
 /**
  * Milestone 1 of docs/ponder-spec.md §4.2/§9: the in-search abort that makes
- * pondering safe to interrupt. `armPonderDeadline`/`disarmPonderDeadline` are
+ * pondering safe to interrupt. `armSearchDeadline`/`disarmSearchDeadline` are
  * the test-facing (and, later, ponder-slice-facing) hooks around the
  * module-level deadline that `negamaxTT`/`quiesce` poll every 2048 nodes.
  *
@@ -16,19 +16,19 @@ import { fromEvoGame } from "../evoBitboard";
 import {
   searchEvoTT,
   searchEvoTTTimed,
-  armPonderDeadline,
-  disarmPonderDeadline,
+  armSearchDeadline,
+  disarmSearchDeadline,
 } from "../evoSearch";
 
 describe("evoSearch in-search abort (ponder-spec.md §4.2, milestone 1)", () => {
   it("an armed deadline stops a search that would otherwise run for seconds", () => {
     const pos = fromEvoGame(new EvoChessGame());
 
-    armPonderDeadline(Date.now() + 50);
+    armSearchDeadline(Date.now() + 50);
     const start = Date.now();
     const r = searchEvoTTTimed(pos, /* timeMs */ 5000, /* maxDepth */ 64);
     const elapsed = Date.now() - start;
-    disarmPonderDeadline();
+    disarmSearchDeadline();
 
     // Generous bound over the ~60ms poll granularity to absorb CI jitter,
     // while still being an order of magnitude below the 5000ms budget it
@@ -46,9 +46,9 @@ describe("evoSearch in-search abort (ponder-spec.md §4.2, milestone 1)", () => 
     // read as a found mate, and inflated the reported `depth` by a ply.
     for (const armMs of [5, 20, 40, 60, 100]) {
       const pos = fromEvoGame(new EvoChessGame());
-      armPonderDeadline(Date.now() + armMs);
+      armSearchDeadline(Date.now() + armMs);
       const r = searchEvoTTTimed(pos, /* timeMs */ armMs, /* maxDepth */ 64);
-      disarmPonderDeadline();
+      disarmSearchDeadline();
 
       expect(Number.isFinite(r.score), `armMs=${armMs} score=${r.score}`).toBe(true);
       // A completed iteration only; never the 64th, which is what the loop
@@ -62,9 +62,9 @@ describe("evoSearch in-search abort (ponder-spec.md §4.2, milestone 1)", () => 
     const before = searchEvoTT(fromEvoGame(new EvoChessGame()), 5);
 
     // Exercise the abort machinery in between, then disarm — must leave no trace.
-    armPonderDeadline(Date.now() + 50);
+    armSearchDeadline(Date.now() + 50);
     searchEvoTTTimed(pos, 5000, 64);
-    disarmPonderDeadline();
+    disarmSearchDeadline();
 
     const after = searchEvoTT(fromEvoGame(new EvoChessGame()), 5);
 

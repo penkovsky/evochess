@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 import { EvoChessGame } from "../game";
 import { fromEvoGame } from "../evoBitboard";
-import { searchEvoTTTimed, armPonderDeadline, disarmPonderDeadline } from "../evoSearch";
+import { searchEvoTTTimed, armSearchDeadline, disarmSearchDeadline } from "../evoSearch";
 import { __ponderTuningForTest } from "../ai.worker";
 
 describe("ponder tuning (ponder-spec.md §9, milestone 5)", () => {
@@ -38,11 +38,11 @@ describe("ponder tuning (ponder-spec.md §9, milestone 5)", () => {
     // first slice, which milestone 1's test already covers.
     const slices = Math.ceil(4000 / SLICE_MS);
     for (let i = 0; i < slices; i++) {
-      armPonderDeadline(Date.now() + SLICE_MS);
+      armSearchDeadline(Date.now() + SLICE_MS);
       const start = Date.now();
       searchEvoTTTimed(pos, SLICE_MS, 64, undefined, false, keepTT);
       const elapsed = Date.now() - start;
-      disarmPonderDeadline();
+      disarmSearchDeadline();
       keepTT = true;
       maxElapsed = Math.max(maxElapsed, elapsed);
     }

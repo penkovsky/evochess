@@ -76,6 +76,57 @@
   background: #2fa84f;
 }
 
+.board-container {
+  position: relative;
+}
+
+.score-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(0, 0, 0, 0.55);
+  color: white;
+  pointer-events: none;
+  z-index: 5;
+  border-radius: 4px;
+}
+
+.score-overlay-text {
+  font-size: 28px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+
+.play-again-btn {
+  pointer-events: auto;
+  padding: 10px 20px;
+  font-size: 16px;
+  font-weight: bold;
+  border: none;
+  border-radius: 8px;
+  background: #22aa77;
+  color: white;
+  cursor: pointer;
+  animation: play-again-pulse 1.6s ease-in-out infinite;
+}
+
+.play-again-btn:hover {
+  background: #269a6e;
+}
+
+@keyframes play-again-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+
 .board-status-underline.easy {
   background: #e6c229;
 }

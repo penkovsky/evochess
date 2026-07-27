@@ -3,9 +3,18 @@ import { Chessboard } from "react-chessboard";
 import type { Color, Square } from "chess.js";
 import { EvoChessGame, EvoChessError, N_MINOR, M_ROOK, ROOK_CHARGES, type ApplyMoveOptions, type ForcedPromo, type MinorPromo } from "./evochess/game";
 import { serializeGame } from "./evochess/serialize";
-import type { AiCandidate, AiSearchRequest, AiSearchResponse, NnueStatusMessage, WorkerRequest } from "./evochess/ai.worker";
+import type {
+  AiCandidate,
+  AiSearchRequest,
+  AiSearchResponse,
+  NnueStatusMessage,
+  PonderPredictionMessage,
+  PonderStatusMessage,
+  WorkerRequest,
+} from "./evochess/ai.worker";
 import type { AiLevel } from "./evochess/ai";
 import { saveGame, loadGame, clearSavedGame } from "./evochess/persistence";
+import { loadScores, recordResult, type Scores } from "./evochess/scores";
 import { Fireworks } from "./Fireworks";
 import "./App.css";
 
@@ -42,6 +51,13 @@ function App() {
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [showFireworks, setShowFireworks] = useState(false);
+  // Win/loss/draw record vs the AI, kept separately per level and persisted
+  // to localStorage (see evochess/scores.ts).
+  const [scores, setScores] = useState<Scores>(loadScores);
+  // Tracks which finished game instance has already been recorded, so the
+  // scores effect below records each game-over exactly once (new game /
+  // takeback reassign gameRef.current, giving a fresh instance to compare).
+  const scoredGameRef = useRef<EvoChessGame | null>(null);
   // Reflects the AI worker's NNUE weights fetch, purely for the status
   // underline color — the worker owns the weights and posts this once its
   // own `nnueReady` promise settles (see ai.worker.ts).
@@ -81,9 +97,30 @@ function App() {
   useEffect(() => {
     const worker = new Worker(new URL("./evochess/ai.worker.ts", import.meta.url), { type: "module" });
     aiWorkerRef.current = worker;
-    const handleStatus = (e: MessageEvent<NnueStatusMessage | unknown>) => {
+    const handleStatus = (e: MessageEvent<NnueStatusMessage | PonderStatusMessage | unknown>) => {
       const data = e.data as { kind?: string; ready?: boolean };
       if (data?.kind === "nnue-status") setNnueReady(!!data.ready);
+      if (data?.kind === "ponder-status") {
+        // The depth a ponder chain reaches is otherwise invisible — it posts
+        // no result, and its whole product is transposition-table entries.
+        // `phase` names which of the two searches a chain runs got there:
+        // "position" is the one the human is looking at, "predicted" the one
+        // their most likely reply leads to (ponder-spec.md §8).
+        const p = data as PonderStatusMessage;
+        console.log(
+          `[EvoChess ponder] phase=${p.phase} depth=${p.depth} elapsed=${p.elapsedMs}ms`
+        );
+      }
+      if (data?.kind === "ponder-prediction") {
+        // Whether the "predicted" phase above was pondering the position the
+        // human actually went on to reach. `actual` is printed on a hit too,
+        // so both outcomes read identically.
+        const p = data as PonderPredictionMessage;
+        console.log(
+          `[EvoChess ponder] predicted? ${p.hit ? "True" : "False"} ` +
+            `(guessed ${p.predicted} at depth ${p.depth}, played ${p.actual})`
+        );
+      }
     };
     worker.addEventListener("message", handleStatus);
     return () => {
@@ -175,6 +212,11 @@ function App() {
     const saved = loadGame();
     if (saved) {
       gameRef.current = saved.game;
+      // A finished game was already scored live before the page was saved/
+      // reloaded (the scores effect runs the moment isGameOver() first goes
+      // true). Mark it pre-scored so that effect doesn't record it again on
+      // every subsequent reload of the same finished game.
+      if (saved.game.isGameOver()) scoredGameRef.current = saved.game;
       setMode(saved.mode);
       setAiColor(saved.aiColor);
       setLevel(saved.level);
@@ -243,6 +285,25 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, mode, aiColor, gameRef.current, gameRef.current.moveLog.length]);
+
+  // Records the outcome of a finished vs-AI game against the current level's
+  // score, once per game instance.
+  useEffect(() => {
+    if (!loaded) return;
+    if (mode !== "human-ai") return;
+    const game = gameRef.current;
+    if (!game.isGameOver()) return;
+    if (scoredGameRef.current === game) return;
+    scoredGameRef.current = game;
+    const humanColor: Color = aiColor === "w" ? "b" : "w";
+    const outcome: "win" | "loss" | "draw" = !game.chess.isCheckmate()
+      ? "draw"
+      : game.turn === humanColor
+      ? "loss"
+      : "win";
+    setScores(recordResult(level, outcome));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, mode, aiColor, level, gameRef.current, gameRef.current.moveLog.length]);
 
   useEffect(() => {
     const el = logRef.current;
@@ -348,6 +409,11 @@ function App() {
     // game: let the AI make its first move again.
     if (mode === "human-ai" && !restored.isGameOver() && restored.turn === aiColor) {
       setTimeout(maybeAiMove, 0);
+    } else {
+      // The usual case: the rollback landed on the human's move, so start a
+      // fresh chain on the restored position rather than leaving this turn
+      // unpondered until the AI's next reply (ponder-spec.md §3, §5.3).
+      maybeStartPonder(restored);
     }
   }
 
@@ -492,6 +558,11 @@ function App() {
   } else if (aiThinking) status += " (AI thinking...)";
   const gameOver = game.isGameOver() || !!timeUp;
 
+  const currentRecord = scores[level];
+  const hasScoreHistory = currentRecord.wins + currentRecord.losses + currentRecord.draws > 0;
+  const showScoreOverlay = mode === "human-ai" && gameOver && hasScoreHistory;
+  const levelLabel = level.charAt(0).toUpperCase() + level.slice(1);
+
   const rw = game.rightsFor("w");
   const rb = game.rightsFor("b");
 
@@ -546,33 +617,45 @@ function App() {
             aiThinking ? " thinking" : level === "easy" ? " easy" : nnueReady ? " nnue-ready" : ""
           }`}
         />
-        <Chessboard
-          options={{
-            position: game.chess.fen(),
-            onPieceDrop,
-            onSquareClick,
-            squareRenderer: ({ square, children }) => {
-              const charges = game.rookCharges.get(square as Square);
-              return (
-                <div style={{ width: "100%", height: "100%", position: "relative", ...squareStyles[square] }}>
-                  {children}
-                  {charges !== undefined && (
-                    <span className={`rook-charge-badge ${charges === 1 ? "low" : ""}`}>{charges}</span>
-                  )}
-                </div>
-              );
-            },
-            boardOrientation:
-              mode === "human-human"
-                ? autoFlip && game.turn === "b"
+        <div className="board-container">
+          <Chessboard
+            options={{
+              position: game.chess.fen(),
+              onPieceDrop,
+              onSquareClick,
+              squareRenderer: ({ square, children }) => {
+                const charges = game.rookCharges.get(square as Square);
+                return (
+                  <div style={{ width: "100%", height: "100%", position: "relative", ...squareStyles[square] }}>
+                    {children}
+                    {charges !== undefined && (
+                      <span className={`rook-charge-badge ${charges === 1 ? "low" : ""}`}>{charges}</span>
+                    )}
+                  </div>
+                );
+              },
+              boardOrientation:
+                mode === "human-human"
+                  ? autoFlip && game.turn === "b"
+                    ? "black"
+                    : "white"
+                  : aiColor === "w"
                   ? "black"
-                  : "white"
-                : aiColor === "w"
-                ? "black"
-                : "white",
-            allowDragging: !(mode === "human-ai" && game.turn === aiColor) && !gameOver,
-          }}
-        />
+                  : "white",
+              allowDragging: !(mode === "human-ai" && game.turn === aiColor) && !gameOver,
+            }}
+          />
+          {showScoreOverlay && (
+            <div className="score-overlay">
+              <div className="score-overlay-text">
+                {levelLabel} {currentRecord.wins}-{currentRecord.losses}-{currentRecord.draws}
+              </div>
+              <button className="play-again-btn" onClick={() => startNewGame(mode, aiColor, level)}>
+                Play again?
+              </button>
+            </div>
+          )}
+        </div>
         {renderActionPicker("action-picker-below-board")}
         <button className="toggle-panel-btn" onClick={() => setHidePanel((v) => !v)}>
           {hidePanel ? "Show widgets" : "Hide widgets"}
@@ -689,8 +772,16 @@ function App() {
                     type="button"
                     className={level === opt.value ? "active" : ""}
                     onClick={() => {
-                      resetPonder(); // level change (ponder-spec.md §5.3, §6.2)
-                      setLevel(opt.value);
+                      const newLevel = opt.value;
+                      if (newLevel === level) return;
+                      if (historyRef.current.length > 0) {
+                        // eslint-disable-next-line no-alert
+                        if (!window.confirm("Switch level and end the current game?")) return;
+                        startNewGame(mode, aiColor, newLevel);
+                      } else {
+                        resetPonder(); // level change (ponder-spec.md §5.3, §6.2)
+                        setLevel(newLevel);
+                      }
                     }}
                   >
                     {opt.label}

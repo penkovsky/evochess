@@ -255,6 +255,34 @@ between-iterations behaviour exactly. (That search can overshoot its budget for 
 structural reason, and the same mechanism would fix it — but that is a separate change
 with its own re-baselining cost, and is deliberately not bundled here.)
 
+> **[Amended — that separate change has since been made, and the parenthesis above was
+> understating it.]** The overshoot it contemplates was measured at **4552ms for a
+> nominally 800ms Fun search** in the browser, and 2.9-3.1s across the corpus — a budget
+> checked between iterations bounds nothing, because the iteration that blows it is the one
+> already running. `searchLevel` now arms this same abort on the move-playing path, at a
+> `TIMED_HARD_MS` ceiling (1200ms) rather than at the budget, so an iteration in flight can
+> still finish and count while a runaway one is cut off. Consequences, all of them
+> deliberate:
+>
+> - `PONDER_DEADLINE` is renamed `SEARCH_DEADLINE`, and `armPonderDeadline` /
+>   `disarmPonderDeadline` to `armSearchDeadline` / `disarmSearchDeadline`. It is no longer
+>   a ponder mechanism.
+> - The move-playing path is **no longer bit-identical** to pre-ponder behaviour, which
+>   several notes in this document promise. Those promises were about not perturbing the
+>   real search *as a side effect of adding pondering*; this perturbs it on purpose, to fix
+>   a user-visible latency bug. An unarmed search is still bit-identical, and that is what
+>   §9 milestone 1's guard actually tests.
+> - The null-move hazard §4.2 warns about above becomes reachable, exactly as predicted.
+>   `searchEvoTTTimed` now falls back to the first statically-ordered turn if the ceiling
+>   fires before any iteration completes: a poor move beats a stalled game.
+> - The budget drops 800ms → 400ms, measured free (`bench/bench11_move_latency.ts`):
+>   stopping at 280/400/560/800ms reaches identical depth, because an iteration started
+>   after ~400ms cannot finish before the ceiling and is discarded when it fires.
+>
+> Result over 8 corpus positions × PST/NNUE: max 3120ms → **1037ms**, mean 1654ms →
+> **728ms**, at a cost of about one ply (typically 6→5 for NNUE). Guard:
+> `src/evochess/__tests__/moveLatency.test.ts`.
+
 Slicing is still needed *on top* of the abort, to yield the event loop: each slice ends,
 `setTimeout(0)` lets the worker drain its message queue, and the next slice starts. Each
 slice restarts iterative deepening from depth 1, which sounds wasteful but is not — the
@@ -631,6 +659,54 @@ Two findings drove the tuning:
   plateau (for slower devices or higher-branching positions) while cutting most of the
   measured idle-CPU tail.
 
+**[Amended] What the plateau is, and is not.** The reading above left the *cause* of the
+plateau open, and the obvious suspect was the chain restarting its deepening ladder at
+`d=1` in every slice: once a `d=n` root pass no longer fits in `SLICE_MS` it aborts, its
+result is discarded (§4.2), and the next slice starts over — so, on that theory, the chain
+re-walks the same ladder forever and can never complete anything deeper. Measured
+(`bench/bench8_ponder_resume.ts`), **that theory is wrong**, and two numbers say so:
+
+- Carrying the ladder position across slices instead of restarting it (`startDepth` on
+  `searchEvoTTTimed`, `ai.worker.ts` `ponderSlice`) moves the plateau by **zero to one ply**
+  across 4 positions × 2 evaluations. The repeated shallow iterations were nearly free —
+  against a warm TT they are answered mostly out of the table, so they were never where a
+  slice's time went.
+- **One uninterrupted 7s search reaches depth 8–9 where 7s of 40ms slices reaches 7–8.**
+  So slicing costs about a ply, but resuming recovers almost none of it: the lost work is
+  work no table holds. Quiescence is never TT-cached (`evoSearch.ts` `quiesce` neither
+  probes nor stores), and the TT is always-replace with no depth preference, so deep
+  entries are evicted by the shallow ones above them. Each aborted attempt at `d=n` redoes
+  most of what the last one did.
+
+The plateau is therefore mostly intrinsic to the search at this branching factor, not an
+artifact of the chain's shape. Resuming is kept — it is strictly less wasted work and
+makes the ladder position explicit — but it is not the lever. Regression guard:
+`src/evochess/__tests__/evoSearchResume.test.ts`, which asserts the contract — resuming
+never costs depth, and never leaks its root-ordering state into a cold search — rather than
+a strength claim it cannot support.
+
+**[Amended again] A longer `SLICE_MS` does not buy the missing ply either.** The obvious
+follow-up to the paragraph above — if slicing costs a ply, slice less often — was measured
+and does not hold (`bench/bench10_slice_ms.ts`, sweeping 40/60/90/150ms through the real
+two-phase chain over 3 corpus positions × PST/NNUE):
+
+| `SLICE_MS` | depth reached (unchanged across the sweep) | worst slice, i.e. the stop-latency bound |
+|---:|---|---:|
+| 40 | phase 1 `6/7/7`, phase 2 `8/6/7` (PST) | 65–84ms |
+| 60 | identical | 86–100ms |
+| 90 | identical | 115–129ms |
+| 150 | identical but for one position a ply *worse* | 177–198ms |
+
+Depth is flat from 40 to 90ms while the worst-case pause after the human moves grows by
+~50ms — a strictly losing trade, so `SLICE_MS` stays at 40. The sliced-vs-continuous gap is
+real (the same benchmark's uninterrupted 7s searches reach `8/8/9` PST, `8/8/8` NNUE) but
+it does not close at any slice length short enough to keep the UI responsive. What is left,
+then, is the work the abort discards being unrecoverable in the first place: TT-ing
+quiescence, or a depth-aware replacement policy so an aborted attempt accumulates instead
+of being re-derived. Beyond that the honest answer is that raising ponder depth means
+raising search depth generally — null-move pruning, late-move reductions — which would pay
+off in the real 800ms search too, not only while pondering.
+
 This is not an Elo measurement — per §7's own priority note, milestone 5 is judged on
 stop-latency, not strength, and the regression guard for it is
 `src/evochess/__tests__/ponderTuning.test.ts`, which chains slices past the depth plateau at
@@ -647,6 +723,48 @@ miss, and it needs a real PV — which `rootSearch` (`evoSearch.ts:405-418`) doe
 currently produce; it returns only the root move. Everything built here (the worker
 protocol, slicing, TT continuity) is a prerequisite for it, so this is a natural follow-up,
 not a competing design.
+
+> **[Amended — implemented, in the half that does not need a PV.]** The *instant answer* is
+> still out of scope and still needs a PV. The TT-warming half does not: predicting the
+> reply needs only the root move `rootSearch` already returns, and "search that position"
+> means nothing more than pointing the next slice at it, because the payoff arrives through
+> the shared table like every other part of this feature. `ponderSlice` now spends
+> `PONDER_PREDICT_MS` (3.5s of the 7s budget) on the position the human is looking at, then
+> plays the move that search likes best there and spends the rest on the position it leads
+> to. The budget is split rather than handed over wholesale because the two halves warm
+> different things and only one of them can be wrong: phase 1 deepens every reply at once,
+> so it pays off however the human moves, while phase 2 concentrates on one line and pays
+> only on a hit.
+>
+> **Measured** (`bench/bench9_ponder_hit.ts`, 4 corpus positions × PST/NNUE, reporting the
+> depth a real 800ms search reaches after each chain):
+>
+> - **On a hit: +1 ply in 3 of 8 cases, −1 in 1, unchanged in 4.** Modest, and in the same
+>   range as everything else here — a chain's product is one warm table, and depth 8 in 800ms
+>   is close to what this search can do at any warmth (see §9's amendment).
+> - **On a miss: identical in 8 of 8 cases.** This is the number that made the split safe to
+>   ship. Phase 2 costs a miss nothing, because the 3.5s it takes from phase 1 is 3.5s phase 1
+>   was measured not to be using — the breadth chain has already plateaued by then.
+>
+> Not tuned against a hit rate: the opponent is a human, so the rate that decides the real
+> value of this cannot be measured from self-play, and a hit-rate figure derived from the
+> engine predicting itself would be a number about the engine, not about the feature. The
+> split is the conservative choice given that, and `PONDER_PREDICT_MS` is where to turn if
+> that assumption ever gets evidence. Guard:
+> `src/evochess/__tests__/aiWorkerPonder.test.ts`, which asserts the handover happens and
+> lands on a legal successor of the pondered position.
+>
+> **[Further amended — the hit rate is now observable.]** The paragraph above is right that
+> the rate cannot be measured *from self-play*, but it can be measured from real play, which
+> is where it matters. On the first real search after a chain committed, the worker compares
+> that search's root against the position phase 2 pondered and posts a `ponder-prediction`
+> verdict; `App.tsx` logs it as `predicted? True/False`. Compared by resulting position, not
+> by move — what phase 2 warmed is a subtree, so two routes into it are a hit. The verdict is
+> posted before the search runs (so a slow search cannot swallow it) and exactly once per
+> prediction; `reset` drops an unsettled one, since the position it was made from is gone.
+> This is instrumentation only — nothing reads it back — but it is the evidence
+> `PONDER_PREDICT_MS` was explicitly left waiting for. Guard: the same test file, which drives
+> a chain past handover and then plays both into and away from the predicted line.
 
 **NNUE-specific precomputation.** Worth stating because it is the intuitive guess: there is
 no meaningful win in precomputing accumulator state. The accumulator is refreshed once per

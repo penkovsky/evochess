@@ -9,7 +9,7 @@ import { EvoChessGame, ROOK_CHARGES, type ApplyMoveOptions } from "./game";
 import { evaluateNNUE, hasNnueWeights } from "./nnue";
 import { squareName } from "./bitboard";
 import { fromEvoGame, type EvoTurn } from "./evoBitboard";
-import { searchEvoTT, searchEvoTTTimed, armPonderDeadline, disarmPonderDeadline } from "./evoSearch";
+import { searchEvoTT, searchEvoTTTimed, armSearchDeadline, disarmSearchDeadline } from "./evoSearch";
 
 const PIECE_VALUES: Record<PieceSymbol, number> = {
   p: 1,
@@ -603,6 +603,12 @@ export function searchRoot(
  * equal-time strength match is meant to expose. A depth may overshoot the
  * budget by up to its own duration; both engines overshoot alike, so the
  * comparison stays fair.
+ *
+ * `startDepth` resumes the deepening ladder instead of restarting it at 1, and
+ * is only meaningful alongside `keepTT` — `searchEvoTTTimed` documents the
+ * contract this forwards. The reference backend honours it too, but has no
+ * persistent table to resume against, so there it only skips (already cheap)
+ * shallow iterations at the cost of a cold deep one.
  */
 export function searchRootTimed(
   game: EvoChessGame,
@@ -610,11 +616,12 @@ export function searchRootTimed(
   seed: number,
   maxDepth = 64,
   useNnue = hasNnueWeights(),
-  keepTT = false
+  keepTT = false,
+  startDepth = 1
 ): RootSearch & { depth: number } {
   const start = performance.now();
   if (engineConfig.backend === "bitboard") {
-    const r = searchEvoTTTimed(fromEvoGame(game), timeMs, maxDepth, seed, useNnue, keepTT);
+    const r = searchEvoTTTimed(fromEvoGame(game), timeMs, maxDepth, seed, useNnue, keepTT, startDepth);
     return {
       move: r.turn ? evoTurnToCandidate(r.turn) : null,
       score: r.score / 100,
@@ -631,7 +638,7 @@ export function searchRootTimed(
   let score = 0;
   let depth = 0;
 
-  for (let d = 1; d <= maxDepth; d++) {
+  for (let d = startDepth < 1 ? 1 : startDepth; d <= maxDepth; d++) {
     let s: number, candidate: CandidateTurn | null;
     try {
       [s, candidate] = negamax(game, d, -Infinity, Infinity, 0, ctx);
@@ -676,7 +683,41 @@ export type AiLevel = "easy" | "zen" | "fun";
 // loaded, falling back to PST when none is (e.g. weights are still fetching
 // in the worker).
 const LEVEL_DEPTH: Record<"easy", number> = { easy: 4 };
-const TIMED_TIME_MS = 800;
+
+// Zen/Fun time management. Two numbers, because one is not enough:
+//
+// `TIMED_TIME_MS` is the *budget* — after this much has elapsed, no new
+// deepening iteration is started. On its own it bounds nothing, since the
+// iteration that blows it is the one already running: measured in the browser
+// at Fun, a nominally 800ms search took 4552ms (depth 6, NNUE, 469k nodes).
+// The move does arrive, so nothing breaks; it just feels broken.
+//
+// `TIMED_HARD_MS` is the *ceiling* — the wall-clock limit on a move, enforced
+// inside the search by the in-search abort (evoSearch.ts `armSearchDeadline`),
+// which unwinds mid-iteration and discards the unfinished pass. It is armed
+// `ABORT_SLACK_MS` early because the abort polls its deadline every 2048
+// nodes and so overshoots by up to one poll interval plus the unwind
+// (measured ~25-45ms, bench/bench10_slice_ms.ts; given room here for slower
+// devices). What has to hold is the total, not the arming point.
+//
+// The budget is 400, not the original 800: measured over 8 corpus positions ×
+// PST/NNUE (bench/bench11_move_latency.ts), stopping at 280/400/560/800ms
+// reaches *identical* depth, because an iteration started after ~400ms cannot
+// finish before the ceiling and is discarded when the ceiling fires. Carrying
+// the budget to 800 therefore bought no depth and cost ~300ms of thrown-away
+// work on every move — mean latency 1005ms against 694ms at 400.
+// The ceiling is 1200, not 1100: measured over the same 8-position corpus
+// (bench/bench11_move_latency.ts), 1100->1200 buys an extra ply on 1-2 of 8
+// positions (an iteration starting just before the 400ms budget needs ~100ms
+// more to finish); 1200->1300 buys nothing further, just 100ms of idle
+// latency. 1200 is the ceiling that actually earns its cost.
+const TIMED_TIME_MS = 400;
+const TIMED_HARD_MS = 1_200;
+const ABORT_SLACK_MS = 80;
+
+// Exposed so the latency regression test asserts against the real constants
+// rather than a copy that can drift out of step with them.
+export const __timingForTest = { TIMED_TIME_MS, TIMED_HARD_MS, ABORT_SLACK_MS };
 
 // Includes `depth`: the fixed depth for Easy, or the deepest completed
 // iteration for Zen/Fun's timed search — reported in the search-speed console log.
@@ -684,11 +725,16 @@ const TIMED_TIME_MS = 800;
 // `opts.keepTT` (ponder-spec.md §4.1/§5.4) threads down to the bitboard TT to
 // suppress its generation bump, so a search can continue from a warm cache
 // left by a prior ponder. `opts.timeMs` overrides the timed levels'
-// `TIMED_TIME_MS` budget — this is what lets a 60ms ponder slice run through
-// the same function as the real 800ms search (ponder-spec.md §5.2) — and,
-// when present, also arms the in-search abort deadline (§4.2) so a single
-// deep iterative-deepening pass can't blow through the slice; when absent,
-// the deadline stays unarmed and the real search's timing is untouched. Both
+// `TIMED_TIME_MS` budget — this is what lets a 40ms ponder slice run through
+// the same function as the real 800ms search (ponder-spec.md §5.2). Either
+// way the in-search abort (§4.2) is armed, since a budget alone bounds
+// nothing: at the slice deadline for a ponder, at `TIMED_HARD_MS` for a real
+// search.
+// `opts.startDepth` resumes the deepening ladder rather than restarting it at
+// 1 — what lets a chain of short ponder slices accumulate depth instead of
+// re-walking d=1..n every slice; only meaningful with `keepTT`, whose warm
+// table is what makes the skipped iterations already-paid-for (see
+// `searchEvoTTTimed`). All three
 // default away so every existing caller is unaffected. Deliberately excludes
 // `useNnue`: that stays derived from `hasNnueWeights()` inside
 // `searchRoot`/`searchRootTimed` so no caller — ponder included — can make it
@@ -697,23 +743,25 @@ export function searchLevel(
   game: EvoChessGame,
   level: AiLevel,
   seed: number,
-  opts: { timeMs?: number; keepTT?: boolean } = {}
+  opts: { timeMs?: number; keepTT?: boolean; startDepth?: number } = {}
 ): RootSearch & { depth: number } {
   engineConfig.backend = "bitboard";
   const keepTT = opts.keepTT ?? false;
   if (level === "zen" || level === "fun") {
     // `useNnue` defaults to hasNnueWeights(), so these levels get the net when
     // the worker has finished fetching it and PST until then.
-    if (opts.timeMs !== undefined) {
-      const timeMs = opts.timeMs;
-      armPonderDeadline(Date.now() + timeMs);
-      try {
-        return searchRootTimed(game, timeMs, seed, undefined, undefined, keepTT);
-      } finally {
-        disarmPonderDeadline();
-      }
+    // A ponder slice's budget *is* its ceiling — it has no move to return, so
+    // an unfinished iteration costs it nothing to discard. A real search
+    // budgets `TIMED_TIME_MS` and is capped at `TIMED_HARD_MS`, the gap being
+    // what lets an iteration already in flight finish and count.
+    const timeMs = opts.timeMs ?? TIMED_TIME_MS;
+    const ceiling = opts.timeMs !== undefined ? timeMs : TIMED_HARD_MS - ABORT_SLACK_MS;
+    armSearchDeadline(Date.now() + ceiling);
+    try {
+      return searchRootTimed(game, timeMs, seed, undefined, undefined, keepTT, opts.startDepth);
+    } finally {
+      disarmSearchDeadline();
     }
-    return searchRootTimed(game, TIMED_TIME_MS, seed, undefined, undefined, keepTT);
   }
   const depth = LEVEL_DEPTH[level];
   return { ...searchRoot(game, depth, seed, false, keepTT), depth };

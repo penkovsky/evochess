@@ -165,35 +165,44 @@ const isDraw = (s: EvoPos): boolean =>
 
 let NODES = 0;
 
-// In-search abort for pondering (ponder-spec.md §4.2). `PONDER_DEADLINE` is
-// Infinity for every search that never arms it, so the deadline check below
-// costs one comparison against Infinity — always false — and `ABORT` never
-// flips; the real (non-ponder) search path is bit-identical to before this
-// was added. Polled every 2048 nodes rather than every node, since Date.now()
-// is not free and node counts run into the millions.
-let PONDER_DEADLINE = Infinity;
+// In-search abort (ponder-spec.md §4.2). Built for pondering, but it is the
+// only thing in this file that can stop a search *inside* an iteration — the
+// iterative-deepening loops below check their budget between passes, so
+// without it a search's true cost is "budget, plus however long one more
+// iteration takes", which measured at 4.5s against a 800ms budget. Both the
+// ponder slice loop and the real move-playing search now arm it (ai.ts
+// `searchLevel`).
+//
+// `SEARCH_DEADLINE` is Infinity for every search that never arms it, so the
+// check below costs one comparison against Infinity — always false — and
+// `ABORT` never flips; an unarmed search is bit-identical to one run before
+// this existed. Polled every 2048 nodes rather than every node, since
+// Date.now() is not free and node counts run into the millions.
+let SEARCH_DEADLINE = Infinity;
 let ABORT = false;
 
 function checkAbort(): boolean {
-  if (!ABORT && (NODES & 2047) === 0 && Date.now() >= PONDER_DEADLINE) ABORT = true;
+  if (!ABORT && (NODES & 2047) === 0 && Date.now() >= SEARCH_DEADLINE) ABORT = true;
   return ABORT;
 }
 
 /**
  * Arms the in-search abort deadline for the *next* search entry point called
  * (`searchEvoTT`/`searchEvoTTTimed`) — `negamaxTT`/`quiesce` will unwind
- * within ~2048 nodes of `deadlineMs` passing. Exported for the ponder
- * slicing loop (ponder-spec.md §5.2, later milestones) and for direct testing
- * here; unarmed by default, so ordinary callers are unaffected.
+ * within ~2048 nodes of `deadlineMs` passing. This is a *hard ceiling*, not a
+ * budget: the search stops mid-iteration and the unfinished iteration is
+ * discarded, so arm it above the budget the caller actually wants to spend
+ * (ai.ts `searchLevel`) rather than at it. Unarmed by default, so callers that
+ * want the old "budget plus one whole iteration" behaviour keep it.
  */
-export function armPonderDeadline(deadlineMs: number): void {
-  PONDER_DEADLINE = deadlineMs;
+export function armSearchDeadline(deadlineMs: number): void {
+  SEARCH_DEADLINE = deadlineMs;
 }
 
-/** Disarms a deadline set by `armPonderDeadline`, restoring the untimed,
- * unabortable behaviour every non-ponder search relies on. */
-export function disarmPonderDeadline(): void {
-  PONDER_DEADLINE = Infinity;
+/** Disarms a deadline set by `armSearchDeadline`, restoring the untimed,
+ * unabortable behaviour an unarmed search relies on. */
+export function disarmSearchDeadline(): void {
+  SEARCH_DEADLINE = Infinity;
 }
 
 // Side-to-move-relative centipawns: PST when NNUE is off (White-positive
@@ -369,6 +378,15 @@ const ttGen = new Int32Array(TT_SIZE);
 const ttMoveArr: (EvoTurn | null)[] = table64(TT_SIZE, () => 0n).map(() => null);
 let GEN = 0;
 
+// Best root move of the last *completed* root pass, with the position it
+// belongs to. `rootSearch` never writes a TT entry for the root itself, so
+// without this a search resumed mid-chain (`startDepth` below) would re-enter
+// at depth d with no first-move hint and re-derive one from static ordering
+// alone. Ordering-only: it can change how many nodes a pass visits, never what
+// it returns. Cleared on every generation bump, so it lives exactly as long as
+// the TT it was derived from and a cold search is unaffected by a prior one.
+let rootHint: { key: bigint; turn: EvoTurn } | null = null;
+
 const EXACT = 1, LOWER = 2, UPPER = 3;
 const MATE_THRESHOLD = MATE - 1000;
 
@@ -483,7 +501,7 @@ export function searchEvoTT(
   useNnue = false,
   keepTT = false
 ): EvoSearchResult {
-  if (!keepTT) GEN++;
+  if (!keepTT) { GEN++; rootHint = null; }
   NODES = 1;
   ABORT = false; // a prior aborted search must not leak into this one
   beginNnueSearch(s, useNnue);
@@ -510,6 +528,16 @@ export interface EvoSearchTimedResult extends EvoSearchResult {
  * depth: deepens until `timeMs` elapses (checked between iterations, so each
  * reported depth completed fully), or a mate is found. Mirrors `ai.ts`
  * `searchRootTimed` so the two backends can be A/B'd at equal time.
+ *
+ * `startDepth` resumes the deepening ladder rather than restarting it at 1.
+ * It is only meaningful together with `keepTT`: it assumes the shallower
+ * iterations were already completed against *this* table by an earlier call,
+ * which is what a chained ponder does (ai.worker.ts `ponderSlice`). Passing it
+ * against a cold table just pays for a deep first iteration with no cache.
+ * The returned `depth` is the deepest iteration that completed *in this call*,
+ * or 0 if the budget/abort cut the very first one short — so a caller chaining
+ * calls resumes at `depth + 1` on progress and retries the same depth
+ * otherwise, against a table the failed attempt still deepened.
  */
 export function searchEvoTTTimed(
   s: EvoPos,
@@ -517,16 +545,21 @@ export function searchEvoTTTimed(
   maxDepth = 64,
   seed?: number,
   useNnue = false,
-  keepTT = false
+  keepTT = false,
+  startDepth = 1
 ): EvoSearchTimedResult {
-  if (!keepTT) GEN++;
+  if (!keepTT) { GEN++; rootHint = null; }
   NODES = 1;
   ABORT = false; // a prior aborted search must not leak into this one
   beginNnueSearch(s, useNnue);
   const rng = seed === undefined ? undefined : mulberry32(seed);
   const deadline = Date.now() + timeMs;
-  let best: EvoTurn | null = null, score = 0, depth = 0;
-  for (let d = 1; d <= maxDepth; d++) {
+  const rootKey = hashEvo(s);
+  // A resumed call inherits the previous call's root move as its first-move
+  // hint (see `rootHint`); a fresh one starts with none, exactly as before.
+  let best: EvoTurn | null = rootHint !== null && rootHint.key === rootKey ? rootHint.turn : null;
+  let score = 0, depth = 0;
+  for (let d = startDepth < 1 ? 1 : startDepth; d <= maxDepth; d++) {
     const r = rootSearch(s, d, best, rng);
     // Keep the last *completed* iteration: an aborted pass's move and score
     // are placeholders (see `rootSearch`), and `depth` is the number both
@@ -534,8 +567,18 @@ export function searchEvoTTTimed(
     // read, so reporting an unfinished pass would overstate it by a ply.
     if (ABORT) break;
     best = r.turn; score = r.score; depth = d;
+    if (best !== null) rootHint = { key: rootKey, turn: best };
     if (score >= MATE_THRESHOLD || score <= -MATE_THRESHOLD) break; // mate found
     if (Date.now() >= deadline) break;
+  }
+  // Last resort: an armed ceiling fired before even depth 1 completed, so no
+  // iteration produced a move. Returning null here would leave the caller with
+  // nothing to play — a statically-ordered move is a poor move, but it is a
+  // legal one, and the alternative is a stalled game. `depth` stays 0, which
+  // is the honest report: nothing was searched to completion.
+  if (best === null) {
+    const turns = generateEvoTurns(s);
+    if (turns.length > 0) best = orderTurns(s, turns)[0];
   }
   return { score, turn: best, nodes: NODES, depth };
 }

@@ -43,13 +43,28 @@ This section describes how to train such a neural network.
 
 ### Step 1 - generate (or relabel) data
 
+`training/scale_loop.sh` is the maintained way to generate self-play data. It
+runs the natural/augmented/seeded generation mix in the right composition,
+then trains and and matches each doubling round automatically:
+
 ```bash
-./more_data.sh
+training/scale_loop.sh [base_positions] [max_rounds] [games] [depth] [shards]
 ```
+
+Data lands under `training/data-scale/`, checkpoints under
+`training/checkpoints/scale-r<N>*`, and a summary accumulates in
+`training/data-scale/scale-log.tsv`. It's resumable — rerun it and it picks up
+from the last completed round.
+
+To relabel existing data instead of generating more:
 
 ```bash
 training/relabel_batch.sh training/data training/data-relabel-pst5 5
 ```
+
+Steps 1a-4 below are the manual train/match flow, used for the relabeled
+data path above. `scale_loop.sh` already runs the equivalent steps for you
+when generating new data.
 
 ### Step 1a - retrain on the relabeled data
 
