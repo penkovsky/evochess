@@ -88,11 +88,39 @@
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: rgba(0, 0, 0, 0.55);
+  background-color: rgba(0, 0, 0, 0);
   color: white;
   pointer-events: none;
   z-index: 5;
   border-radius: 4px;
+  /* Dims gradually over the 2.5s grace period, so the final position stays
+     readable while the overlay creeps in. */
+  animation: score-overlay-dim 2500ms ease-in forwards;
+}
+
+@keyframes score-overlay-dim {
+  from {
+    background-color: rgba(0, 0, 0, 0);
+  }
+  to {
+    background-color: rgba(0, 0, 0, 0.55);
+  }
+}
+
+/* Contents only appear once the dim has finished (see `.revealed`). */
+.score-overlay-text,
+.score-overlay .play-again-btn {
+  opacity: 0;
+  transition: opacity 450ms ease;
+}
+
+.score-overlay.revealed .score-overlay-text,
+.score-overlay.revealed .play-again-btn {
+  opacity: 1;
+}
+
+.score-overlay:not(.revealed) .play-again-btn {
+  pointer-events: none;
 }
 
 .score-overlay-text {

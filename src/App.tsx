@@ -58,6 +58,10 @@ function App() {
   // scores effect below records each game-over exactly once (new game /
   // takeback reassign gameRef.current, giving a fresh instance to compare).
   const scoredGameRef = useRef<EvoChessGame | null>(null);
+  // The score overlay covers the board, so its dim fades in over 2.5s and the
+  // score itself is only revealed at the end — long enough to see the final
+  // position / mating move.
+  const [scoreOverlayReady, setScoreOverlayReady] = useState(false);
   // Reflects the AI worker's NNUE weights fetch, purely for the status
   // underline color — the worker owns the weights and posts this once its
   // own `nnueReady` promise settles (see ai.worker.ts).
@@ -304,6 +308,18 @@ function App() {
     setScores(recordResult(level, outcome));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, mode, aiColor, level, gameRef.current, gameRef.current.moveLog.length]);
+
+  // Reveals the score 2.5s after the game ends (matching the CSS dim-in), and
+  // hides it again as soon as play resumes (new game / takeback).
+  const gameIsOver = gameRef.current.isGameOver() || !!timeUp;
+  useEffect(() => {
+    if (!gameIsOver) {
+      setScoreOverlayReady(false);
+      return;
+    }
+    const id = setTimeout(() => setScoreOverlayReady(true), 2500);
+    return () => clearTimeout(id);
+  }, [gameIsOver]);
 
   useEffect(() => {
     const el = logRef.current;
@@ -556,10 +572,12 @@ function App() {
     const winner = timeUp === "w" ? "Black" : "White";
     status = `${timeUp === "w" ? "White" : "Black"} ran out of time. ${winner} wins!`;
   } else if (aiThinking) status += " (AI thinking...)";
-  const gameOver = game.isGameOver() || !!timeUp;
+  const gameOver = gameIsOver;
 
   const currentRecord = scores[level];
   const hasScoreHistory = currentRecord.wins + currentRecord.losses + currentRecord.draws > 0;
+  // The overlay mounts as soon as the game ends and dims in over 2.5s (CSS);
+  // `scoreOverlayReady` then reveals the score text and the button.
   const showScoreOverlay = mode === "human-ai" && gameOver && hasScoreHistory;
   const levelLabel = level.charAt(0).toUpperCase() + level.slice(1);
 
@@ -646,7 +664,7 @@ function App() {
             }}
           />
           {showScoreOverlay && (
-            <div className="score-overlay">
+            <div className={`score-overlay${scoreOverlayReady ? " revealed" : ""}`}>
               <div className="score-overlay-text">
                 {levelLabel} {currentRecord.wins}-{currentRecord.losses}-{currentRecord.draws}
               </div>
