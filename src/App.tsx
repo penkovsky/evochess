@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Chessboard } from "react-chessboard";
 import type { Color, Square } from "chess.js";
-import { EvoChessGame, EvoChessError, N_MINOR, M_ROOK, ROOK_CHARGES, type ApplyMoveOptions, type ForcedPromo, type MinorPromo } from "./evochess/game";
+import { EvoChessGame, EvoChessError, ROOK_CHARGES, type ApplyMoveOptions, type ForcedPromo, type MinorPromo } from "./evochess/game";
 import { serializeGame } from "./evochess/serialize";
 import type {
   AiCandidate,
@@ -15,7 +15,12 @@ import type {
 import type { AiLevel } from "./evochess/ai";
 import { saveGame, loadGame, clearSavedGame } from "./evochess/persistence";
 import { loadScores, recordResult, type Scores } from "./evochess/scores";
+import { RULES_SUMMARY } from "./evochess/tutorial";
+import { loadProgress, markSeen } from "./evochess/tutorialProgress";
 import { Fireworks } from "./Fireworks";
+import { EvoStrip } from "./EvoStrip";
+import { Tutorial } from "./Tutorial";
+import { PIECE_GLYPH } from "./pieceGlyph";
 import "./App.css";
 
 type Mode = "human-ai" | "human-human";
@@ -28,11 +33,6 @@ interface PromoModalState {
   canMinor: boolean;
   canRook: boolean;
 }
-
-const PIECE_GLYPH: Record<Color, Record<"q" | "r" | "b" | "n", string>> = {
-  w: { q: "♕", r: "♖", b: "♗", n: "♘" },
-  b: { q: "♛", r: "♜", b: "♝", n: "♞" },
-};
 
 function App() {
   const [, forceRender] = useState(0);
@@ -51,6 +51,12 @@ function App() {
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [showFireworks, setShowFireworks] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  // The rules are the whole point of the variant and take longer to read than
+  // a first-time visitor will give us — so a first visit offers the tutorial
+  // beside a live board rather than in front of it. The offer never blocks
+  // play: making a move dismisses it (see dismissInvite).
+  const [showInvite, setShowInvite] = useState(false);
   // Win/loss/draw record vs the AI, kept separately per level and persisted
   // to localStorage (see evochess/scores.ts).
   const [scores, setScores] = useState<Scores>(loadScores);
@@ -208,6 +214,23 @@ function App() {
 
   const rerender = () => forceRender((n) => n + 1);
 
+  // Someone who has started playing has answered the question the invitation
+  // was asking, so it gets out of the way and doesn't come back.
+  function dismissInvite() {
+    if (!showInvite) return;
+    setShowInvite(false);
+    markSeen();
+  }
+
+  function openTutorial() {
+    // The tutorial is about to use the worker for its own opponent, so hand it
+    // over: a ponder chain on this game's position is now both stale and in
+    // the way (ponder-spec.md §5.3, §6.2).
+    resetPonder();
+    setShowInvite(false);
+    setShowTutorial(true);
+  }
+
   function resetClock(minutes: number) {
     clockRef.current = { w: minutes * 60, b: minutes * 60 };
   }
@@ -230,6 +253,8 @@ function App() {
       clockRef.current = saved.clock ?? { w: (saved.timerMinutes ?? 10) * 60, b: (saved.timerMinutes ?? 10) * 60 };
       setPonderEnabled(saved.ponderEnabled ?? true);
       resetPonder(); // loading a save (ponder-spec.md §5.3, §6.2)
+    } else if (!loadProgress().seen) {
+      setShowInvite(true);
     }
     setLoaded(true);
     rerender();
@@ -388,6 +413,7 @@ function App() {
       return;
     }
     // Only record the snapshot once the move actually applied.
+    dismissInvite();
     historyRef.current.push(snapshot);
     clockHistoryRef.current.push({ ...clockRef.current });
     rerender();
@@ -562,6 +588,9 @@ function App() {
   }
 
   if (!loaded) return null;
+  // The tutorial plays Black through the same worker and the same Easy search
+  // the game itself uses, so what it teaches against is a real opponent.
+  if (showTutorial) return <Tutorial onExit={() => setShowTutorial(false)} onSearch={searchInWorker} />;
 
   const game = gameRef.current;
   const turnLabel = game.turn === "w" ? "White" : "Black";
@@ -639,6 +668,28 @@ function App() {
           launchY={boardWrapRef.current?.getBoundingClientRect().bottom}
         />
       )}
+      {/* Sits above the board rather than inside the panel: on a phone the
+          panel is below the board, which would put the offer under the fold
+          for exactly the visitors who most need it. */}
+      {showInvite && (
+        <div className="tutorial-invite">
+          <div className="tutorial-invite-text">
+            <h2>New to EvoChess?</h2>
+            <p>
+              It's chess, but you start with only Pawns and a King — everything else has to be
+              earned mid-game. Three one-minute lessons, or just start playing and pick it up.
+            </p>
+          </div>
+          <div className="tutorial-invite-actions">
+            <button className="learn-btn" onClick={openTutorial}>
+              Show me how
+            </button>
+            <button className="invite-skip-btn" onClick={dismissInvite}>
+              No thanks
+            </button>
+          </div>
+        </div>
+      )}
       <div className="board-wrap" ref={boardWrapRef}>
         {mode === "human-human" && timerEnabled && (
           <ClockDisplay clock={clockRef.current} turn={game.turn} gameOver={gameOver} />
@@ -696,6 +747,12 @@ function App() {
       </div>
       {!hidePanel && (
       <div className="panel">
+        {/* The banner is already asking; this is the permanent way back in. */}
+        {!showInvite && (
+          <button className="learn-btn" onClick={openTutorial}>
+            Learn Evo Basics
+          </button>
+        )}
         <details
           className="collapsible rules-summary"
           open={openPanel === "rules"}
@@ -703,13 +760,9 @@ function App() {
         >
           <summary>Rules summary</summary>
           <ul>
-            <li>Starts with only Pawns and Kings; other pieces are earned through play.</li>
-            <li>Every 3 Pawn moves earns a right to promote the last Pawn that moved to a Knight or Bishop.</li>
-            <li>Every 3 minor-piece (Knight/Bishop) moves earns a right to promote the last minor piece that moved to a Rook.</li>
-            <li>Rights accumulate and carry over until used; only one promotion may be spent per turn.</li>
-            <li>A Rook has 5 charges, spent only when it moves; at 0 it downgrades to a Knight or Bishop (owner's choice) and can never become a Rook again. Capturing a Rook is a normal capture — it never triggers a downgrade.</li>
-            <li>Reaching the 8th rank still forces a standard Pawn promotion, as in chess.</li>
-            <li>Castling is not defined.</li>
+            {RULES_SUMMARY.map((rule) => (
+              <li key={rule}>{rule}</li>
+            ))}
           </ul>
         </details>
         <details
@@ -980,74 +1033,6 @@ function ClockDisplay({
         </div>
       ))}
     </div>
-  );
-}
-
-// One compact line of evolution progress, sitting directly above or below the
-// board on that color's side. Which side a strip is on identifies its color, so
-// it carries no title — only dots and the banked-rights badges.
-function EvoStrip({
-  color,
-  game,
-  rights,
-  active,
-}: {
-  color: Color;
-  game: EvoChessGame;
-  rights: { minor: number; rook: number };
-  active: boolean;
-}) {
-  const side = color === "w" ? "White" : "Black";
-  return (
-    <div className={`evo-strip ${active ? "active" : ""}`}>
-      <EvoDots
-        kind="minor"
-        value={game.pawnMoveProgress[color]}
-        max={N_MINOR}
-        banked={rights.minor}
-        bankedGlyph={color === "w" ? "♘/♗" : "♞/♝"}
-        label={`${side} pawn moves toward a minor promotion`}
-      />
-      <EvoDots
-        kind="rook"
-        value={game.minorMoveProgress[color]}
-        max={M_ROOK}
-        banked={rights.rook}
-        bankedGlyph={color === "w" ? "♖" : "♜"}
-        label={`${side} minor moves toward a rook promotion`}
-      />
-    </div>
-  );
-}
-
-function EvoDots({
-  kind,
-  value,
-  max,
-  banked,
-  bankedGlyph,
-  label,
-}: {
-  kind: "minor" | "rook";
-  value: number;
-  max: number;
-  banked: number;
-  bankedGlyph: string;
-  label: string;
-}) {
-  return (
-    <span className="evo-group">
-      <span className="evo-dots" role="progressbar" aria-label={label} aria-valuenow={value} aria-valuemax={max}>
-        {Array.from({ length: max }, (_, i) => (
-          <span key={i} className={`evo-dot ${kind} ${i < value ? "filled" : ""}`} />
-        ))}
-      </span>
-      {/* Always rendered, blank at zero: the slot reserves its width so the
-          dots don't shift sideways the moment a right is banked. */}
-      <span className="evo-banked" title={banked > 0 ? "Banked unused promotion rights" : undefined}>
-        {banked > 0 ? `×${banked} ${bankedGlyph}` : ""}
-      </span>
-    </span>
   );
 }
 

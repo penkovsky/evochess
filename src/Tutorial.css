@@ -1,0 +1,331 @@
+/* The tutorial reuses the game's board furniture (.board-wrap, .evo-strip,
+   .modal, .rook-charge-badge from App.css) so the learner is looking at the
+   real interface, not a mock-up. Everything here is the teaching layer on
+   top: lesson menu, instruction cards and the step indicator. */
+
+.tutorial {
+  font-family: sans-serif;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.tutorial-title {
+  margin: 0 0 8px;
+}
+
+.tutorial-lede {
+  margin: 0 0 24px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+/* -- lesson menu ------------------------------------------------------- */
+
+.lesson-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lesson-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.lesson-card:hover {
+  border-color: #22aa77;
+  transform: translateY(-1px);
+}
+
+.lesson-num {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--text);
+}
+
+.lesson-card.done .lesson-num {
+  background: #22aa77;
+  border-color: #22aa77;
+  color: white;
+}
+
+.lesson-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lesson-card-title {
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--text-h);
+}
+
+.lesson-card-blurb {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.tutorial-menu-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+/* Secondary to the lessons: present for anyone who wants the whole rule set,
+   but visually quieter so it doesn't compete with them. */
+.tutorial-rules {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.tutorial-rules h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: var(--text-h);
+}
+
+.tutorial-rules ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.tutorial-rules li {
+  margin: 6px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+/* -- buttons ----------------------------------------------------------- */
+
+.tutorial-btn {
+  padding: 10px 18px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.tutorial-btn:hover {
+  border-color: #22aa77;
+}
+
+.tutorial-btn.primary {
+  background: #22aa77;
+  border-color: #22aa77;
+  color: white;
+  font-weight: bold;
+}
+
+.tutorial-btn.primary:hover {
+  background: #269a6e;
+}
+
+.tutorial-btn.subtle {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-color: transparent;
+  color: var(--text);
+  text-decoration: underline;
+}
+
+/* -- lesson layout ----------------------------------------------------- */
+
+.tutorial-lesson {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  align-items: flex-start;
+}
+
+.tutorial-lesson .board-wrap {
+  margin: 0;
+}
+
+.tutorial-lesson-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.tutorial-crumb {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #22aa77;
+  font-weight: bold;
+}
+
+.tutorial-lesson-title {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+.tutorial-panel {
+  flex: 1;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* -- step indicator ---------------------------------------------------- */
+
+.step-pips {
+  display: flex;
+  gap: 6px;
+}
+
+.step-pip {
+  width: 28px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.step-pip.current {
+  background: #22aa77;
+}
+
+.step-pip.done {
+  background: rgba(34, 170, 119, 0.45);
+}
+
+/* -- instruction / note cards ------------------------------------------ */
+
+.tutorial-card {
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text-h);
+}
+
+.tutorial-card p + p {
+  margin-top: 10px;
+}
+
+.tutorial-card.instruction {
+  border-left: 3px solid #22aa77;
+}
+
+.tutorial-card.note {
+  border-left: 3px solid #d68910;
+  background: rgba(214, 137, 16, 0.06);
+}
+
+/* Deliberately calmer than the instruction card: going off-script is a normal
+   thing to do, not a warning state. */
+.tutorial-card.free {
+  border-left: 3px solid var(--border);
+}
+
+.tutorial-card.outro h3,
+.tutorial-card.free h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  color: var(--text-h);
+}
+
+/* The concrete move a step suggests, spelled out for anyone who'd rather read
+   it than decode the highlight on the board. */
+.tutorial-suggestion {
+  font-size: 13px;
+  color: #22aa77;
+}
+
+.tutorial-aside {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text);
+}
+
+.tutorial-free-status {
+  font-size: 13px;
+  font-weight: bold;
+  color: var(--text-h);
+}
+
+.tutorial-choice-prompt {
+  margin-top: 12px;
+  font-size: 13px;
+  color: #22aa77;
+  text-align: center;
+}
+
+.tutorial-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.tutorial-footnote {
+  margin-top: 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.tutorial-footer {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lesson-card:hover {
+    transform: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .tutorial {
+    padding: 12px;
+  }
+
+  .tutorial-lesson {
+    gap: 16px;
+  }
+
+  .tutorial-panel {
+    min-width: 0;
+    width: 100%;
+  }
+}

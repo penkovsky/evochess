@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
+import { freshGamePage } from "./helpers";
 
 test.beforeEach(async ({ page }) => {
   // Start from a clean slate so a persisted game doesn't leak between runs.
-  await page.addInitScript(() => window.localStorage.clear());
-  await page.goto("./");
+  await freshGamePage(page);
 });
 
 test("renders the board and per-color evolution counters", async ({ page }) => {

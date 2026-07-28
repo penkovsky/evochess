@@ -27,6 +27,10 @@
   max-height: calc(100vh - 48px);
   overflow-y: auto;
   text-align: left;
+  /* Shared by everything stacked in the panel so the column stays flush.
+     It is only a cap — each item is width:100%, so a narrow screen shrinks
+     them rather than overflowing. */
+  --panel-width: 360px;
 }
 
 .toggle-panel-btn {
@@ -175,6 +179,87 @@
   background: #c4c4c4;
 }
 
+/* The first-visit offer: a compact banner across the top of the page, never
+   an overlay. The board below it has to stay both visible and playable, since
+   starting a game is one of the two valid answers to the question it asks. */
+.tutorial-invite {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid #22aa77;
+  border-radius: 10px;
+  background: rgba(34, 170, 119, 0.07);
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.tutorial-invite-text {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.tutorial-invite h2 {
+  margin: 0 0 2px;
+  font-size: 17px;
+}
+
+.tutorial-invite p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.tutorial-invite-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tutorial-invite .learn-btn {
+  width: auto;
+  margin: 0;
+  padding: 10px 18px;
+}
+
+.invite-skip-btn {
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.invite-skip-btn:hover {
+  border-color: #999;
+}
+
+.learn-btn {
+  display: block;
+  width: 100%;
+  max-width: var(--panel-width);
+  margin: 0 auto 8px;
+  padding: 10px;
+  font-size: 14px;
+  font-weight: bold;
+  border: 1px solid #22aa77;
+  border-radius: 6px;
+  background: #22aa77;
+  color: white;
+  cursor: pointer;
+}
+
+.learn-btn:hover {
+  background: #269a6e;
+}
+
 .collapsible {
   margin: 8px auto;
   padding: 8px;
@@ -184,7 +269,7 @@
   text-align: left;
   box-sizing: border-box;
   width: 100%;
-  max-width: 300px;
+  max-width: var(--panel-width);
 }
 
 .collapsible summary {
@@ -193,7 +278,9 @@
 }
 
 .rules-summary ul {
-  height: 200px;
+  /* Taller than the move log: the rules are seven dense bullets, and at the
+     log's 200px almost every one of them needed scrolling to read. */
+  height: 300px;
   overflow-y: auto;
   overflow-x: hidden;
   margin: 8px 0 0;

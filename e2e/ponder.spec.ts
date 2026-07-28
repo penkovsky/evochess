@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { freshGamePage } from "./helpers";
 
 // Milestone 4 verification (docs/ponder-spec.md §9): a takeback during a deep
 // ponder must yield a legal, playable position promptly, with no console
@@ -6,8 +7,7 @@ import { test, expect } from "@playwright/test";
 // the instant the human moves"), exercised end-to-end against the real
 // worker rather than through a direct-call harness.
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
-  await page.goto("./");
+  await freshGamePage(page);
 });
 
 test("takeback during a deep ponder yields a playable position promptly, with no console errors", async ({
