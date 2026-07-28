@@ -133,6 +133,14 @@
   letter-spacing: 0.5px;
 }
 
+.score-win {
+  color: #2ecc71;
+}
+
+.score-loss {
+  color: #8b1a1a;
+}
+
 .play-again-btn {
   pointer-events: auto;
   padding: 10px 20px;

@@ -674,7 +674,8 @@ function App() {
           {showScoreOverlay && (
             <div className={`score-overlay${scoreOverlayReady ? " revealed" : ""}`}>
               <div className="score-overlay-text">
-                {levelLabel} {currentRecord.wins}-{currentRecord.losses}-{currentRecord.draws}
+                {levelLabel} <span className="score-win">{currentRecord.wins}</span>-{currentRecord.draws}-
+                <span className="score-loss">{currentRecord.losses}</span>
               </div>
               <button className="play-again-btn" onClick={() => startNewGame(mode, aiColor, level)}>
                 Play again?
