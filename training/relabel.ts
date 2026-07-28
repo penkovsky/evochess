@@ -40,6 +40,7 @@
  * search budget keeps its existing score rather than being dropped (dropping
  * would shrink the set and bias it toward quiet positions).
  */
+import type { Color } from "chess.js";
 import { createReadStream, readdirSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
@@ -137,6 +138,20 @@ async function* readRecords(paths: string[]): AsyncGenerator<PositionRecord> {
   }
 }
 
+// -- scoring convention -------------------------------------------------------
+
+/**
+ * Convert a `searchRoot()` score (side-to-move-relative) into the
+ * White-positive pawn units records store, per `jsonl.ts`'s `PositionRecord`.
+ * Same flip `gen.ts` and `augment.ts` apply to their own labels — exported
+ * (and pinned in `relabel.test.ts`) because getting it backwards is silent:
+ * every score keeps a plausible magnitude and only the sign is wrong, which
+ * no downstream stage checks and which trains the net to prefer losing.
+ */
+export function whiteScore(turn: Color, sideToMoveScore: number): number {
+  return turn === "w" ? sideToMoveScore : -sideToMoveScore;
+}
+
 // -- deterministic hash (FNV-1a) ----------------------------------------------
 
 function hash32(s: string): number {
@@ -196,7 +211,7 @@ async function main(): Promise<void> {
       if (result === null) {
         stats.timedOut += 1;
       } else {
-        record.score = round(game.turn === "w" ? result.score : -result.score);
+        record.score = round(whiteScore(game.turn, result.score));
         stats.relabeled += 1;
       }
 
@@ -229,7 +244,14 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((err) => {
-  process.stderr.write(`\n${err instanceof Error ? err.stack : String(err)}\n`);
-  process.exit(1);
-});
+// Guarded exactly as `augment.ts` is, and for the same reason: the test suite
+// imports `whiteScore` from here, and an unguarded `main()` would kick off a
+// relabel run (against the default `--in`, which usually doesn't exist) as an
+// import side effect and `process.exit(1)` out of the test process. See
+// augment.ts's note for why this can't be an `import.meta.url` check.
+if (!process.env.VITEST) {
+  main().catch((err) => {
+    process.stderr.write(`\n${err instanceof Error ? err.stack : String(err)}\n`);
+    process.exit(1);
+  });
+}

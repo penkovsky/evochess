@@ -9,7 +9,11 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    // Keep Vitest to unit tests under src/; Playwright owns e2e/.
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // Unit tests under src/ and the data-pipeline tests under training/;
+    // Playwright owns e2e/. training/ was omitted originally, which quietly
+    // meant `npm test` never ran augment.test.ts or sampler.test.ts at all.
+    // (training/tests/ is the Python side, run by pytest, and matches nothing
+    // here.)
+    include: ['src/**/*.{test,spec}.{ts,tsx}', 'training/**/*.{test,spec}.ts'],
   },
 })

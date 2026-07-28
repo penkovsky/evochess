@@ -1,3 +1,8 @@
+// @vitest-environment node
+//
+// Node, not the config's default jsdom: augment.ts pulls in
+// searchWorkerPool.ts -> esbuild, which refuses to load under jsdom (its
+// TextEncoder doesn't produce a real Uint8Array).
 /**
  * Material augmentation tests (`nnue-data-coverage-spec.md`, mechanism 2).
  * The load-bearing property: every emitted record has a score and no

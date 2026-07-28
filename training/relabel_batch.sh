@@ -47,6 +47,34 @@ BACKEND="${8:-auto}"
 BUNDLE="training/relabel.bundle.mjs"
 mkdir -p "$OUT_DIR" "$OUT_DIR/logs"
 
+# Refuse to leave stale shards behind. A re-run with the same <n_shards>
+# overwrites every file it wrote last time, which is fine; a re-run with a
+# *smaller* one leaves the extra shards of the previous run sitting in the
+# directory, where they are invisible trouble: the count check below globs
+# them in, and train.py --data <out_dir> reads the whole directory, so those
+# positions get trained on twice with two different labels. Only files this
+# run won't overwrite are a problem, so list exactly those.
+shopt -s nullglob
+expected=()
+for i in $(seq 0 $((SHARDS - 1))); do expected+=("${OUT_DIR}/relabel-shard-${i}.jsonl.gz"); done
+stale=()
+for f in "${OUT_DIR}"/relabel-shard-*.jsonl.gz; do
+  keep=0
+  for e in "${expected[@]}"; do
+    if [ "$f" = "$e" ]; then keep=1; break; fi
+  done
+  # if/then, not `[ ... ] && stale+=(...)`: a false test as the last command in
+  # a loop body is a nonzero exit status, which `set -e` would take as failure.
+  if [ "$keep" -eq 0 ]; then stale+=("$f"); fi
+done
+shopt -u nullglob
+if [ "${#stale[@]}" -gt 0 ]; then
+  echo "ERROR: ${OUT_DIR} holds shards from an earlier run that this ${SHARDS}-shard run will not overwrite:" >&2
+  printf '  %s\n' "${stale[@]}" >&2
+  echo "Remove them (or pick a fresh <out_dir>) before re-running — leaving them in place double-counts those positions in training." >&2
+  exit 1
+fi
+
 echo "bundling relabel.ts ..."
 npx esbuild training/relabel.ts --bundle --platform=node --format=esm --target=node20 \
   --external:esbuild --outfile="$BUNDLE" >/dev/null
@@ -82,7 +110,22 @@ for i in $(seq 0 $((SHARDS - 1))); do
   tail -n 6 "${OUT_DIR}/logs/relabel-shard-${i}.log"
 done
 
-in_total=$(gunzip -cf "$IN_DIR"/*.jsonl.gz "$IN_DIR"/*.jsonl 2>/dev/null | wc -l)
+# nullglob, not a bare glob: an input directory of only .jsonl.gz (the normal
+# case) leaves the .jsonl pattern unmatched, which gunzip reports as an error,
+# which `pipefail` + `set -e` turned into the whole script dying *here* —
+# after every shard had finished successfully. The relabel was fine; the run
+# just exited 1 and never printed the summary or ran the partition check.
+shopt -s nullglob
+in_files=("$IN_DIR"/*.jsonl.gz "$IN_DIR"/*.jsonl)
+shopt -u nullglob
+# relabel.ts also accepts a single file as --in; and an empty array would
+# leave gunzip reading stdin, i.e. hanging at the end of a finished run.
+if [ "${#in_files[@]}" -eq 0 ] && [ -f "$IN_DIR" ]; then in_files=("$IN_DIR"); fi
+if [ "${#in_files[@]}" -eq 0 ]; then
+  in_total=0
+else
+  in_total=$(gunzip -cf "${in_files[@]}" | wc -l)
+fi
 out_total=$(gunzip -c "${OUT_DIR}"/relabel-shard-*.jsonl.gz | wc -l)
 echo "=== done: ${in_total} input positions, ${out_total} relabeled positions written across ${SHARDS} shards (fail=${fail}) ==="
 if [ "$in_total" -ne "$out_total" ]; then
