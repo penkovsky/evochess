@@ -52,6 +52,10 @@
     width: 100%;
     max-height: none;
   }
+
+  .evo-strip {
+    gap: 12px;
+  }
 }
 
 .status {
@@ -195,67 +199,63 @@
   overflow-wrap: break-word;
 }
 
-.rights {
-  margin: 8px auto;
-  padding: 8px;
-  border: 1px solid #ccc;
+.evo-strip {
+  display: flex;
+  align-items: center;
+  /* Both counters sit at the left edge of the board column; the empty right
+     side of the row supplies the clearance after the rook counter. */
+  justify-content: flex-start;
+  gap: 24px;
+  padding: 4px 6px;
   border-radius: 6px;
-  box-sizing: border-box;
-  width: 100%;
-  max-width: 300px;
-  background: #f9f9f9;
+  font-size: 12px;
+  /* Fixed height so the strip doesn't jump as banked badges appear. */
+  min-height: 22px;
+  /* Small separation from the board on whichever side the strip sits. */
+  margin: 4px 0;
 }
 
-.rights.active {
+.evo-strip.active {
   box-shadow: 0 0 0 2px rgba(34, 170, 119, 0.35);
 }
 
-.rights-title {
-  font-weight: bold;
-  font-size: 13px;
-  margin-bottom: 6px;
-}
-
-.evo-track {
+.evo-group {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  margin: 3px 0;
+  gap: 6px;
 }
 
-.evo-label {
-  width: 96px;
-  flex-shrink: 0;
-  color: #555;
-}
-
-.evo-bar {
+.evo-dots {
   display: inline-flex;
-  gap: 2px;
+  gap: 3px;
 }
 
-.evo-cell {
-  width: 16px;
-  height: 10px;
+.evo-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
   border: 1px solid #bbb;
-  border-radius: 2px;
   background: #fff;
 }
 
-.evo-cell.filled {
+.evo-dot.minor.filled {
   background: #2a7;
   border-color: #2a7;
 }
 
-.evo-count {
-  color: #555;
-  min-width: 26px;
+.evo-dot.rook.filled {
+  background: #37c;
+  border-color: #37c;
 }
 
 .evo-banked {
   font-size: 13px;
   color: #a60;
+  white-space: nowrap;
+  /* Reserved even when empty, so banking a right never nudges the dots. Wide
+     enough for the two-glyph minor badge at its widest ("×9 ♞/♝"). */
+  display: inline-block;
+  min-width: 46px;
 }
 
 .log {

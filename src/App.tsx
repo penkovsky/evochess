@@ -584,6 +584,20 @@ function App() {
   const rw = game.rightsFor("w");
   const rb = game.rightsFor("b");
 
+  // Both the board and the evolution strips flanking it depend on which way the
+  // board faces, so it's computed once here rather than inline in the board.
+  const boardOrientation: "white" | "black" =
+    mode === "human-human"
+      ? autoFlip && game.turn === "b"
+        ? "black"
+        : "white"
+      : aiColor === "w"
+      ? "black"
+      : "white";
+  const bottomColor: Color = boardOrientation === "white" ? "w" : "b";
+  const topColor: Color = bottomColor === "w" ? "b" : "w";
+  const rightsFor = { w: rw, b: rb };
+
   const renderActionPicker = (extraClass: string) => (
     <div className={`action-picker ${extraClass}`}>
       <button
@@ -635,6 +649,7 @@ function App() {
             aiThinking ? " thinking" : level === "easy" ? " easy" : nnueReady ? " nnue-ready" : ""
           }`}
         />
+        <EvoStrip color={topColor} game={game} rights={rightsFor[topColor]} active={game.turn === topColor} />
         <div className="board-container">
           <Chessboard
             options={{
@@ -652,14 +667,7 @@ function App() {
                   </div>
                 );
               },
-              boardOrientation:
-                mode === "human-human"
-                  ? autoFlip && game.turn === "b"
-                    ? "black"
-                    : "white"
-                  : aiColor === "w"
-                  ? "black"
-                  : "white",
+              boardOrientation,
               allowDragging: !(mode === "human-ai" && game.turn === aiColor) && !gameOver,
             }}
           />
@@ -674,6 +682,12 @@ function App() {
             </div>
           )}
         </div>
+        <EvoStrip
+          color={bottomColor}
+          game={game}
+          rights={rightsFor[bottomColor]}
+          active={game.turn === bottomColor}
+        />
         {renderActionPicker("action-picker-below-board")}
         <button className="toggle-panel-btn" onClick={() => setHidePanel((v) => !v)}>
           {hidePanel ? "Show widgets" : "Hide widgets"}
@@ -697,8 +711,6 @@ function App() {
             <li>Castling is not defined.</li>
           </ul>
         </details>
-        <EvolutionPanel label="White" color="w" game={game} rights={rw} />
-        <EvolutionPanel label="Black" color="b" game={game} rights={rb} />
         <details
           className="collapsible"
           open={openPanel === "log"}
@@ -970,69 +982,71 @@ function ClockDisplay({
   );
 }
 
-function EvolutionPanel({
-  label,
+// One compact line of evolution progress, sitting directly above or below the
+// board on that color's side. Which side a strip is on identifies its color, so
+// it carries no title — only dots and the banked-rights badges.
+function EvoStrip({
   color,
   game,
   rights,
+  active,
 }: {
-  label: string;
   color: Color;
   game: EvoChessGame;
   rights: { minor: number; rook: number };
+  active: boolean;
 }) {
-  const active = game.turn === color;
+  const side = color === "w" ? "White" : "Black";
   return (
-    <div className={`rights ${active ? "active" : ""}`}>
-      <div className="rights-title">{label}</div>
-      <EvoTrack
-        label="Pawns → Minor"
+    <div className={`evo-strip ${active ? "active" : ""}`}>
+      <EvoDots
+        kind="minor"
         value={game.pawnMoveProgress[color]}
         max={N_MINOR}
         banked={rights.minor}
         bankedGlyph={color === "w" ? "♘/♗" : "♞/♝"}
+        label={`${side} pawn moves toward a minor promotion`}
       />
-      <EvoTrack
-        label="Minors → Rook"
+      <EvoDots
+        kind="rook"
         value={game.minorMoveProgress[color]}
         max={M_ROOK}
         banked={rights.rook}
         bankedGlyph={color === "w" ? "♖" : "♜"}
+        label={`${side} minor moves toward a rook promotion`}
       />
     </div>
   );
 }
 
-function EvoTrack({
-  label,
+function EvoDots({
+  kind,
   value,
   max,
   banked,
   bankedGlyph,
+  label,
 }: {
-  label: string;
+  kind: "minor" | "rook";
   value: number;
   max: number;
   banked: number;
   bankedGlyph: string;
+  label: string;
 }) {
   return (
-    <div className="evo-track">
-      <span className="evo-label">{label}</span>
-      <span className="evo-bar" role="progressbar" aria-valuenow={value} aria-valuemax={max}>
+    <span className="evo-group">
+      <span className="evo-dots" role="progressbar" aria-label={label} aria-valuenow={value} aria-valuemax={max}>
         {Array.from({ length: max }, (_, i) => (
-          <span key={i} className={`evo-cell ${i < value ? "filled" : ""}`} />
+          <span key={i} className={`evo-dot ${kind} ${i < value ? "filled" : ""}`} />
         ))}
       </span>
-      <span className="evo-count">
-        {value}/{max}
+      {/* Always rendered, blank at zero: the slot reserves its width so the
+          dots don't shift sideways the moment a right is banked. */}
+      <span className="evo-banked" title={banked > 0 ? "Banked unused promotion rights" : undefined}>
+        {banked > 0 ? `×${banked} ${bankedGlyph}` : ""}
       </span>
-      {banked > 0 && (
-        <span className="evo-banked" title="Banked unused promotion rights">
-          {bankedGlyph} ×{banked}
-        </span>
-      )}
-    </div>
+    </span>
   );
 }
 
