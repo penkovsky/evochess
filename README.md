@@ -1,15 +1,41 @@
 # EvoChess
 
-A standalone, backend-free browser port of [EvoChess](./rules.txt) — a chess
-variant where the game starts with only Pawns and Kings, and pieces evolve
-onto the board over time via accumulated promotion rights.
+**You start with only pawns and kings, and your army evolves out of pawn activity**.
+
+Play vs Human or AI.
+NNUE engine was trained from self-play because EvoChess is a variant that has no
+existing engine, no book, no corpus.
 
 Written in TypeScript/React. All game logic (rules engine + AI) runs
 client-side; there is no server.
 
-## Rules
+[Play it in your browser](https://penkovsky.github.io/evochess/). No install, no signup.
 
-See [`rules.txt`](./rules.txt) for the full rule text.
+## Rules in 60 seconds
+
+Each side starts with 8 pawns and a king. That is all. There are no queens,
+rooks, knights, or bishops on the board. You grow your army by playing.
+
+**Pawns become minor pieces.** Every 3 pawn moves earn you one promotion
+right. Spend it to turn the pawn that just moved into a knight or a bishop.
+
+**Minor pieces become rooks.** Every 3 minor piece moves earn you one more
+promotion right. Spend it to turn the minor piece that just moved into a rook.
+
+**Rights are saved up.** You never have to spend one right away. But you can
+only spend it on the piece that just moved. A pawn right needs a pawn move. A
+minor right needs a minor piece move. One promotion per move, no more.
+
+**Rooks run out.** Every rook has 5 charges. Each rook move spends one. At 0
+charges the rook downgrades on the spot into a knight or a bishop. That piece
+can never become a rook again. So a rook is a burst of power you time, not a
+piece you keep.
+
+Everything else is normal chess. Same moves, same checks, same mates. En
+passant works. A pawn reaching the 8th rank promotes as usual, and that is
+still obligatory. Castling does not exist.
+
+Complete EvoChess rules are [here](./rules.txt).
 
 ## Stack
 
@@ -53,7 +79,7 @@ training/scale_loop.sh [base_positions] [max_rounds] [games] [depth] [shards]
 
 Data lands under `training/data-scale/`, checkpoints under
 `training/checkpoints/scale-r<N>*`, and a summary accumulates in
-`training/data-scale/scale-log.tsv`. It's resumable — rerun it and it picks up
+`training/data-scale/scale-log.tsv`. It's resumable: rerun it and it picks up
 from the last completed round.
 
 To relabel existing data instead of generating more:
@@ -101,7 +127,7 @@ node training/match.bundle.mjs --weights training/checkpoints/net-relabel-pst5-w
 ### Step 4 - match vs. another net (optional)
 
 Pass `--opponent-weights` to play the challenger against a second checkpoint
-instead of material+PST — e.g. to check a relabeled net against the net it's
+instead of material+PST, e.g. to check a relabeled net against the net it's
 meant to replace:
 
 ```bash
