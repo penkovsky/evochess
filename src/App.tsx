@@ -21,9 +21,44 @@ import { Fireworks } from "./Fireworks";
 import { EvoStrip } from "./EvoStrip";
 import { Tutorial } from "./Tutorial";
 import { PIECE_GLYPH } from "./pieceGlyph";
+import { CapIcon, ScrollIcon, BookIcon, GearIcon } from "./Icons";
 import "./App.css";
 
 type Mode = "human-ai" | "human-human";
+
+/** Which widget the mobile bar is showing in the sheet, if any. */
+type MobileWidget = "rules" | "log" | "settings";
+
+/**
+ * The move log, owning its own scroll-to-bottom. A component rather than a
+ * render helper because the panel copy and the mobile copy are both mounted
+ * (one is hidden by CSS), and a single shared ref cannot serve two elements.
+ */
+function MoveLog({ moveLog }: { moveLog: string[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+  return (
+    <div className="log" ref={ref}>
+      {/* Without this the sheet's height:auto log collapses to nothing on an
+          unplayed game, leaving a drawer with a title and no body. Not a
+          <div>: the e2e specs count `.log > div` to mean "moves played". */}
+      {moveLog.length === 0 && <p className="log-empty">No moves yet.</p>}
+      {moveLog
+        .filter((_, i) => i % 2 === 0)
+        .map((white, n) => {
+          const black = moveLog[n * 2 + 1];
+          return (
+            <div key={n}>
+              {n + 1}. {white}{black ? ` ${black}` : ""}
+            </div>
+          );
+        })}
+    </div>
+  );
+}
 
 interface PromoModalState {
   from: Square;
@@ -87,14 +122,14 @@ function App() {
   const [ponderEnabled, setPonderEnabled] = useState(true);
   const [timeUp, setTimeUp] = useState<Color | null>(null);
   const clockRef = useRef<Record<Color, number>>({ w: 600, b: 600 });
-  const logRef = useRef<HTMLDivElement>(null);
   const boardWrapRef = useRef<HTMLDivElement>(null);
   // Rules summary and move log share panel space, so only one is expanded
   // at a time — opening one collapses the other.
   const [openPanel, setOpenPanel] = useState<"rules" | "log" | null>("log");
-  // Lets small screens hide the side panel to give the board more room; the
-  // toggle button itself is only shown below a width breakpoint (see CSS).
-  const [hidePanel, setHidePanel] = useState(false);
+  // On a phone the side panel is hidden entirely (CSS) and its widgets are
+  // reached through the icon bar under the board, which opens one of them in
+  // a bottom sheet over the page. null = no sheet open.
+  const [widget, setWidget] = useState<MobileWidget | null>(null);
   // Click-to-move: square selected by tapping a piece, awaiting a target
   // square tap. Cleared on every move attempt (successful or not).
   const [selected, setSelected] = useState<Square | null>(null);
@@ -347,11 +382,6 @@ function App() {
   }, [gameIsOver]);
 
   useEffect(() => {
-    const el = logRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  });
-
-  useEffect(() => {
     if (!modal || modal.kind !== "optional") return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") finishModalMove({});
@@ -360,6 +390,45 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modal]);
+
+  // Escape closes the widget sheet — but not while the promotion prompt is up,
+  // which binds Escape for itself and takes priority.
+  useEffect(() => {
+    if (!widget || modal) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setWidget(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [widget, modal]);
+
+  // The sheet is position:fixed, so nothing stops the page scrolling behind
+  // it; and a rotate/resize past the breakpoint would leave it stranded over
+  // the desktop layout, where the bar that opened it no longer exists.
+  //
+  // iOS Safari ignores `overflow: hidden` on the body for touch scrolling, so
+  // the lock has to pin the body itself — which drops the scroll position, and
+  // so has to carry it in `top` and restore it on the way out.
+  useEffect(() => {
+    if (!widget) return;
+    const { style } = document.body;
+    const previous = { overflow: style.overflow, position: style.position, top: style.top, width: style.width };
+    const scrollY = window.scrollY;
+    style.overflow = "hidden";
+    style.position = "fixed";
+    style.top = `-${scrollY}px`;
+    style.width = "100%";
+    const mq = window.matchMedia("(max-width: 600px)");
+    const onChange = () => {
+      if (!mq.matches) setWidget(null);
+    };
+    mq.addEventListener("change", onChange);
+    return () => {
+      Object.assign(style, previous);
+      window.scrollTo(0, scrollY);
+      mq.removeEventListener("change", onChange);
+    };
+  }, [widget]);
 
   async function maybeAiMove(overrides?: { mode?: Mode; aiColor?: Color; level?: AiLevel }) {
     const effMode = overrides?.mode ?? mode;
@@ -642,6 +711,155 @@ function App() {
     </div>
   );
 
+  // Shared by the desktop panel and the mobile widget bar, which mount the
+  // same content in two different containers.
+  const renderRules = () => (
+    <ul>
+      {RULES_SUMMARY.map((rule) => (
+        <li key={rule}>{rule}</li>
+      ))}
+    </ul>
+  );
+
+  const renderControls = () => (
+    <div className="controls">
+      <div className="mode-picker" role="group" aria-label="Mode">
+        {(
+          [
+            { label: "vs AI", value: "human-ai" },
+            { label: "vs Human", value: "human-human" },
+          ] as const
+        ).map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            className={mode === opt.value ? "active" : ""}
+            onClick={() => {
+              const newMode = opt.value;
+              if (newMode === mode) return;
+              if (historyRef.current.length > 0) {
+                // eslint-disable-next-line no-alert
+                if (!window.confirm("Switch mode and end the current game?")) return;
+                startNewGame(newMode, aiColor, level);
+              } else {
+                resetPonder(); // mode change (ponder-spec.md §5.3, §6.2)
+                setMode(newMode);
+              }
+            }}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      {mode === "human-ai" && (
+        <>
+          <div className="color-picker" role="group" aria-label="Your color">
+            {(
+              [
+                { label: "White", value: "b" },
+                { label: "Black", value: "w" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={aiColor === opt.value ? "active" : ""}
+                onClick={() => {
+                  const newAiColor = opt.value;
+                  if (newAiColor === aiColor) return;
+                  if (historyRef.current.length > 0) {
+                    // eslint-disable-next-line no-alert
+                    if (!window.confirm("Switch colors and start a new game?")) return;
+                    startNewGame(mode, newAiColor, level);
+                  } else {
+                    resetPonder(); // side change (ponder-spec.md §5.3, §6.2)
+                    setAiColor(newAiColor);
+                  }
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="level-picker" role="group" aria-label="AI level">
+            {(
+              [
+                { label: "Easy", value: "easy" },
+                { label: "Zen", value: "zen" },
+                { label: "Fun", value: "fun" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={level === opt.value ? "active" : ""}
+                onClick={() => {
+                  const newLevel = opt.value;
+                  if (newLevel === level) return;
+                  if (historyRef.current.length > 0) {
+                    // eslint-disable-next-line no-alert
+                    if (!window.confirm("Switch level and end the current game?")) return;
+                    startNewGame(mode, aiColor, newLevel);
+                  } else {
+                    resetPonder(); // level change (ponder-spec.md §5.3, §6.2)
+                    setLevel(newLevel);
+                  }
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {mode === "human-human" && (
+        <div className="controls-row">
+          <button
+            type="button"
+            className={`toggle-btn ${autoFlip ? "pressed" : ""}`}
+            aria-pressed={autoFlip}
+            onClick={() => setAutoFlip((v) => !v)}
+          >
+            Flip board
+          </button>
+          <button
+            type="button"
+            className={`toggle-btn ${timerEnabled ? "pressed" : ""}`}
+            aria-pressed={timerEnabled}
+            disabled={historyRef.current.length > 0}
+            onClick={() => {
+              const enabled = !timerEnabled;
+              setTimerEnabled(enabled);
+              if (enabled) {
+                setTimeUp(null);
+                resetClock(timerMinutes);
+              }
+            }}
+          >
+            Clock
+          </button>
+        </div>
+      )}
+      {mode === "human-human" && timerEnabled && (
+        <label>
+          Minutes per side:
+          <input
+            type="number"
+            min={1}
+            max={180}
+            value={timerMinutes}
+            disabled={historyRef.current.length > 0}
+            onChange={(e) => {
+              const minutes = Number(e.target.value);
+              setTimerMinutes(minutes);
+              resetClock(minutes);
+            }}
+          />
+        </label>
+      )}
+    </div>
+  );
+
   const squareStyles: Record<string, CSSProperties> = {};
   if (selected) {
     squareStyles[selected] = { background: "rgba(255, 255, 0, 0.4)" };
@@ -741,11 +959,42 @@ function App() {
           active={game.turn === bottomColor}
         />
         {renderActionPicker("action-picker-below-board")}
-        <button className="toggle-panel-btn" onClick={() => setHidePanel((v) => !v)}>
-          {hidePanel ? "Show widgets" : "Hide widgets"}
-        </button>
+        {/* Phone-only: the panel below is hidden at this width, so its widgets
+            are reached here instead. Tapping an icon slides that widget up
+            from the bottom edge as a sheet. While a sheet is open its backdrop
+            covers this bar, so the next tap anywhere — including on an icon —
+            dismisses it rather than switching widgets. */}
+        <div className="mobile-bar" role="group" aria-label="Widgets">
+          <button
+            type="button"
+            className="widget-btn primary"
+            aria-label="Learn Evo Basics"
+            title="Learn Evo Basics"
+            onClick={openTutorial}
+          >
+            <CapIcon />
+          </button>
+          {(
+            [
+              { id: "settings", label: "Settings", Icon: GearIcon },
+              { id: "log", label: "Move log", Icon: BookIcon },
+              { id: "rules", label: "Rules summary", Icon: ScrollIcon },
+            ] as const
+          ).map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              type="button"
+              className="widget-btn"
+              aria-label={label}
+              title={label}
+              aria-haspopup="dialog"
+              onClick={() => setWidget(id)}
+            >
+              <Icon />
+            </button>
+          ))}
+        </div>
       </div>
-      {!hidePanel && (
       <div className="panel">
         {/* The banner is already asking; this is the permanent way back in. */}
         {!showInvite && (
@@ -753,174 +1002,59 @@ function App() {
             Learn Evo Basics
           </button>
         )}
-        <details
-          className="collapsible rules-summary"
-          open={openPanel === "rules"}
-          onToggle={(e) => togglePanel("rules", e.currentTarget.open)}
-        >
-          <summary>Rules summary</summary>
-          <ul>
-            {RULES_SUMMARY.map((rule) => (
-              <li key={rule}>{rule}</li>
-            ))}
-          </ul>
-        </details>
+        {renderControls()}
         <details
           className="collapsible"
           open={openPanel === "log"}
           onToggle={(e) => togglePanel("log", e.currentTarget.open)}
         >
           <summary>Move log</summary>
-          <div className="log" ref={logRef}>
-            {game.moveLog
-              .filter((_, i) => i % 2 === 0)
-              .map((white, n) => {
-                const black = game.moveLog[n * 2 + 1];
-                return (
-                  <div key={n}>
-                    {n + 1}. {white}{black ? ` ${black}` : ""}
-                  </div>
-                );
-              })}
-          </div>
+          <MoveLog moveLog={game.moveLog} />
         </details>
-        <div className="controls">
-          <div className="mode-picker" role="group" aria-label="Mode">
-            {(
-              [
-                { label: "vs AI", value: "human-ai" },
-                { label: "vs Human", value: "human-human" },
-              ] as const
-            ).map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={mode === opt.value ? "active" : ""}
-                onClick={() => {
-                  const newMode = opt.value;
-                  if (newMode === mode) return;
-                  if (historyRef.current.length > 0) {
-                    // eslint-disable-next-line no-alert
-                    if (!window.confirm("Switch mode and end the current game?")) return;
-                    startNewGame(newMode, aiColor, level);
-                  } else {
-                    resetPonder(); // mode change (ponder-spec.md §5.3, §6.2)
-                    setMode(newMode);
-                  }
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          {mode === "human-ai" && (
-            <>
-              <div className="color-picker" role="group" aria-label="Your color">
-                {(
-                  [
-                    { label: "White", value: "b" },
-                    { label: "Black", value: "w" },
-                  ] as const
-                ).map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={aiColor === opt.value ? "active" : ""}
-                    onClick={() => {
-                      const newAiColor = opt.value;
-                      if (newAiColor === aiColor) return;
-                      if (historyRef.current.length > 0) {
-                        // eslint-disable-next-line no-alert
-                        if (!window.confirm("Switch colors and start a new game?")) return;
-                        startNewGame(mode, newAiColor, level);
-                      } else {
-                        resetPonder(); // side change (ponder-spec.md §5.3, §6.2)
-                        setAiColor(newAiColor);
-                      }
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-              <div className="level-picker" role="group" aria-label="AI level">
-                {(
-                  [
-                    { label: "Easy", value: "easy" },
-                    { label: "Zen", value: "zen" },
-                    { label: "Fun", value: "fun" },
-                  ] as const
-                ).map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={level === opt.value ? "active" : ""}
-                    onClick={() => {
-                      const newLevel = opt.value;
-                      if (newLevel === level) return;
-                      if (historyRef.current.length > 0) {
-                        // eslint-disable-next-line no-alert
-                        if (!window.confirm("Switch level and end the current game?")) return;
-                        startNewGame(mode, aiColor, newLevel);
-                      } else {
-                        resetPonder(); // level change (ponder-spec.md §5.3, §6.2)
-                        setLevel(newLevel);
-                      }
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-          {mode === "human-human" && (
-            <div className="controls-row">
+        <details
+          className="collapsible rules-summary"
+          open={openPanel === "rules"}
+          onToggle={(e) => togglePanel("rules", e.currentTarget.open)}
+        >
+          <summary>Rules summary</summary>
+          {renderRules()}
+        </details>
+      </div>
+
+      {/* The mobile widget drawer: same idea as a hamburger side menu, but
+          anchored to the bottom edge, where the thumb and the bar that opened
+          it already are. It scrolls inside itself so the page never does. */}
+      {widget && (
+        <div className="sheet-backdrop" onClick={() => setWidget(null)}>
+          <div
+            className="sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              widget === "rules" ? "Rules summary" : widget === "log" ? "Move log" : "Settings"
+            }
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sheet-header">
+              <h2>
+                {widget === "rules" ? "Rules summary" : widget === "log" ? "Move log" : "Settings"}
+              </h2>
               <button
                 type="button"
-                className={`toggle-btn ${autoFlip ? "pressed" : ""}`}
-                aria-pressed={autoFlip}
-                onClick={() => setAutoFlip((v) => !v)}
+                className="sheet-close"
+                aria-label="Close"
+                onClick={() => setWidget(null)}
               >
-                Flip board
-              </button>
-              <button
-                type="button"
-                className={`toggle-btn ${timerEnabled ? "pressed" : ""}`}
-                aria-pressed={timerEnabled}
-                disabled={historyRef.current.length > 0}
-                onClick={() => {
-                  const enabled = !timerEnabled;
-                  setTimerEnabled(enabled);
-                  if (enabled) {
-                    setTimeUp(null);
-                    resetClock(timerMinutes);
-                  }
-                }}
-              >
-                Clock
+                ×
               </button>
             </div>
-          )}
-          {mode === "human-human" && timerEnabled && (
-            <label>
-              Minutes per side:
-              <input
-                type="number"
-                min={1}
-                max={180}
-                value={timerMinutes}
-                disabled={historyRef.current.length > 0}
-                onChange={(e) => {
-                  const minutes = Number(e.target.value);
-                  setTimerMinutes(minutes);
-                  resetClock(minutes);
-                }}
-              />
-            </label>
-          )}
+            <div className="sheet-body">
+              {widget === "rules" && <div className="rules-summary">{renderRules()}</div>}
+              {widget === "log" && <MoveLog moveLog={game.moveLog} />}
+              {widget === "settings" && renderControls()}
+            </div>
+          </div>
         </div>
-      </div>
       )}
 
       {modal && (

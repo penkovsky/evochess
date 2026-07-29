@@ -33,12 +33,10 @@
   --panel-width: 360px;
 }
 
-.toggle-panel-btn {
+/* The icon bar is phone-only; above the breakpoint the side panel carries the
+   same content. */
+.mobile-bar {
   display: none;
-  width: 100%;
-  margin-bottom: 8px;
-  padding: 8px;
-  cursor: pointer;
 }
 
 @media (max-width: 600px) {
@@ -47,19 +45,150 @@
     gap: 12px;
   }
 
-  .toggle-panel-btn {
-    display: block;
+  /* Below the board the panel is under the fold, so the widget bar replaces
+     it entirely rather than stacking beneath it. */
+  .panel {
+    display: none;
   }
 
-  .panel {
-    min-width: 0;
-    width: 100%;
-    max-height: none;
+  .mobile-bar {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 10px;
   }
 
   .evo-strip {
     gap: 12px;
   }
+}
+
+.widget-btn {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  /* Themed via the root variables (index.css) so the bar follows the device's
+     light/dark setting, like the rest of the page. */
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.widget-btn.primary {
+  border-color: #22aa77;
+  background: #22aa77;
+  color: white;
+}
+
+/* Bottom drawer. The board stays visible above it, so consulting the rules
+   mid-game doesn't cost you the position. */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 40;
+}
+
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  /* Follows the device light/dark setting via the root variables, like the
+     board screen behind it. */
+  background: var(--bg);
+  color: var(--text);
+  border-top: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  text-align: left;
+  animation: sheet-up 180ms ease-out;
+  /* .learn-btn and friends size against this in the panel; the sheet is
+     already full width, so let them fill it. */
+  --panel-width: 100%;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet {
+    animation: none;
+  }
+}
+
+.sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.sheet-header h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-h);
+}
+
+.sheet-close {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 26px;
+  line-height: 1;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.sheet-body {
+  overflow-y: auto;
+  /* Don't hand the scroll on to the page once the sheet hits its end — the
+     body is pinned while the sheet is open, but this also stops the rubber-band
+     chaining that pinning alone doesn't prevent. */
+  overscroll-behavior: contain;
+  margin-top: 6px;
+}
+
+/* The panel gives these fixed heights so the column stays put; in the sheet
+   the rules let .sheet-body do the scrolling instead. */
+.sheet .rules-summary ul {
+  height: auto;
+}
+
+/* The log stays its own scroller even in the sheet: MoveLog pins it to the
+   bottom on open and after each move, which only works if the element with
+   the ref is the one that scrolls. It grows with the game up to the cap. */
+.sheet .log {
+  height: auto;
+  max-height: 55vh;
+  overscroll-behavior: contain;
+}
+
+.log-empty {
+  margin: 0;
+  color: var(--text);
+  opacity: 0.7;
+}
+
+.sheet .controls {
+  margin-top: 0;
 }
 
 .status {
@@ -535,6 +664,9 @@
 .modal-backdrop {
   position: fixed;
   inset: 0;
+  /* Above the widget sheet (z-index 40): the promotion prompt must never end
+     up behind a drawer the player left open. */
+  z-index: 50;
   background: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
