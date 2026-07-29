@@ -5,7 +5,7 @@
  * quiescence search.
  */
 import type { Color, Square, PieceSymbol } from "chess.js";
-import { EvoChessGame, ROOK_CHARGES, type ApplyMoveOptions } from "./game";
+import { EvoChessGame, ROOK_CHARGES, N_MINOR, M_ROOK, type ApplyMoveOptions } from "./game";
 import { evaluateNNUE, hasNnueWeights } from "./nnue";
 import { squareName } from "./bitboard";
 import { fromEvoGame, type EvoTurn } from "./evoBitboard";
@@ -337,7 +337,15 @@ function candidateTurns(
 
     push(from, to, {}, isCapture, captureBonus);
 
-    if (isPawnMove && game.minorRights[color] > 0) {
+    // Rights are read *after* this move's own counter tick: a right earned by
+    // this very move may be spent on it (see the `a4=B` example in rules.txt,
+    // and the matching ordering in applyMove()).
+    const minorRightsAfter =
+      game.minorRights[color] + (game.pawnMoveProgress[color] + 1 >= N_MINOR ? 1 : 0);
+    const rookRightsAfter =
+      game.rookRights[color] + (game.minorMoveProgress[color] + 1 >= M_ROOK ? 1 : 0);
+
+    if (isPawnMove && minorRightsAfter > 0) {
       for (const minor of ["n", "b"] as const) {
         // Spending a right adds ~2 pawns of material on the spot: order it
         // above quiet moves but below real captures.
@@ -345,7 +353,7 @@ function candidateTurns(
       }
     }
 
-    if (isMinorMove && game.rookRights[color] > 0 && !game.rookLocked.has(from)) {
+    if (isMinorMove && rookRightsAfter > 0 && !game.rookLocked.has(from)) {
       push(from, to, { rookPromo: true }, isCapture, captureBonus + 5e5);
     }
   }

@@ -160,10 +160,17 @@ export function generateEvoTurns(s: EvoPos): EvoTurn[] {
       }
     }
     turns.push({ from, to });
-    if (isPawn && evo.minorRights[us] > 0) {
+    // Rights are read *after* this move's own counter tick: a right earned by
+    // this very move may be spent on it (see the `a4=B` example in rules.txt,
+    // and the matching ordering in game.ts `applyMove`).
+    if (isPawn && evo.minorRights[us] + (evo.pawnProgress[us] + 1 >= N_MINOR ? 1 : 0) > 0) {
       for (const m of ["n", "b"] as const) turns.push({ from, to, minor: m });
     }
-    if (isMinor && evo.rookRights[us] > 0 && !evo.locked.has(from)) {
+    if (
+      isMinor &&
+      evo.rookRights[us] + (evo.minorProgress[us] + 1 >= M_ROOK ? 1 : 0) > 0 &&
+      !evo.locked.has(from)
+    ) {
       turns.push({ from, to, rook: true });
     }
   };
@@ -179,7 +186,11 @@ export function generateEvoTurns(s: EvoPos): EvoTurn[] {
       if (pieceAt(pos, from) !== P || (pos.occ[us] & bitAt(from)) === 0n) continue;
       if (!evolvedEpLegal(s, from, ep.victim, ep.skipped)) continue;
       turns.push({ from, to: ep.skipped });
-      if (evo.minorRights[us] > 0) for (const m of ["n", "b"] as const) turns.push({ from, to: ep.skipped, minor: m });
+      // An evolved-ep capture is a pawn move, so it ticks the counter too and
+      // can spend a right it earns (same rule as `expand` above).
+      if (evo.minorRights[us] + (evo.pawnProgress[us] + 1 >= N_MINOR ? 1 : 0) > 0) {
+        for (const m of ["n", "b"] as const) turns.push({ from, to: ep.skipped, minor: m });
+      }
     }
   }
 

@@ -544,10 +544,6 @@ export class EvoChessGame {
 
   // -- helpers for candidate generation (used by the AI / UI) ----------
 
-  minorPromoCandidates(color: Color): boolean {
-    return this.minorRights[color] > 0;
-  }
-
   /**
    * Whether a Knight/Bishop currently standing on `square` (assumed to be the
    * piece that just moved) may be evolved into a Rook: the side must hold an
