@@ -72,15 +72,18 @@ test("lesson 1 teaches the first promotion against a real opponent", async ({ pa
   await firstVisitPage(page);
   await openLesson(page, "Start lesson 1");
 
-  // Step 1: e4. The note only appears once Black — the Easy AI — has answered.
+  // Step 1: e4. Once Black — the Easy AI — has answered, the next step arrives
+  // on its own: what the move did leads the card the next instruction is on,
+  // so there is nothing to click through between moves.
   await move(page, "e2", "e4");
-  await expect(page.locator(".tutorial-card.note")).toBeVisible();
-  await page.getByRole("button", { name: "Continue" }).click();
+  const instruction = page.locator(".tutorial-card.instruction");
+  await expect(instruction).toContainText("One green dot");
+  await expect(instruction).toContainText("b3");
 
-  // Step 2: b3.
+  // Step 2: b3, and again straight on to step 3.
   await move(page, "b2", "b3");
-  await expect(page.locator(".tutorial-card.note")).toBeVisible();
-  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(instruction).toContainText("Two dots");
+  await expect(instruction).toContainText("c3");
 
   // Step 3: the third pawn move earns a minor piece and opens the real prompt.
   await move(page, "c2", "c3");
@@ -90,10 +93,12 @@ test("lesson 1 teaches the first promotion against a real opponent", async ({ pa
   await page.locator(".promo-icon[title*='Knight']").click();
   await expect(page.locator(".modal")).toHaveCount(0);
   await expect(page.locator('[data-square="c3"] [data-piece="wN"]')).toBeVisible();
-  await expect(page.locator(".tutorial-card.note")).toBeVisible();
 
-  await page.getByRole("button", { name: "Finish lesson" }).click();
-  await expect(page.locator(".tutorial-card.outro")).toBeVisible();
+  // The last step's payoff heads the outro rather than delaying it.
+  const outro = page.locator(".tutorial-card.outro");
+  await expect(outro).toBeVisible();
+  await expect(outro).toContainText("now a Knight");
+  await expect(page.getByRole("button", { name: "Finish lesson" })).toHaveCount(0);
 
   await page.locator(".tutorial-actions").getByRole("button", { name: "All lessons" }).click();
   await expect(page.locator(".lesson-card.done")).toHaveCount(1);
@@ -133,9 +138,9 @@ test("an off-script move is played, not refused, and the game carries on", async
   await expect(page.locator('[data-square="a4"] [data-piece]')).toHaveCount(0);
   await expect(page.locator('[data-square="b4"] [data-piece]')).toHaveCount(0);
 
-  // The rewound step still works.
+  // The rewound step still works, and carries on into step 2.
   await move(page, "e2", "e4");
-  await expect(page.locator(".tutorial-card.note")).toBeVisible();
+  await expect(page.locator(".tutorial-card.instruction")).toContainText("One green dot");
 });
 
 test("an off-script promotion choice is accepted too", async ({ page }) => {
@@ -143,9 +148,9 @@ test("an off-script promotion choice is accepted too", async ({ page }) => {
   await openLesson(page, "Start lesson 1");
 
   await move(page, "e2", "e4");
-  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.locator(".tutorial-card.instruction")).toContainText("b3");
   await move(page, "b2", "b3");
-  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.locator(".tutorial-card.instruction")).toContainText("c3");
 
   // The step suggests a Knight; taking the Bishop is a legal, sensible choice
   // and must be honoured rather than rejected.
@@ -163,8 +168,7 @@ test("rewinding mid-lesson returns to the current step, keeping earlier ones", a
   await openLesson(page, "Start lesson 1");
 
   await move(page, "e2", "e4");
-  await expect(page.locator(".tutorial-card.note")).toBeVisible();
-  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.locator(".tutorial-card.instruction")).toContainText("b3");
 
   // Wander off on step 2, then ask for the step back.
   await move(page, "h2", "h4");
@@ -175,6 +179,30 @@ test("rewinding mid-lesson returns to the current step, keeping earlier ones", a
   await expect(page.locator('[data-square="e4"] [data-piece]')).toBeVisible();
   await expect(page.locator('[data-square="h4"] [data-piece]')).toHaveCount(0);
   await expect(page.locator(".tutorial-card.instruction")).toContainText("b3");
+});
+
+test("finishing a lesson hands the position over rather than freezing it", async ({ page }) => {
+  await firstVisitPage(page);
+  await openLesson(page, /Minors earn Rooks/);
+
+  // The lesson itself: the Bishop's third minor move arrives on a8 as a Rook,
+  // giving check, and Black's only answer is to block on d8.
+  await move(page, "g2", "a8");
+  await page.locator(".promo-icon[title*='Rook']").click();
+  await expect(page.locator('[data-square="a8"] [data-piece="wR"]')).toBeVisible();
+
+  // The reply flows straight into the outro — no intermediate screen, and
+  // nothing to click through.
+  await expect(page.locator('[data-square="d8"] [data-piece="bR"]')).toBeVisible();
+  await expect(page.locator(".tutorial-card.outro")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Finish lesson" })).toHaveCount(0);
+
+  // The outro is not a full stop: the board is still live, and this position
+  // is mate in one. Taking it must work, and must not throw the outro away.
+  await move(page, "a8", "d8");
+  await expect(page.locator('[data-square="d8"] [data-piece="wR"]')).toBeVisible();
+  await expect(page.locator(".tutorial-card.outro")).toContainText("Checkmate");
+  await expect(page.locator(".tutorial-actions").getByRole("button", { name: "Next lesson" })).toBeVisible();
 });
 
 test("the rook-charge lesson downgrades the rook on its last charge", async ({ page }) => {

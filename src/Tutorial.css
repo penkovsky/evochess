@@ -225,7 +225,7 @@
   background: rgba(34, 170, 119, 0.45);
 }
 
-/* -- instruction / note cards ------------------------------------------ */
+/* -- instruction / outro cards ----------------------------------------- */
 
 .tutorial-card {
   padding: 16px 18px;
@@ -244,9 +244,16 @@
   border-left: 3px solid #22aa77;
 }
 
-.tutorial-card.note {
+/* What the last move did, riding on top of the next instruction rather than
+   on a screen of its own — kept visually distinct so the reader can tell the
+   recap from the thing they're being asked to do next. */
+.tutorial-recap {
+  margin: -4px -8px 12px;
+  padding: 8px 10px;
   border-left: 3px solid #d68910;
-  background: rgba(214, 137, 16, 0.06);
+  border-radius: 0 6px 6px 0;
+  background: rgba(214, 137, 16, 0.08);
+  font-size: 14px;
 }
 
 /* Deliberately calmer than the instruction card: going off-script is a normal

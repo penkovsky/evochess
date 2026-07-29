@@ -47,14 +47,36 @@ export interface TutorialStep {
    * tutorial.test.ts checks), and as the fallback when no AI is available.
    */
   reply?: ScriptedMove;
-  /** The payoff: what just happened and why it matters. */
-  note: string;
+  /**
+   * The payoff: what this step's move did and why it matters. It is *not* a
+   * screen of its own — the lesson never stops to be acknowledged, which on a
+   * phone is a "Continue" tap between every move. Instead it becomes the
+   * opening paragraph of the next step's card (or of the outro, for the last
+   * step), so the learner reads what just happened and what to do next in one
+   * breath. Optional: a step whose payoff the outro already states can omit it.
+   */
+  recap?: string;
 }
 
 /**
  * A hand-built teaching position: the FEN plus everything about EvoChess state
  * that a FEN cannot carry. Every counter defaults to zero and every map to
  * empty, so a lesson states only what it actually wants to be true.
+ *
+ * Which squares a lesson uses is a hard constraint, not a free choice. Black
+ * is the Easy AI, so anything left en prise gets taken and any legal check
+ * gets played. Three rules, learned the hard way from lessons that stranded
+ * themselves, and every square in `LESSONS` is picked to satisfy them:
+ *
+ *  1. A piece a later step depends on must stand where Black cannot reach it —
+ *     otherwise the step asks for a move with no piece left to make it.
+ *  2. The piece a lesson *produces* must not appear en prise, or the lesson's
+ *     punchline is a blunder.
+ *  3. White's King must stay out of check at the start of every step, or the
+ *     step's own move is illegal and the lesson strands.
+ *
+ * The tests in tutorial.test.ts play each lesson out against the real Easy
+ * opponent, which is what actually catches a square that breaks one of these.
  */
 export interface LessonPosition {
   fen: string;
@@ -80,83 +102,9 @@ export interface Lesson {
   /** A hand-built position instead of a setup line. Takes precedence. */
   position?: LessonPosition;
   steps: TutorialStep[];
-  outro: string;
+  /** The closing screen, one string per paragraph. */
+  outro: string[];
 }
-
-/**
- * 1.e4 e5 2.b3 b6 3.c3=N d6 — White converts the c-pawn into a Knight on c3,
- * the starting point for the lessons about what minor pieces then earn.
- *
- * Which squares a lesson uses is a hard constraint, not a free choice. Black
- * is the Easy AI, so anything left en prise gets taken and any legal check
- * gets played — and either can leave a multi-step lesson unfinishable, since
- * every later step asks the same piece to move again.
- *
- * Three rules follow, and every square below is chosen to satisfy them:
- *
- *  1. A piece a later step depends on must stand where no Black pawn can
- *     reach it. Ranks 1 and 2 are unreachable inside a lesson; rank 3 takes
- *     two pawn moves; ranks 4 and 5 are one pawn push from being attacked.
- *  2. The piece a lesson *produces* must not appear en prise, or the lesson's
- *     punchline is a blunder.
- *  3. White's King must stay out of check, or the checking move makes the
- *     suggested reply illegal and strands the lesson. Hence the d- and
- *     f-pawns never move: they block both diagonals into e1. Black banks
- *     promotion rights fast here, and a pawn evolving into a Bishop on a5 is
- *     check the moment d2 stands empty.
- *
- * So the Knight is made on c3, out of the c-pawn, leaving d2 and f2 at home.
- */
-const KNIGHT_ON_C3: ScriptedMove[] = [
-  { from: "e2", to: "e4" },
-  { from: "e7", to: "e5" },
-  { from: "b2", to: "b3" },
-  { from: "b7", to: "b6" },
-  { from: "c2", to: "c3", options: { minorPromo: "n" } },
-  { from: "d7", to: "d6" },
-];
-
-/**
- * ...Ne2, Ng1 — the Knight has two minor moves banked, so the next Knight move
- * earns the Rook that the charges lesson goes on to burn out.
- *
- * This is the shape every lesson wants: the learner's own move is the *last*
- * one in a sequence, with the earlier moves pre-played in the setup. It keeps
- * the opponent from ever getting a turn between the steps that matter, which
- * is what used to strand these lessons — a captured Knight or a check, and
- * every later step was asking for an illegal move.
- *
- * The Knight tours e2 and g1 because those are squares Black can never touch
- * (rule 1 above). The route is pointless as chess; the learner never sees
- * these moves, only the position and the counters they produce.
- */
-const KNIGHT_TWO_MOVES_IN: ScriptedMove[] = [
-  ...KNIGHT_ON_C3,
-  { from: "c3", to: "e2" },
-  { from: "g7", to: "g6" },
-  { from: "e2", to: "g1" },
-  { from: "h7", to: "h6" },
-];
-
-/**
- * ...Nf3=R and four Rook moves, leaving a White Rook on c2 with a single
- * charge left — one move from burning out. The Rook walks back to c2 for the
- * same reason the Knight toured the back rank: Black cannot reach it there.
- */
-const ROOK_ON_LAST_CHARGE: ScriptedMove[] = [
-  ...KNIGHT_TWO_MOVES_IN,
-  { from: "g1", to: "f3", options: { rookPromo: true } },
-  { from: "a7", to: "a6" },
-  // Four Rook moves: 5 charges down to 1.
-  { from: "f3", to: "e3" },
-  { from: "f7", to: "f6" },
-  { from: "e3", to: "d3" },
-  { from: "a6", to: "a5" },
-  { from: "d3", to: "c3" },
-  { from: "h6", to: "h5" },
-  { from: "c3", to: "c2" },
-  { from: "g6", to: "g5" },
-];
 
 export const LESSONS: Lesson[] = [
   {
@@ -170,24 +118,25 @@ export const LESSONS: Lesson[] = [
         hint: "Move the e2 Pawn two squares forward, to e4.",
         play: { from: "e2", to: "e4" },
         reply: { from: "e7", to: "e5" },
-        note: "One green dot filled in under the board. That strip is your progress toward your next piece: every Pawn move fills a dot.",
+        recap: "One green dot filled in under the board. That strip is your progress toward your next piece: every Pawn move fills a dot.",
       },
       {
         text: "Two more Pawn moves to go. Play b3.",
         hint: "Move the b2 Pawn to b3.",
         play: { from: "b2", to: "b3" },
         reply: { from: "b7", to: "b6" },
-        note: "Two dots. The strip above the board is Black's — they're earning pieces on the same terms you are, so watch it as closely as your own.",
+        recap: "Two dots. The strip above the board is Black's — they're earning pieces on the same terms you are, so watch it as closely as your own.",
       },
       {
         text: "This is the one. Play c3 — your third Pawn move — and a Knight or Bishop will be offered to you.",
         hint: "Move the c2 Pawn to c3 to complete three Pawn moves.",
         play: { from: "c2", to: "c3", options: { minorPromo: "n" } },
-        note: "The Pawn on c3 is now a Knight, and the green dots have reset to zero. Three more Pawn moves buys the next piece.",
+        recap: "The Pawn on c3 is now a Knight, and the green dots have reset to zero. Three more Pawn moves buys the next piece.",
       },
     ],
-    outro:
+    outro: [
       "Three Pawn moves earned one minor piece — and it appeared on c3, the square of the Pawn that just moved. That's the rule that shapes the whole game: the piece you get is the Pawn you just pushed, so which Pawn you move decides where your army grows.",
+    ],
   },
   {
     id: "rooks",
@@ -211,27 +160,38 @@ export const LESSONS: Lesson[] = [
         hint: "Slide the Bishop from g2 down the long diagonal to a8, then choose the Rook.",
         play: { from: "g2", to: "a8", options: { rookPromo: true } },
         reply: { from: "d2", to: "d8" },
-        note: "The Bishop travelled as a Bishop and landed as a Rook — and a Rook on a8 is check along the empty back rank, which a Bishop there would never have been. The blue dots are back to zero, and the new Rook carries a small 5.",
+        // No recap: the outro below already is this step's payoff, and a lesson
+        // of one step would otherwise say the same thing twice on one screen.
       },
     ],
-    outro:
-      "Same shape as the Pawn rule, one level up: three moves, and the piece that just moved is the one that upgrades. The two ladders run side by side and never mix — Pawn moves fill only green dots, minor-piece moves only blue. That also makes the third move a choice of square: the piece arrives where you park it, so park it where a Rook hurts. Notice the small badge on it — that's a countdown, and the last lesson is about what it means.",
+    outro: [
+      "The Bishop travelled as a Bishop and landed as a Rook — and a Rook on a8 is check along the empty back rank, which a Bishop there would never have been. The blue dots are back to zero, and the new Rook carries a small 5. That's a countdown.",
+    ],
   },
   {
     id: "charges",
     title: "Rooks burn out",
     blurb: "A Rook is five moves of power, not a permanent piece.",
-    setup: ROOK_ON_LAST_CHARGE,
+    // An endgame, built rather than played into: a Rook down to its last
+    // charge, and one Pawn behind it. Black's King on d5 is what makes the
+    // choice at the end a real one — a Knight landing on c7 checks it, a
+    // Bishop doesn't, and neither can be taken by the Queen on a6.
+    position: {
+      fen: "8/2p5/q6P/3k4/8/8/2R5/4K3 w - - 0 1",
+      rookCharges: { c2: 1 },
+    },
     steps: [
       {
         text: "Every Rook is born with five charges, and the badge on c2 reads 1 — this one has been busy. Charges are spent only when the Rook itself moves, so the rest of your army costs it nothing. But any Rook move now is one too many, so make it count: take the Pawn on c7.",
         hint: "Capture the c7 Pawn with the Rook on c2.",
         play: { from: "c2", to: "c7", anyDowngrade: true },
-        note: "Zero charges, so the Rook never really arrived: it made its move and collapsed into the minor piece you chose, on the same square, on the same turn.",
+        // No recap, as in the Rook lesson: one step, so the payoff is the outro.
       },
     ],
-    outro:
-      "The Rook took the Pawn and immediately collapsed into a minor piece on the same square. That piece is permanently barred from becoming a Rook again, so it can never cycle. Rooks are a burst of power to be timed, not a piece you keep.",
+    outro: [
+      "Zero charges, so the Rook never really arrived: it made its move and collapsed into the minor piece you chose, on the same square, on the same turn.",
+      "That piece is permanently barred from becoming a Rook again, so it can never cycle. Rooks are a burst of power to be timed, not a piece you keep.",
+    ],
   },
 ];
 

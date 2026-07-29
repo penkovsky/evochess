@@ -68,11 +68,14 @@ describe("tutorial lessons", () => {
     expect(lesson.title.length).toBeGreaterThan(0);
     expect(lesson.blurb.length).toBeGreaterThan(0);
     expect(lesson.outro.length).toBeGreaterThan(0);
+    for (const paragraph of lesson.outro) expect(paragraph.length).toBeGreaterThan(0);
     expect(lesson.steps.length).toBeGreaterThan(0);
     for (const step of lesson.steps) {
       expect(step.text.length).toBeGreaterThan(0);
       expect(step.hint.length).toBeGreaterThan(0);
-      expect(step.note.length).toBeGreaterThan(0);
+      // A recap is optional — an empty one is not, since it renders as a
+      // paragraph of its own on the following card.
+      if (step.recap !== undefined) expect(step.recap.length).toBeGreaterThan(0);
     }
   });
 
@@ -126,13 +129,16 @@ describe("tutorial lessons", () => {
     const game = buildLessonGame(LESSONS[2]);
     expect(game.chess.get("c2" as Square)).toMatchObject({ type: "r", color: "w" });
     expect(game.rookCharges.get("c2" as Square)).toBe(1);
+    // Hand-built, so the rest of the state is stated rather than earned.
+    expect(game.minorMoveProgress).toEqual({ w: 0, b: 0 });
+    expect(game.rookLocked.size).toBe(0);
   });
 
   // The lesson asserts this in prose rather than spending a step on it, so
   // the claim is checked here instead.
   it("charges: a non-Rook move leaves the charge untouched", () => {
     const game = buildLessonGame(LESSONS[2]);
-    game.applyMove("a2", "a3");
+    game.applyMove("h6", "h7");
     expect(game.rookCharges.get("c2" as Square), "a pawn move must not spend a charge").toBe(1);
   });
 
@@ -230,7 +236,7 @@ describe("lessons against the Easy opponent", () => {
    * the same piece to move each time, so if the opponent captures it the
    * lesson becomes impossible to finish rather than merely off-script. Every
    * square that piece visits has to be out of reach — see the note on
-   * ROOK_ON_LAST_CHARGE for the rules the squares were chosen by.
+   * `LessonPosition` for the rules the squares were chosen by.
    */
   it.each(SEEDS)("the Rook lesson completes against Easy (seed %i)", (seed) => {
     const lesson = LESSONS[1];

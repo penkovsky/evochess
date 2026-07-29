@@ -33,12 +33,19 @@ export type SearchFn = (
 /**
  * "await" — a step is suggesting a move.
  * "reply" — the opponent is choosing its answer.
- * "note"  — the suggested move was played; showing what it did.
- * "done"  — the lesson's last step is finished.
+ * "done"  — the lesson's last step is finished. The board stays live: the
+ *           outro is an invitation to play the position out, not a full stop.
  * "free"  — the learner played something else, so the script stepped aside;
  *           the game carries on against the AI until they ask to rewind.
+ *
+ * There is deliberately no phase for "your move worked, press Continue": a
+ * step's payoff rides along on the next step's card instead (see `recap`),
+ * so playing a lesson through is all board taps and no button taps.
  */
-type Phase = "await" | "reply" | "note" | "done" | "free";
+type Phase = "await" | "reply" | "done" | "free";
+
+/** Where a move lands once its reply has resolved. */
+type Settle = "advance" | "free" | "done";
 
 interface ModalState {
   kind: "optional" | "downgrade" | "forced";
@@ -182,15 +189,25 @@ function LessonPlayer({
   const stepStartsRef = useRef<EvoChessGame[]>([gameRef.current.copy()]);
   const [stepIndex, setStepIndex] = useState(0);
   const [phase, setPhase] = useState<Phase>("await");
+  // Sticky once the lesson's last step is done: play continues from there, so
+  // `phase` still swings to "reply" and back while the outro stays on screen.
+  const [finished, setFinished] = useState(false);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [selected, setSelected] = useState<Square | null>(null);
+  // Where the reply currently in flight will land. The panel shows no "Easy is
+  // thinking…" card — Easy answers fast enough that one would be a flicker
+  // rather than information — so it has to keep showing whatever it was
+  // showing, and that means knowing which card the move came from.
+  const [replySettle, setReplySettle] = useState<Settle>("advance");
   // Set while an opponent search is in flight so a reply arriving after a
   // rewind can be recognised as stale and dropped.
   const mountedRef = useRef(true);
 
   const step = lesson.steps[stepIndex];
   const game = gameRef.current;
-  const boardLive = (phase === "await" || phase === "free") && !game.isGameOver();
+  // "done" is live too: finishing a lesson hands the position over rather than
+  // freezing it, so the learner can play out whatever the lesson set up.
+  const boardLive = (phase === "await" || phase === "free" || phase === "done") && !game.isGameOver();
   // A real opponent can overtake the lesson: the piece a step wants to move
   // may be gone, or a check may rule the move out.
   const diverged = phase === "await" && !isSuggestionAvailable(game, step);
@@ -208,9 +225,21 @@ function LessonPlayer({
     gameRef.current = position;
     setStepIndex(target);
     setPhase("await");
+    setFinished(false);
     setModal(null);
     setSelected(null);
     rerender();
+  }
+
+  /**
+   * Where the panel lands once a move (and the reply to it) has resolved. The
+   * step's own move moves the lesson on; anything else hands the board over —
+   * but after the lesson is finished there is no script left to leave, so the
+   * outro simply stays put while the game continues under it.
+   */
+  function settleTo(onScript: boolean): Settle {
+    if (finished) return "done";
+    return onScript ? "advance" : "free";
   }
 
   /** Back to the position this step was played from — earlier steps survive. */
@@ -230,8 +259,9 @@ function LessonPlayer({
    * opponent the app itself offers. `step.reply` is the fallback for when no
    * search is available at all.
    */
-  async function playOpponentReply(from: EvoChessGame, onScript: boolean, fallback?: ScriptedMove) {
+  async function playOpponentReply(from: EvoChessGame, settle: Settle, fallback?: ScriptedMove) {
     setPhase("reply");
+    setReplySettle(settle);
     // Let the learner's own move land visibly before the search starts.
     await new Promise((r) => setTimeout(r, MOVE_SETTLE_MS));
     let move: ScriptedMove | null = null;
@@ -251,11 +281,11 @@ function LessonPlayer({
         // than corrupt the game. The learner simply gets another turn.
       }
     }
-    setPhase(onScript ? "note" : "free");
+    settleOrAdvance(settle);
     rerender();
   }
 
-  function commit(from: Square, to: Square, options: ApplyMoveOptions, onScript: boolean) {
+  function commit(from: Square, to: Square, options: ApplyMoveOptions, settle: Settle) {
     setModal(null);
     setSelected(null);
     try {
@@ -267,10 +297,16 @@ function LessonPlayer({
     }
     rerender();
     if (game.isGameOver()) {
-      setPhase(onScript ? "note" : "free");
+      settleOrAdvance(settle);
       return;
     }
-    void playOpponentReply(game, onScript, onScript ? step.reply : undefined);
+    void playOpponentReply(game, settle, settle === "advance" ? step.reply : undefined);
+  }
+
+  /** Lands the panel: on-script moves roll straight into the next step. */
+  function settleOrAdvance(settle: Settle) {
+    if (settle === "advance") advance();
+    else setPhase(settle);
   }
 
   function advance() {
@@ -281,6 +317,7 @@ function LessonPlayer({
       return;
     }
     onComplete(lesson.id);
+    setFinished(true);
     setPhase("done");
   }
 
@@ -294,6 +331,7 @@ function LessonPlayer({
     const piece = game.chess.get(from);
     if (!piece || piece.color !== game.turn) return false;
     const onScript = suggestionLive && isStepSquarePair(step.play, from, to);
+    const settle = settleTo(onScript);
     const color = game.turn;
 
     // Which prompt (if any) a move needs is decided by the rules engine, so the
@@ -323,7 +361,7 @@ function LessonPlayer({
         setModal({ kind: "downgrade", from, to, color, canMinor: false, canRook: false, onScript });
         return true;
       }
-      commit(from, to, {}, onScript);
+      commit(from, to, {}, settle);
       return true;
     }
 
@@ -335,7 +373,7 @@ function LessonPlayer({
     const canMinor = isPawn && scratch.minorRights[color] > 0;
     const canRook = (piece.type === "n" || piece.type === "b") && scratch.canRookPromote(color, to);
     if (!canMinor && !canRook) {
-      commit(from, to, {}, onScript);
+      commit(from, to, {}, settle);
       return true;
     }
     setModal({ kind: "optional", from, to, color, canMinor, canRook, onScript });
@@ -345,7 +383,7 @@ function LessonPlayer({
   /** A choice from the prompt. Taking a different one is allowed — it goes free. */
   function choose(options: ApplyMoveOptions) {
     if (!modal) return;
-    commit(modal.from, modal.to, options, modal.onScript && optionsMatch(step.play, options));
+    commit(modal.from, modal.to, options, settleTo(modal.onScript && optionsMatch(step.play, options)));
   }
 
   function onSquareClick({ square }: { square: string }) {
@@ -392,8 +430,20 @@ function LessonPlayer({
     }
   }
 
+  // What the move that got us here did. Only steps reached on-script advance
+  // (going off-script lands in "free" instead), so the previous step's recap
+  // always describes a move the learner actually played.
+  const recap = stepIndex > 0 ? lesson.steps[stepIndex - 1].recap : undefined;
+  const finalRecap = lesson.steps[lesson.steps.length - 1].recap;
+
   const rights = { w: game.rightsFor("w"), b: game.rightsFor("b") };
-  const turnLabel = game.turn === "w" ? "White" : "Black";
+  // Reads through the reply rather than blinking "Black to move" and back for
+  // the moment Easy takes to answer: the learner is White, and the turn is
+  // coming back to them either way.
+  const turnLabel = game.turn === "w" || phase === "reply" ? "White" : "Black";
+  // A move played off-script must keep showing the off-script card while the
+  // reply to it is searched, not fall back to the instruction underneath.
+  const offScript = phase === "free" || (phase === "reply" && replySettle === "free");
 
   return (
     <div className="tutorial tutorial-lesson">
@@ -437,9 +487,9 @@ function LessonPlayer({
             <span
               key={i}
               className={`step-pip ${
-                i < stepIndex || phase === "done"
+                i < stepIndex || finished
                   ? "done"
-                  : i === stepIndex && phase !== "free" && !diverged
+                  : i === stepIndex && !offScript && !diverged
                   ? "current"
                   : ""
               }`}
@@ -447,10 +497,21 @@ function LessonPlayer({
           ))}
         </div>
 
-        {phase === "done" ? (
+        {/* Checked ahead of `phase` so the outro — and its buttons — survive the
+            "reply" swings of a game played on past the end of the lesson. */}
+        {finished ? (
           <div className="tutorial-card outro">
             <h3>Lesson complete</h3>
-            <p>{lesson.outro}</p>
+            {/* The last step's payoff, which has no next step to lead into. */}
+            {finalRecap && <p className="tutorial-recap">{finalRecap}</p>}
+            {lesson.outro.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
+            <p className="tutorial-free-status">
+              {game.isGameOver()
+                ? game.resultString()
+                : `The board is still live — ${turnLabel} to move. Play the position out if you like.`}
+            </p>
             <div className="tutorial-actions">
               {isLast ? (
                 <button className="tutorial-btn primary" onClick={onExit}>
@@ -472,7 +533,7 @@ function LessonPlayer({
               </p>
             )}
           </div>
-        ) : phase === "free" ? (
+        ) : offScript ? (
           <div className="tutorial-card free">
             <h3>Off script — that's fine</h3>
             <p>
@@ -492,10 +553,6 @@ function LessonPlayer({
               </button>
             </div>
           </div>
-        ) : phase === "reply" ? (
-          <div className="tutorial-card thinking">
-            <p>Easy is thinking…</p>
-          </div>
         ) : diverged ? (
           <div className="tutorial-card free">
             <h3>The game has moved on</h3>
@@ -514,17 +571,9 @@ function LessonPlayer({
               </button>
             </div>
           </div>
-        ) : phase === "note" ? (
-          <div className="tutorial-card note">
-            <p>{step.note}</p>
-            <div className="tutorial-actions">
-              <button className="tutorial-btn primary" onClick={advance}>
-                {stepIndex + 1 < lesson.steps.length ? "Continue" : "Finish lesson"}
-              </button>
-            </div>
-          </div>
         ) : (
           <div className="tutorial-card instruction">
+            {recap && <p className="tutorial-recap">{recap}</p>}
             <p>{step.text}</p>
             <p className="tutorial-suggestion">{step.hint}</p>
             <p className="tutorial-aside">Or play anything else — I'll step aside and wait.</p>
