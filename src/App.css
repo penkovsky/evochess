@@ -510,10 +510,46 @@
   min-width: 46px;
 }
 
+/* Moves flow across the line rather than one pair per row, so the same 200px
+   shows several times as much of the game. Each pair is one flex item and
+   never breaks: "3. f4 h4=N" wraps whole or not at all. */
 .log {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  /* The column gap has to beat the space inside a pair, or the eye groups
+     "f4" with the next move number instead of with the move before it. */
+  gap: 2px 16px;
   height: 200px;
   overflow-y: auto;
   margin-top: 6px;
+}
+
+.log > div {
+  white-space: nowrap;
+}
+
+/* One tap target per move, padded past the text so a thumb has something to
+   aim at. The row gap above keeps two lines of them from overlapping. Kept
+   narrow horizontally: this padding is what separates the two moves of a
+   pair, and it has to stay well under the gap between pairs. */
+.log-move {
+  padding: 7px 3px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.log-move:hover {
+  background: var(--code-bg);
+}
+
+.log-move.current {
+  background: #22aa77;
+  color: white;
 }
 
 .clocks {
@@ -606,8 +642,14 @@
   margin-top: 8px;
 }
 
+/* Fixed widths rather than an even split: the row's contents change when
+   browsing starts, and buttons that resize under the thumb are hard to aim
+   at. Centred, like the widget bar below it. */
 .action-picker {
-  gap: 8px;
+  --action-gap: 6px;
+  gap: var(--action-gap);
+  justify-content: center;
+  flex-wrap: wrap;
 }
 
 .mode-picker button,
@@ -625,6 +667,7 @@
 }
 
 .action-picker button {
+  flex: 0 0 auto;
   border-radius: 6px;
 }
 
@@ -664,13 +707,53 @@
   color: white;
 }
 
-.action-picker .takeback-btn {
-  background: white;
-  border-color: #ccc;
-  color: #333;
+/* One caption and three pictograms, which is what makes room for the
+   steppers. Widths are fixed per slot, all 44px tall so every one of them
+   clears the touch target vertically. */
+.action-picker .icon-btn {
+  height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Holding a chevron is a gesture here, so the browser must not treat it as
+     the start of a selection or a double-tap zoom. */
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
-.action-picker .new-game-btn {
+/* The captioned slot, and the button that replaces it while browsing. Same
+   width, so the three pictograms beside it do not move when the row swaps. */
+.action-picker .new-game-btn,
+.action-picker .back-btn {
+  width: 8.5em;
+}
+
+.action-picker .takeback-btn,
+.action-picker .play-here-btn,
+.action-picker .browse-step-btn {
+  width: 44px;
+}
+
+/* Themed off the root variables, like the widget bar directly below: these
+   are the same kind of control and sat as a white block on a dark page. */
+.action-picker .icon-btn {
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--text-h);
+}
+
+.action-picker .icon-btn:disabled {
+  background: var(--code-bg);
+  border-color: var(--border);
+  opacity: 0.4;
+  cursor: default;
+}
+
+.action-picker .new-game-btn,
+.action-picker .back-btn {
   background: #1976d2;
   border-color: #1976d2;
   color: white;
@@ -757,6 +840,31 @@
 
 .modal .modal-close:hover {
   color: var(--text-h);
+}
+
+/* Side-by-side, and the destructive one is not the one under the thumb by
+   default. Both clear the 44px target. */
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.modal .modal-actions button {
+  flex: 1 1 0;
+  width: auto;
+  min-height: 44px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--text-h);
+}
+
+.modal .modal-actions .danger-btn {
+  background: #c0392b;
+  border-color: #c0392b;
+  color: white;
 }
 
 .promo-icons {

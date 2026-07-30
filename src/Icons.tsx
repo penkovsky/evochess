@@ -59,6 +59,45 @@ export function GearIcon() {
   );
 }
 
+/** Arrow curving back on itself — the takeback. */
+export function UndoIcon() {
+  return (
+    <Svg {...stroke} strokeWidth={2}>
+      <path d="M4 8.5h9.5a5.5 5.5 0 1 1 0 11H7" />
+      <path d="M7.5 4.5 3.5 8.5l4 4" />
+    </Svg>
+  );
+}
+
+/** Chevron left — step one ply back. */
+export function ChevronLeftIcon() {
+  return (
+    <Svg {...stroke} strokeWidth={2.2}>
+      <path d="M15 5 8 12l7 7" />
+    </Svg>
+  );
+}
+
+/** Chevron right — step one ply forward. */
+export function ChevronRightIcon() {
+  return (
+    <Svg {...stroke} strokeWidth={2.2}>
+      <path d="M9 5l7 7-7 7" />
+    </Svg>
+  );
+}
+
+/** Pawn — play on from the ply on screen, discarding what came after. */
+export function PawnIcon() {
+  return (
+    <Svg fill="currentColor">
+      <circle cx="12" cy="6.2" r="3.1" />
+      <path d="M9.1 9.4h5.8l-.9 2.2c-.6 1.5.1 3 1.1 4.2 1 1.2 1.6 2.2 1.8 3.2H7.1c.2-1 .8-2 1.8-3.2 1-1.2 1.7-2.7 1.1-4.2L9.1 9.4z" />
+      <rect x="5.8" y="19.6" width="12.4" height="2.2" rx="1.1" />
+    </Svg>
+  );
+}
+
 /** Share graph — one node fanning out to two — the outbound share dialog. */
 export function ShareIcon() {
   return (

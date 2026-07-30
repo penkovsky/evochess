@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type TouchEvent as ReactTouchEvent,
+} from "react";
 import { Chessboard } from "react-chessboard";
 import type { Color, Square } from "chess.js";
 import { EvoChessGame, EvoChessError, ROOK_CHARGES, type ApplyMoveOptions, type ForcedPromo, type MinorPromo } from "./evochess/game";
@@ -30,7 +37,17 @@ import { Fireworks } from "./Fireworks";
 import { EvoStrip } from "./EvoStrip";
 import { Tutorial } from "./Tutorial";
 import { PIECE_GLYPH } from "./pieceGlyph";
-import { CapIcon, ScrollIcon, BookIcon, GearIcon, ShareIcon } from "./Icons";
+import {
+  CapIcon,
+  ScrollIcon,
+  BookIcon,
+  GearIcon,
+  ShareIcon,
+  UndoIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  PawnIcon,
+} from "./Icons";
 import "./App.css";
 
 type Mode = "human-ai" | "human-human";
@@ -43,11 +60,34 @@ type MobileWidget = "rules" | "log" | "settings";
  * render helper because the panel copy and the mobile copy are both mounted
  * (one is hidden by CSS), and a single shared ref cannot serve two elements.
  */
-function MoveLog({ moveLog }: { moveLog: string[] }) {
+function MoveLog({
+  moveLog,
+  browsePly,
+  browsable,
+  onSelectPly,
+}: {
+  moveLog: string[];
+  /** null means live; a ply is highlighted and scrolled to when set. */
+  browsePly: number | null;
+  /**
+   * Whether the snapshots browsing needs actually exist. They are built as
+   * moves are played and are not persisted, so a game resumed from the
+   * autosave has a move log and no positions to go with it. The entries are
+   * rendered as plain text then, rather than as tap targets that do nothing.
+   */
+  browsable: boolean;
+  onSelectPly: (ply: number) => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
+  const currentPly = browsePly ?? moveLog.length;
   useEffect(() => {
     const el = ref.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    if (browsePly !== null) {
+      el.querySelector<HTMLButtonElement>(".log-move.current")?.scrollIntoView({ block: "nearest" });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
   });
   return (
     <div className="log" ref={ref}>
@@ -59,9 +99,24 @@ function MoveLog({ moveLog }: { moveLog: string[] }) {
         .filter((_, i) => i % 2 === 0)
         .map((white, n) => {
           const black = moveLog[n * 2 + 1];
+          const whitePly = n * 2 + 1;
+          const blackPly = n * 2 + 2;
+          const entry = (san: string, ply: number) =>
+            browsable ? (
+              <button
+                type="button"
+                className={`log-move${currentPly === ply ? " current" : ""}`}
+                onClick={() => onSelectPly(ply)}
+              >
+                {san}
+              </button>
+            ) : (
+              san
+            );
           return (
             <div key={n}>
-              {n + 1}. {white}{black ? ` ${black}` : ""}
+              {n + 1}. {entry(white, whitePly)}
+              {black && <> {entry(black, blackPly)}</>}
             </div>
           );
         })}
@@ -88,6 +143,9 @@ interface ShareModalState {
   copiedAt: number | null;
 }
 
+/** The two actions that discard moves, and so are asked about before they run. */
+type ConfirmState = { kind: "play-here"; ply: number } | { kind: "new-game" };
+
 function App() {
   const [, forceRender] = useState(0);
   const gameRef = useRef<EvoChessGame>(new EvoChessGame());
@@ -98,6 +156,13 @@ function App() {
   // Clock reading captured alongside each historyRef snapshot (same index),
   // so takeback can restore each side's remaining time instead of resetting it.
   const clockHistoryRef = useRef<Record<Color, number>[]>([]);
+  // Which ply of the current game is on screen. null means live (the actual
+  // gameRef.current position); otherwise an index into historyRef, which
+  // holds the position after that many plies. Not persisted: a reload always
+  // lands on the live position. Deliberately a free-floating index rather than
+  // "steps back from live", so a move arriving while browsing (own or the
+  // AI's) grows historyRef underneath it without moving what's on screen.
+  const [browsePly, setBrowsePly] = useState<number | null>(null);
   const [mode, setMode] = useState<Mode>("human-ai");
   const [aiColor, setAiColor] = useState<Color>("b");
   const [level, setLevel] = useState<AiLevel>("zen");
@@ -106,6 +171,12 @@ function App() {
   const shareLastFocusRef = useRef<HTMLElement | null>(null);
   const shareCopyBtnRef = useRef<HTMLButtonElement>(null);
   const shareCloseBtnRef = useRef<HTMLButtonElement>(null);
+  // The action waiting on confirmation, or null. Both of these throw away
+  // moves, and neither can be undone. `play-here` carries its ply rather than
+  // reading `browsePly` at the end, so the dialog commits to the position the
+  // player was looking at when they asked, even if the AI moves meanwhile.
+  const [confirmAction, setConfirmAction] = useState<ConfirmState | null>(null);
+  const confirmCancelBtnRef = useRef<HTMLButtonElement>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [showFireworks, setShowFireworks] = useState(false);
@@ -664,6 +735,46 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [widget, modal]);
 
+  // Escape and focus for the confirmation dialog. Focus lands on Cancel, not
+  // on the destructive action, so a stray Enter or Space does nothing.
+  useEffect(() => {
+    if (!confirmAction) return;
+    confirmCancelBtnRef.current?.focus();
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setConfirmAction(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [confirmAction]);
+
+  // Desktop history browsing: left/right steps a ply, Home/End jump to the
+  // ends. Skipped while a modal/sheet is open or a text input has focus, so
+  // it never steals keys from the promotion prompt, the widget sheet, or the
+  // minutes-per-side field.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (modal || shareModal || widget || confirmAction) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        browsePrev();
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        browseNext();
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        browseHome();
+      } else if (e.key === "End") {
+        e.preventDefault();
+        browseLive();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modal, shareModal, widget, browsePly, confirmAction]);
+
   // Escape and focus for the share dialog: focus lands on Copy when it opens,
   // and returns to whichever share button opened it when it closes. There is
   // no Copy button when there is no link, so Close takes the focus instead.
@@ -822,14 +933,138 @@ function App() {
     }
   }
 
+  // Lands on `ply`, clamped to live if it has reached or passed the end of
+  // the recorded history (historyRef only holds positions strictly before the
+  // live one — see browsePly's declaration).
+  function enterBrowse(ply: number) {
+    setSelected(null);
+    const total = historyRef.current.length;
+    setBrowsePly(ply >= total ? null : Math.max(0, ply));
+  }
+
+  function browsePrev() {
+    const total = historyRef.current.length;
+    if (browsePly === null) {
+      if (total > 0) enterBrowse(total - 1);
+    } else if (browsePly > 0) {
+      enterBrowse(browsePly - 1);
+    }
+  }
+
+  function browseNext() {
+    if (browsePly === null) return;
+    enterBrowse(browsePly + 1);
+  }
+
+  function browseHome() {
+    if (historyRef.current.length > 0) enterBrowse(0);
+  }
+
+  function browseLive() {
+    setSelected(null);
+    setBrowsePly(null);
+  }
+
+  // Hold a chevron to jump to the end of the history it steps towards, the
+  // way holding a rewind button seeks. The click that follows the release is
+  // swallowed, or the jump would be undone by a step in the same direction.
+  const LONG_PRESS_MS = 500;
+  const longPressRef = useRef<{ timer: number | null; fired: boolean }>({ timer: null, fired: false });
+
+  function cancelLongPress() {
+    if (longPressRef.current.timer !== null) {
+      clearTimeout(longPressRef.current.timer);
+      longPressRef.current.timer = null;
+    }
+  }
+
+  /** Handlers for a button whose hold does `onHold` and whose tap does `onTap`. */
+  function holdable(onHold: () => void, onTap: () => void) {
+    return {
+      onPointerDown: () => {
+        cancelLongPress();
+        longPressRef.current.fired = false;
+        longPressRef.current.timer = window.setTimeout(() => {
+          longPressRef.current = { timer: null, fired: true };
+          onHold();
+        }, LONG_PRESS_MS);
+      },
+      onPointerUp: cancelLongPress,
+      onPointerLeave: cancelLongPress,
+      onPointerCancel: cancelLongPress,
+      // A long press on a touch screen otherwise raises the selection or
+      // context menu on top of the jump.
+      onContextMenu: (e: ReactMouseEvent) => e.preventDefault(),
+      onClick: () => {
+        if (longPressRef.current.fired) {
+          longPressRef.current.fired = false;
+          return;
+        }
+        onTap();
+      },
+    };
+  }
+
+  // Swipe-to-step on the board, while browsing only. Safe to enable
+  // unconditionally on the container: the board is read-only in that state,
+  // so there is no drag gesture for it to collide with. Not used to *enter*
+  // browsing — that would fire by accident on a drag from an empty square.
+  const touchStartXRef = useRef<number | null>(null);
+  const SWIPE_THRESHOLD_PX = 40;
+  function onBoardTouchStart(e: ReactTouchEvent) {
+    touchStartXRef.current = browsePly !== null ? e.touches[0].clientX : null;
+  }
+  function onBoardTouchEnd(e: ReactTouchEvent) {
+    const startX = touchStartXRef.current;
+    touchStartXRef.current = null;
+    if (startX === null) return;
+    const dx = e.changedTouches[0].clientX - startX;
+    if (dx > SWIPE_THRESHOLD_PX) browsePrev();
+    else if (dx < -SWIPE_THRESHOLD_PX) browseNext();
+  }
+
+  // Truncates the line at the browsed ply and goes live there — the one way
+  // browsing is allowed to change the game, and only via this explicit action
+  // (spec: the board itself stays read-only while browsing).
+  //
+  // Always behind the confirmation dialog, never a bare tap: it
+  // throws away every move after the cursor. The dialog is in-page rather than
+  // `window.confirm`, which some mobile browsers suppress outright.
+  function playFromHere(ply: number) {
+    const hist = historyRef.current;
+    const clockHist = clockHistoryRef.current;
+    const snapshot = hist[ply];
+    setConfirmAction(null);
+    if (!snapshot) return;
+    const restoredClock = clockHist[ply];
+    gameRef.current = snapshot.copy();
+    historyRef.current = hist.slice(0, ply);
+    clockHistoryRef.current = clockHist.slice(0, ply);
+    clockRef.current = restoredClock ? { ...restoredClock } : { w: timerMinutes * 60, b: timerMinutes * 60 };
+    resetPonder(); // discards everything after the cursor (ponder-spec.md §5.3, §6.2)
+    setModal(null);
+    setSelected(null);
+    setTimeUp(null);
+    setShowFireworks(false);
+    setBrowsePly(null);
+    rerender();
+    const restored = gameRef.current;
+    if (mode === "human-ai" && !restored.isGameOver() && restored.turn === aiColor) {
+      setTimeout(maybeAiMove, 0);
+    } else {
+      maybeStartPonder(restored);
+    }
+  }
+
   function onPieceDrop({ sourceSquare, targetSquare }: { sourceSquare: string; targetSquare: string | null }) {
-    if (!targetSquare) return false;
+    if (!targetSquare || browsePly !== null) return false;
     setSelected(null);
     return attemptMove(sourceSquare as Square, targetSquare as Square);
   }
 
   function attemptMove(from: Square, to: Square): boolean {
     const game = gameRef.current;
+    if (browsePly !== null) return false;
     if (from === to) return false;
     if (mode === "human-ai" && game.turn === aiColor) return false;
     if (game.isGameOver()) return false;
@@ -896,7 +1131,8 @@ function App() {
   function onSquareClick({ square }: { square: string }) {
     const game = gameRef.current;
     const sq = square as Square;
-    const humanCanMove = !(mode === "human-ai" && game.turn === aiColor) && !game.isGameOver() && !modal;
+    const humanCanMove =
+      browsePly === null && !(mode === "human-ai" && game.turn === aiColor) && !game.isGameOver() && !modal;
     if (!humanCanMove) {
       setSelected(null);
       return;
@@ -967,14 +1203,26 @@ function App() {
   if (showTutorial) return <Tutorial onExit={() => setShowTutorial(false)} onSearch={searchInWorker} />;
 
   const game = gameRef.current;
-  const turnLabel = game.turn === "w" ? "White" : "Black";
-  let status = `${turnLabel} to move.`;
-  if (game.chess.isCheck()) status += " Check!";
-  if (game.isGameOver()) status = game.resultString();
-  else if (timeUp) {
-    const winner = timeUp === "w" ? "Black" : "White";
-    status = `${timeUp === "w" ? "White" : "Black"} ran out of time. ${winner} wins!`;
-  } else if (aiThinking) status += " (AI thinking...)";
+  const totalPlies = historyRef.current.length;
+  const browsing = browsePly !== null;
+  // Everything rendered below tracks this, not `game`, so the board, the evo
+  // strips and the status line all show the browsed ply rather than the live
+  // position. historyRef only holds positions strictly before the live one
+  // (see browsePly's declaration), so an out-of-range index falls back to it.
+  const displayGame = browsing && browsePly! < totalPlies ? historyRef.current[browsePly!] : game;
+  const turnLabel = displayGame.turn === "w" ? "White" : "Black";
+  // With no bar under the board, this line is the only readout of where in
+  // the game you are, so ply 0 says what it is rather than "Move 0 of N".
+  const browsingStatus = browsePly === 0 ? "Start position" : `Move ${browsePly} of ${totalPlies}`;
+  let status = browsing ? browsingStatus : `${turnLabel} to move.`;
+  if (!browsing) {
+    if (game.chess.isCheck()) status += " Check!";
+    if (game.isGameOver()) status = game.resultString();
+    else if (timeUp) {
+      const winner = timeUp === "w" ? "Black" : "White";
+      status = `${timeUp === "w" ? "White" : "Black"} ran out of time. ${winner} wins!`;
+    } else if (aiThinking) status += " (AI thinking...)";
+  }
   const gameOver = gameIsOver;
 
   const currentRecord = scores[level];
@@ -984,11 +1232,14 @@ function App() {
   // Suppressed for a game played from a shared position: that result was never
   // recorded, so the score would be the running total of unrelated games, and
   // "play again" would start from the opening rather than from the position.
-  const showScoreOverlay = mode === "human-ai" && gameOver && hasScoreHistory && !fromShared;
+  // Also suppressed while browsing: the overlay and the fireworks belong to
+  // the end of the live game, not to whichever ply is on screen.
+  const showScoreOverlay = mode === "human-ai" && gameOver && hasScoreHistory && !fromShared && !browsing;
+
   const levelLabel = level.charAt(0).toUpperCase() + level.slice(1);
 
-  const rw = game.rightsFor("w");
-  const rb = game.rightsFor("b");
+  const rw = displayGame.rightsFor("w");
+  const rb = displayGame.rightsFor("b");
 
   // Both the board and the evolution strips flanking it depend on which way the
   // board faces, so it's computed once here rather than inline in the board.
@@ -1006,15 +1257,70 @@ function App() {
 
   const renderActionPicker = (extraClass: string) => (
     <div className={`action-picker ${extraClass}`}>
+      {/* Four slots, the same widths whichever state the row is in, so nothing
+          moves under the thumb when browsing starts. The first two swap: the
+          captioned button becomes the way out of browsing, and the takeback
+          (unusable while browsing) gives its place to "play from here". */}
+      {browsing ? (
+        <button className="back-btn" onClick={browseLive} title="Back to the live position">
+          Back
+        </button>
+      ) : (
+        <button
+          className="new-game-btn"
+          // Only asks when there is something to lose: a game with moves in it
+          // that has not finished. Starting over from the opening, or after a
+          // result, goes straight through.
+          onClick={() =>
+            totalPlies > 0 && !gameOver
+              ? setConfirmAction({ kind: "new-game" })
+              : startNewGame(mode, aiColor, level)
+          }
+        >
+          New Game
+        </button>
+      )}
+      {browsing ? (
+        <button
+          className="play-here-btn icon-btn"
+          onClick={() => setConfirmAction({ kind: "play-here", ply: browsePly! })}
+          aria-label="Play from here"
+          title="Play from here"
+        >
+          <PawnIcon />
+        </button>
+      ) : (
+        <button
+          className="takeback-btn icon-btn"
+          onClick={takeback}
+          aria-label="Takeback"
+          title="Takeback"
+          disabled={totalPlies === 0 || aiThinking}
+        >
+          <UndoIcon />
+        </button>
+      )}
+      {/* The way into history browsing on a phone: always on screen, next to
+          the board, no sheet to open first. Stepping back from the live
+          position enters browsing (see `browsePrev`). Holding either one runs
+          it to the end of the history in that direction. */}
       <button
-        className="takeback-btn"
-        onClick={takeback}
-        disabled={historyRef.current.length === 0 || aiThinking}
+        className="browse-step-btn icon-btn"
+        aria-label="Previous move"
+        title="Previous move (hold for the start)"
+        disabled={totalPlies === 0 || browsePly === 0}
+        {...holdable(browseHome, browsePrev)}
       >
-        Takeback
+        <ChevronLeftIcon />
       </button>
-      <button className="new-game-btn" onClick={() => startNewGame(mode, aiColor, level)}>
-        New Game
+      <button
+        className="browse-step-btn icon-btn"
+        aria-label="Next move"
+        title="Next move (hold for the live position)"
+        disabled={!browsing}
+        {...holdable(browseLive, browseNext)}
+      >
+        <ChevronRightIcon />
       </button>
     </div>
   );
@@ -1196,7 +1502,7 @@ function App() {
 
   return (
     <div className="layout">
-      {showFireworks && (
+      {showFireworks && !browsing && (
         <Fireworks
           onDone={() => setShowFireworks(false)}
           launchX={
@@ -1269,15 +1575,20 @@ function App() {
             aiThinking ? " thinking" : level === "easy" ? " easy" : nnueReady ? " nnue-ready" : ""
           }`}
         />
-        <EvoStrip color={topColor} game={game} rights={rightsFor[topColor]} active={game.turn === topColor} />
-        <div className="board-container">
+        <EvoStrip
+          color={topColor}
+          game={displayGame}
+          rights={rightsFor[topColor]}
+          active={displayGame.turn === topColor}
+        />
+        <div className="board-container" onTouchStart={onBoardTouchStart} onTouchEnd={onBoardTouchEnd}>
           <Chessboard
             options={{
-              position: game.chess.fen(),
+              position: displayGame.chess.fen(),
               onPieceDrop,
               onSquareClick,
               squareRenderer: ({ square, children }) => {
-                const charges = game.rookCharges.get(square as Square);
+                const charges = displayGame.rookCharges.get(square as Square);
                 return (
                   <div style={{ width: "100%", height: "100%", position: "relative", ...squareStyles[square] }}>
                     {children}
@@ -1288,7 +1599,7 @@ function App() {
                 );
               },
               boardOrientation,
-              allowDragging: !(mode === "human-ai" && game.turn === aiColor) && !gameOver,
+              allowDragging: !browsing && !(mode === "human-ai" && game.turn === aiColor) && !gameOver,
             }}
           />
           {showScoreOverlay && (
@@ -1305,9 +1616,9 @@ function App() {
         </div>
         <EvoStrip
           color={bottomColor}
-          game={game}
+          game={displayGame}
           rights={rightsFor[bottomColor]}
-          active={game.turn === bottomColor}
+          active={displayGame.turn === bottomColor}
         />
         {renderActionPicker("action-picker-below-board")}
         {/* Phone-only: the panel below is hidden at this width, so its widgets
@@ -1382,7 +1693,12 @@ function App() {
           onToggle={(e) => togglePanel("log", e.currentTarget.open)}
         >
           <summary>Move log</summary>
-          <MoveLog moveLog={game.moveLog} />
+          <MoveLog
+            moveLog={game.moveLog}
+            browsePly={browsePly}
+            browsable={totalPlies > 0}
+            onSelectPly={enterBrowse}
+          />
         </details>
         <details
           className="collapsible rules-summary"
@@ -1423,7 +1739,17 @@ function App() {
             </div>
             <div className="sheet-body">
               {widget === "rules" && <div className="rules-summary">{renderRules()}</div>}
-              {widget === "log" && <MoveLog moveLog={game.moveLog} />}
+              {widget === "log" && (
+                <MoveLog
+                  moveLog={game.moveLog}
+                  browsePly={browsePly}
+                  browsable={totalPlies > 0}
+                  onSelectPly={(ply) => {
+                    enterBrowse(ply);
+                    setWidget(null);
+                  }}
+                />
+              )}
               {widget === "settings" && renderControls()}
             </div>
           </div>
@@ -1552,6 +1878,56 @@ function App() {
           </div>
         </div>
       )}
+      {confirmAction &&
+        (() => {
+          // The discarded count is recomputed here rather than captured with
+          // the ply, so it stays true if the AI adds a move while the dialog
+          // is open.
+          const discarded = confirmAction.kind === "play-here" ? totalPlies - confirmAction.ply : totalPlies;
+          const isPlayHere = confirmAction.kind === "play-here";
+          const title = isPlayHere ? "Play from here?" : "Start a new game?";
+          const close = () => setConfirmAction(null);
+          return (
+            <div className="modal-backdrop" onClick={close}>
+              <div
+                className="modal"
+                role="dialog"
+                aria-modal="true"
+                aria-label={title}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="modal-header">
+                  <p>{title}</p>
+                  <button className="modal-close" aria-label="Close" onClick={close}>
+                    ×
+                  </button>
+                </div>
+                <p>
+                  This discards the {discarded} move{discarded === 1 ? "" : "s"}{" "}
+                  {isPlayHere ? "played after this position" : "of the game in progress"}. It cannot
+                  be undone.
+                </p>
+                <div className="modal-actions">
+                  <button ref={confirmCancelBtnRef} onClick={close}>
+                    Cancel
+                  </button>
+                  <button
+                    className="danger-btn"
+                    onClick={() => {
+                      if (confirmAction.kind === "play-here") playFromHere(confirmAction.ply);
+                      else {
+                        setConfirmAction(null);
+                        startNewGame(mode, aiColor, level);
+                      }
+                    }}
+                  >
+                    {isPlayHere ? "Discard and play" : "Discard and start"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
     </div>
   );
 }

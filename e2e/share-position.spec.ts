@@ -231,7 +231,9 @@ test("New Game gives up the game a shared link displaced", async ({ page }) => {
 
   // New Game is an explicit fresh start, so it clears the parked game too
   // rather than leaving a button that outlives what the player asked for.
+  // It discards a game in progress, so it asks first.
   await page.getByRole("button", { name: "New Game" }).click();
+  await page.getByRole("button", { name: "Discard and start" }).click();
   await expect(page.locator(".log > div")).toHaveCount(0);
   await expect(page.locator(".parked-game-btn")).toHaveCount(0);
   await page.reload();
