@@ -143,8 +143,24 @@ interface ShareModalState {
   copiedAt: number | null;
 }
 
-/** The two actions that discard moves, and so are asked about before they run. */
-type ConfirmState = { kind: "play-here"; ply: number } | { kind: "new-game" };
+/** Why a restart is being proposed. Only the dialog's wording depends on it. */
+type RestartReason = "new-game" | "mode" | "color" | "level";
+
+/**
+ * The actions that discard moves, and so are asked about before they run.
+ * `restart` carries the settings to start with, since a switch applies its own
+ * new value while New Game reuses the current ones.
+ */
+type ConfirmState =
+  | { kind: "play-here"; ply: number }
+  | { kind: "restart"; what: RestartReason; mode: Mode; aiColor: Color; level: AiLevel };
+
+const RESTART_TITLE: Record<RestartReason, string> = {
+  "new-game": "Start a new game?",
+  mode: "Switch mode?",
+  color: "Switch colors?",
+  level: "Switch level?",
+};
 
 function App() {
   const [, forceRender] = useState(0);
@@ -724,16 +740,18 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modal]);
 
-  // Escape closes the widget sheet — but not while the promotion prompt is up,
-  // which binds Escape for itself and takes priority.
+  // Escape closes the widget sheet — but not while the promotion prompt or a
+  // confirmation is up, which bind Escape for themselves and take priority.
+  // The settings switches open a confirmation from inside the sheet, so
+  // without this Escape would dismiss both at once.
   useEffect(() => {
-    if (!widget || modal) return;
+    if (!widget || modal || confirmAction) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") setWidget(null);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [widget, modal]);
+  }, [widget, modal, confirmAction]);
 
   // Escape and focus for the confirmation dialog. Focus lands on Cancel, not
   // on the destructive action, so a stray Enter or Space does nothing.
@@ -1255,6 +1273,30 @@ function App() {
   const topColor: Color = bottomColor === "w" ? "b" : "w";
   const rightsFor = { w: rw, b: rb };
 
+  /**
+   * The one route to a restart, for New Game and for the three settings
+   * switches, which all end the current game. It only asks when there is
+   * something to lose: a game with moves in it that has not finished. Starting
+   * over from the opening, or after a result, goes straight through.
+   *
+   * `apply` is what a switch does when no game is under way — set the value
+   * and leave the board alone, rather than restarting it for nothing.
+   */
+  const restart = (
+    what: RestartReason,
+    next: { mode: Mode; aiColor: Color; level: AiLevel },
+    apply?: () => void
+  ) => {
+    if (totalPlies === 0 && apply) {
+      resetPonder(); // setting change (ponder-spec.md §5.3, §6.2)
+      apply();
+    } else if (totalPlies > 0 && !gameOver) {
+      setConfirmAction({ kind: "restart", what, ...next });
+    } else {
+      startNewGame(next.mode, next.aiColor, next.level);
+    }
+  };
+
   const renderActionPicker = (extraClass: string) => (
     <div className={`action-picker ${extraClass}`}>
       {/* Four slots, the same widths whichever state the row is in, so nothing
@@ -1266,17 +1308,7 @@ function App() {
           Back
         </button>
       ) : (
-        <button
-          className="new-game-btn"
-          // Only asks when there is something to lose: a game with moves in it
-          // that has not finished. Starting over from the opening, or after a
-          // result, goes straight through.
-          onClick={() =>
-            totalPlies > 0 && !gameOver
-              ? setConfirmAction({ kind: "new-game" })
-              : startNewGame(mode, aiColor, level)
-          }
-        >
+        <button className="new-game-btn" onClick={() => restart("new-game", { mode, aiColor, level })}>
           New Game
         </button>
       )}
@@ -1354,14 +1386,7 @@ function App() {
             onClick={() => {
               const newMode = opt.value;
               if (newMode === mode) return;
-              if (historyRef.current.length > 0) {
-                // eslint-disable-next-line no-alert
-                if (!window.confirm("Switch mode and end the current game?")) return;
-                startNewGame(newMode, aiColor, level);
-              } else {
-                resetPonder(); // mode change (ponder-spec.md §5.3, §6.2)
-                setMode(newMode);
-              }
+              restart("mode", { mode: newMode, aiColor, level }, () => setMode(newMode));
             }}
           >
             {opt.label}
@@ -1384,14 +1409,7 @@ function App() {
                 onClick={() => {
                   const newAiColor = opt.value;
                   if (newAiColor === aiColor) return;
-                  if (historyRef.current.length > 0) {
-                    // eslint-disable-next-line no-alert
-                    if (!window.confirm("Switch colors and start a new game?")) return;
-                    startNewGame(mode, newAiColor, level);
-                  } else {
-                    resetPonder(); // side change (ponder-spec.md §5.3, §6.2)
-                    setAiColor(newAiColor);
-                  }
+                  restart("color", { mode, aiColor: newAiColor, level }, () => setAiColor(newAiColor));
                 }}
               >
                 {opt.label}
@@ -1413,14 +1431,7 @@ function App() {
                 onClick={() => {
                   const newLevel = opt.value;
                   if (newLevel === level) return;
-                  if (historyRef.current.length > 0) {
-                    // eslint-disable-next-line no-alert
-                    if (!window.confirm("Switch level and end the current game?")) return;
-                    startNewGame(mode, aiColor, newLevel);
-                  } else {
-                    resetPonder(); // level change (ponder-spec.md §5.3, §6.2)
-                    setLevel(newLevel);
-                  }
+                  restart("level", { mode, aiColor, level: newLevel }, () => setLevel(newLevel));
                 }}
               >
                 {opt.label}
@@ -1883,9 +1894,9 @@ function App() {
           // The discarded count is recomputed here rather than captured with
           // the ply, so it stays true if the AI adds a move while the dialog
           // is open.
-          const discarded = confirmAction.kind === "play-here" ? totalPlies - confirmAction.ply : totalPlies;
           const isPlayHere = confirmAction.kind === "play-here";
-          const title = isPlayHere ? "Play from here?" : "Start a new game?";
+          const discarded = isPlayHere ? totalPlies - confirmAction.ply : totalPlies;
+          const title = isPlayHere ? "Play from here?" : RESTART_TITLE[confirmAction.what];
           const close = () => setConfirmAction(null);
           return (
             <div className="modal-backdrop" onClick={close}>
@@ -1917,11 +1928,15 @@ function App() {
                       if (confirmAction.kind === "play-here") playFromHere(confirmAction.ply);
                       else {
                         setConfirmAction(null);
-                        startNewGame(mode, aiColor, level);
+                        startNewGame(confirmAction.mode, confirmAction.aiColor, confirmAction.level);
                       }
                     }}
                   >
-                    {isPlayHere ? "Discard and play" : "Discard and start"}
+                    {isPlayHere
+                      ? "Discard and play"
+                      : confirmAction.what === "new-game"
+                      ? "Discard and start"
+                      : "Switch and restart"}
                   </button>
                 </div>
               </div>
