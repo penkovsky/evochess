@@ -921,6 +921,42 @@
   color: #22aa77;
 }
 
+/* The two halves of the Share dialog: the link and the move log. The rule
+   between them is what says they are separate takeaways, not one flow. */
+.share-section + .share-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.share-section h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text);
+  opacity: 0.75;
+}
+
+.share-section .share-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.modal .share-section button {
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--text-h);
+}
+
+.modal .share-section button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Shared-position banners (docs/share-links-spec.md). Same shape as the
    tutorial invite, in a neutral colour so they read as information rather than
    an offer. */

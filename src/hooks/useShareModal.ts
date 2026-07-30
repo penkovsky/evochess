@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import type { EvoChessGame } from "../evochess/game";
 import { encodeShareLink, MAX_SHARE_PARAM_CHARS } from "../evochess/shareLink";
+import { formatMoveLog } from "../evochess/moveLogText";
 import type { ShareModalState, ShareProblem } from "../appTypes";
 
 export interface UseShareModal {
   shareModal: ShareModalState | null;
-  /** Opens the sheet or the dialog, depending on which button was pressed. */
+  /** Opens the dialog. `useShareSheet` decides whether it offers the OS sheet. */
   handleShare: (e: ReactMouseEvent<HTMLButtonElement>, useShareSheet: boolean) => Promise<void>;
   copyShareUrl: (url: string) => Promise<void>;
+  copyMoveLog: (moveLog: string[]) => Promise<void>;
+  shareViaSheet: (url: string) => Promise<void>;
   closeShareModal: () => void;
   shareCopyBtnRef: RefObject<HTMLButtonElement | null>;
   shareCloseBtnRef: RefObject<HTMLButtonElement | null>;
@@ -43,41 +46,52 @@ export function useShareModal(gameRef: RefObject<EvoChessGame>): UseShareModal {
     return { url: url.toString(), problem: null };
   }
 
-  async function copyShareUrl(url: string) {
+  // `kind` only picks which section shows the confirmation; the clipboard call
+  // is the same either way.
+  async function copyText(text: string, kind: "url" | "log") {
     try {
-      await navigator.clipboard.writeText(url);
-      setShareModal((m) => (m ? { ...m, clipboardOk: true, copiedAt: Date.now() } : m));
+      await navigator.clipboard.writeText(text);
+      setShareModal((m) => (m ? { ...m, clipboardOk: true, copiedAt: Date.now(), copiedKind: kind } : m));
     } catch {
-      setShareModal((m) => (m ? { ...m, clipboardOk: false } : m));
+      setShareModal((m) => (m ? { ...m, clipboardOk: false, copiedAt: null, copiedKind: null } : m));
     }
   }
 
-  // `useShareSheet` is per button, not per capability. Desktop browsers expose
-  // `navigator.share` too, so gating on it alone would send a PC user to an OS
-  // sheet and they would never see the URL field the panel button promises.
-  // The mobile bar and the panel already exist on opposite sides of the
-  // breakpoint, so the button that was pressed is the honest signal.
+  async function copyShareUrl(url: string) {
+    await copyText(url, "url");
+  }
+
+  async function copyMoveLog(moveLog: string[]) {
+    await copyText(formatMoveLog(moveLog), "log");
+  }
+
+  // Never rejects: a dismissed sheet is an answer, not a failure, and the
+  // dialog stays open behind it either way.
+  async function shareViaSheet(url: string) {
+    try {
+      await navigator.share?.({ title: "EvoChess position", url });
+    } catch {
+      /* dismissed, or the sheet never happened */
+    }
+  }
+
+  // Both buttons open the same dialog, because the move log lives in it too
+  // and a phone handed straight to the OS sheet would never reach it.
+  // `useShareSheet` is per button, not per capability: desktop browsers expose
+  // `navigator.share` too, so gating on it alone would put an OS-sheet button
+  // in front of a PC user. The mobile bar and the panel already exist on
+  // opposite sides of the breakpoint, so the button pressed is the honest
+  // signal.
   async function handleShare(e: ReactMouseEvent<HTMLButtonElement>, useShareSheet: boolean) {
     shareLastFocusRef.current = e.currentTarget;
+    const moveLog = [...gameRef.current.moveLog];
     const { url, problem } = buildShareUrl();
+    const canShareSheet = useShareSheet && !!navigator.share;
     if (problem) {
-      setShareModal({ url, problem, clipboardOk: false, copiedAt: null });
+      setShareModal({ url, problem, clipboardOk: false, copiedAt: null, copiedKind: null, canShareSheet, moveLog });
       return;
     }
-    if (useShareSheet && navigator.share) {
-      try {
-        // `title` and `url` only. Targets that take both `text` and `url`
-        // tend to concatenate them rather than pick one, so passing the link
-        // as `text` as well puts it in the message twice.
-        await navigator.share({ title: "EvoChess position", url });
-        return;
-      } catch (err) {
-        // A dismissed sheet is an answer, not a failure: don't follow it with
-        // a fallback dialog. Anything else means the sheet never happened.
-        if ((err as Error)?.name === "AbortError") return;
-      }
-    }
-    setShareModal({ url, problem: null, clipboardOk: true, copiedAt: null });
+    setShareModal({ url, problem: null, clipboardOk: true, copiedAt: null, copiedKind: null, canShareSheet, moveLog });
     copyShareUrl(url);
   }
 
@@ -107,10 +121,19 @@ export function useShareModal(gameRef: RefObject<EvoChessGame>): UseShareModal {
     if (shareModal?.copiedAt == null) return;
     const at = shareModal.copiedAt;
     const t = setTimeout(() => {
-      setShareModal((m) => (m && m.copiedAt === at ? { ...m, copiedAt: null } : m));
+      setShareModal((m) => (m && m.copiedAt === at ? { ...m, copiedAt: null, copiedKind: null } : m));
     }, 1800);
     return () => clearTimeout(t);
   }, [shareModal?.copiedAt]);
 
-  return { shareModal, handleShare, copyShareUrl, closeShareModal, shareCopyBtnRef, shareCloseBtnRef };
+  return {
+    shareModal,
+    handleShare,
+    copyShareUrl,
+    copyMoveLog,
+    shareViaSheet,
+    closeShareModal,
+    shareCopyBtnRef,
+    shareCloseBtnRef,
+  };
 }

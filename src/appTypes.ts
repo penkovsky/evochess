@@ -24,6 +24,16 @@ export interface ShareModalState {
   problem: ShareProblem;
   clipboardOk: boolean;
   copiedAt: number | null;
+  /** Which section the "Copied!" confirmation belongs to. */
+  copiedKind: "url" | "log" | null;
+  /**
+   * Whether to offer the OS share sheet as well as the URL field. True only
+   * for the mobile bar's button, since a desktop browser exposing
+   * `navigator.share` is not a reason to send a PC user to a sheet.
+   */
+  canShareSheet: boolean;
+  /** The move log, snapshotted when the dialog opened. */
+  moveLog: string[];
 }
 
 /** Why a restart is being proposed. Only the dialog's wording depends on it. */

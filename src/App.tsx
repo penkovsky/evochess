@@ -53,8 +53,16 @@ function App() {
   const [aiColor, setAiColor] = useState<Color>("b");
   const [level, setLevel] = useState<AiLevel>("zen");
   const [modal, setModal] = useState<PromoModalState | null>(null);
-  const { shareModal, handleShare, copyShareUrl, closeShareModal, shareCopyBtnRef, shareCloseBtnRef } =
-    useShareModal(gameRef);
+  const {
+    shareModal,
+    handleShare,
+    copyShareUrl,
+    copyMoveLog,
+    shareViaSheet,
+    closeShareModal,
+    shareCopyBtnRef,
+    shareCloseBtnRef,
+  } = useShareModal(gameRef);
   // The action waiting on confirmation, or null. Both of these throw away
   // moves, and neither can be undone. `play-here` carries its ply rather than
   // reading `browsePly` at the end, so the dialog commits to the position the
@@ -955,6 +963,8 @@ function App() {
           shareModal={shareModal}
           closeShareModal={closeShareModal}
           copyShareUrl={copyShareUrl}
+          copyMoveLog={copyMoveLog}
+          shareViaSheet={shareViaSheet}
           shareCopyBtnRef={shareCopyBtnRef}
           shareCloseBtnRef={shareCloseBtnRef}
         />
