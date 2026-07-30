@@ -61,6 +61,24 @@
   .evo-strip {
     gap: 12px;
   }
+
+  /* Above the board on a phone, so it buys its vertical space from the board
+     itself. Tighter, and the button sits on the same row as the text whenever
+     the text leaves room for it. */
+  .link-banner {
+    padding: 8px 10px;
+    gap: 6px 10px;
+  }
+
+  .link-banner p {
+    flex: 1 1 160px;
+    font-size: 12px;
+  }
+
+  .link-banner .invite-skip-btn {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
 }
 
 .widget-btn {
@@ -389,6 +407,20 @@
   background: #269a6e;
 }
 
+.learn-btn.share-btn {
+  border-color: var(--border);
+  background: var(--code-bg);
+  color: var(--text-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.learn-btn.share-btn:hover {
+  background: var(--border);
+}
+
 .collapsible {
   margin: 8px auto;
   padding: 8px;
@@ -675,8 +707,13 @@
 
 .modal {
   position: relative;
-  background: white;
-  color: #111;
+  /* Follows the device light/dark setting via the root variables, like the
+     widget sheet and the board screen behind it. The border and shadow carry
+     the edge, which a dark card on a dark backdrop otherwise loses. */
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
   padding: 20px;
   border-radius: 8px;
   min-width: 260px;
@@ -705,6 +742,7 @@
 
 .modal-header p {
   margin: 0;
+  color: var(--text-h);
 }
 
 .modal .modal-close {
@@ -717,12 +755,12 @@
   background: transparent;
   font-size: 20px;
   line-height: 1;
-  color: #666;
+  color: var(--text);
   cursor: pointer;
 }
 
 .modal .modal-close:hover {
-  color: #111;
+  color: var(--text-h);
 }
 
 .promo-icons {
@@ -741,19 +779,96 @@
   line-height: 1;
   padding: 10px;
   border-radius: 8px;
-  border: 1px solid #ccc;
-  background: #f4f4f4;
-  color: #111;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--text-h);
   cursor: pointer;
 }
 
 .modal .promo-icon:hover {
-  background: #e6e6e6;
+  background: var(--border);
 }
 
 .modal .promo-icon.promo-none {
   font-size: 14px;
   min-width: 56px;
+}
+
+/* Explicit colours, not the UA default: the root sets `color-scheme: light
+   dark`, so an unstyled input paints itself dark and lands as a black box on
+   the card in either theme. */
+.share-url {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  margin: 8px 0;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.share-status {
+  min-height: 1.2em;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: #22aa77;
+}
+
+/* Shared-position banners (docs/share-links-spec.md). Same shape as the
+   tutorial invite, in a neutral colour so they read as information rather than
+   an offer. */
+.link-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(128, 128, 128, 0.08);
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.link-banner p {
+  flex: 1 1 260px;
+  margin: 0;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* A full-width row so the button gets its own line in the wrapping layout,
+   while the button itself stays the size of its label. */
+.parked-game-row {
+  display: flex;
+  width: 100%;
+}
+
+.parked-game-btn {
+  flex: 0 0 auto;
+  /* 40px tall at this padding: a thumb target, not a desktop-only link. */
+  padding: 10px 14px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(128, 128, 128, 0.08);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.parked-game-btn:hover {
+  border-color: #999;
+}
+
+.link-banner.unverified {
+  border-color: #d98c00;
+  background: rgba(217, 140, 0, 0.09);
 }
 
 .rook-charge-badge {

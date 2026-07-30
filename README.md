@@ -52,6 +52,7 @@ Complete EvoChess rules are [here](./rules.txt).
 npm install
 npm run dev      # start dev server
 npm test         # run the rules-engine test suite (vitest)
+npm run test:e2e # run the e2e suite (playwright, auto-starts the dev server)
 npm run build    # typecheck + production build
 ```
 

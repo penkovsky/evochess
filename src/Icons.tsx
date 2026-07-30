@@ -58,3 +58,16 @@ export function GearIcon() {
     </Svg>
   );
 }
+
+/** Share graph — one node fanning out to two — the outbound share dialog. */
+export function ShareIcon() {
+  return (
+    <Svg {...stroke}>
+      <circle cx="7" cy="12" r="2.2" />
+      <circle cx="16.5" cy="6.8" r="2.2" />
+      <circle cx="16.5" cy="17.2" r="2.2" />
+      <path d="M9 10.9 14.5 7.9" />
+      <path d="M9 13.1 14.5 16.1" />
+    </Svg>
+  );
+}

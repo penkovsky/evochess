@@ -8,6 +8,11 @@ import { freshGamePage } from "./helpers";
 // worker rather than through a direct-call harness.
 test.beforeEach(async ({ page }) => {
   await freshGamePage(page);
+  // Pondering runs at Fun only (`maybeStartPonder`), and the app opens on Zen,
+  // so every test here has to select the level rather than inherit it. Safe
+  // before the first move: the level picker only asks for confirmation once a
+  // game is in progress.
+  await page.getByRole("button", { name: "Fun" }).click();
 });
 
 test("takeback during a deep ponder yields a playable position promptly, with no console errors", async ({
@@ -19,8 +24,9 @@ test("takeback during a deep ponder yields a playable position promptly, with no
   });
   page.on("pageerror", (err) => errors.push(err.message));
 
-  // Default setup: Human vs AI, AI plays Black, level Fun — ponder is on by
-  // default (§5.5). Human (White) moves first via click-to-move.
+  // Setup: Human vs AI by default, AI plays Black, level Fun from the
+  // beforeEach, ponder on by default (§5.5). Human (White) moves first via
+  // click-to-move.
   await page.locator('[data-square="e2"]').click();
   await page.locator('[data-square="e4"]').click();
 

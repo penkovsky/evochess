@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { Chessboard } from "react-chessboard";
 import type { Color, Square } from "chess.js";
 import { EvoChessGame, EvoChessError, ROOK_CHARGES, type ApplyMoveOptions, type ForcedPromo, type MinorPromo } from "./evochess/game";
@@ -13,15 +13,24 @@ import type {
   WorkerRequest,
 } from "./evochess/ai.worker";
 import type { AiLevel } from "./evochess/ai";
-import { saveGame, loadGame, clearSavedGame } from "./evochess/persistence";
+import { decodeShareLink, encodeShareLink, MAX_SHARE_PARAM_CHARS, readShareParam } from "./evochess/shareLink";
 import { loadScores, recordResult, type Scores } from "./evochess/scores";
+import {
+  saveGame,
+  loadGame,
+  clearSavedGame,
+  parkSavedGame,
+  loadParkedGame,
+  hasParkedGame,
+  clearParkedGame,
+} from "./evochess/persistence";
 import { RULES_SUMMARY } from "./evochess/tutorial";
 import { loadProgress, markSeen } from "./evochess/tutorialProgress";
 import { Fireworks } from "./Fireworks";
 import { EvoStrip } from "./EvoStrip";
 import { Tutorial } from "./Tutorial";
 import { PIECE_GLYPH } from "./pieceGlyph";
-import { CapIcon, ScrollIcon, BookIcon, GearIcon } from "./Icons";
+import { CapIcon, ScrollIcon, BookIcon, GearIcon, ShareIcon } from "./Icons";
 import "./App.css";
 
 type Mode = "human-ai" | "human-human";
@@ -69,6 +78,16 @@ interface PromoModalState {
   canRook: boolean;
 }
 
+/** Why there is no link to hand over. `null` is the ordinary case. */
+type ShareProblem = "too-long" | "unencodable" | null;
+
+interface ShareModalState {
+  url: string;
+  problem: ShareProblem;
+  clipboardOk: boolean;
+  copiedAt: number | null;
+}
+
 function App() {
   const [, forceRender] = useState(0);
   const gameRef = useRef<EvoChessGame>(new EvoChessGame());
@@ -83,6 +102,10 @@ function App() {
   const [aiColor, setAiColor] = useState<Color>("b");
   const [level, setLevel] = useState<AiLevel>("zen");
   const [modal, setModal] = useState<PromoModalState | null>(null);
+  const [shareModal, setShareModal] = useState<ShareModalState | null>(null);
+  const shareLastFocusRef = useRef<HTMLElement | null>(null);
+  const shareCopyBtnRef = useRef<HTMLButtonElement>(null);
+  const shareCloseBtnRef = useRef<HTMLButtonElement>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [showFireworks, setShowFireworks] = useState(false);
@@ -133,6 +156,35 @@ function App() {
   // Click-to-move: square selected by tapping a piece, awaiting a target
   // square tap. Cleared on every move attempt (successful or not).
   const [selected, setSelected] = useState<Square | null>(null);
+  // -- shared positions (?p=…), docs/share-links-spec.md ---------------
+  // A shared position is held in memory only until the recipient makes a move:
+  // their own autosave stays intact and restorable until then, so
+  // opening a link never costs them a game in progress.
+  const [sharedPending, setSharedPending] = useState(false);
+  // The autosave a shared link arrived on top of, kept for "back to my game".
+  const savedGameRef = useRef<ReturnType<typeof loadGame>>(null);
+  // A link that decoded cleanly but describes a position that could not occur
+  // (spec §5.2). The board is still shown; the engine is not allowed near it.
+  const [unverified, setUnverified] = useState(false);
+  // Read by maybeAiMove/maybeStartPonder, which run from setTimeout callbacks
+  // holding a closure over state React may not have flushed yet. The engine
+  // lockout must not depend on that timing: the search and NNUE assume a
+  // well-formed board, and an impossible one risks an out-of-bounds read in
+  // the bitboard layer.
+  const engineLockedRef = useRef(false);
+  // Why a `?p=` was refused outright (spec §5.1). Purely informational: the app
+  // has already fallen back to the normal startup path by the time it shows.
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
+  // Stays true after `sharedPending` clears, for as long as the game on the
+  // board is the one that arrived on a link. A game played from someone else's
+  // position is not a game against the AI from the opening, so its result is
+  // not recorded against the level's score and no score is shown when it ends.
+  // Persisted with the save, so a reload does not turn it back into a scored
+  // game (persistence.ts `fromShared`).
+  const [fromShared, setFromShared] = useState(false);
+  // Whether a game of the recipient's own is sitting in the parked slot, which
+  // is what "back to my game" offers once the shared game has gone live.
+  const [parked, setParked] = useState(false);
   // Runs chooseMove off the main thread so the board stays responsive while
   // the AI is thinking. searchIdRef tags each request so a stale response
   // (e.g. after a takeback) can't be mistaken for the latest one.
@@ -230,6 +282,7 @@ function App() {
     const effAiColor = overrides?.aiColor ?? aiColor;
     const effLevel = overrides?.level ?? level;
     const effPonder = overrides?.ponderEnabled ?? ponderEnabled;
+    if (engineLockedRef.current) return;
     if (
       effMode === "human-ai" &&
       effLevel === "fun" &&
@@ -266,19 +319,162 @@ function App() {
     setShowTutorial(true);
   }
 
+  // Never throws. `encodeShareLink` does, for a position the format cannot
+  // represent, and the caller is an async click handler: an escaping throw
+  // becomes an unhandled rejection, so the button would silently do nothing.
+  function buildShareUrl(): { url: string; problem: ShareProblem } {
+    let param: string;
+    try {
+      param = encodeShareLink(gameRef.current);
+    } catch {
+      return { url: "", problem: "unencodable" };
+    }
+    // The same comparison the decoder makes, so a link that would be refused
+    // on arrival is never handed over.
+    if (param.length > MAX_SHARE_PARAM_CHARS) return { url: "", problem: "too-long" };
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.searchParams.set("p", param);
+    return { url: url.toString(), problem: null };
+  }
+
+  async function copyShareUrl(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareModal((m) => (m ? { ...m, clipboardOk: true, copiedAt: Date.now() } : m));
+    } catch {
+      setShareModal((m) => (m ? { ...m, clipboardOk: false } : m));
+    }
+  }
+
+  // `useShareSheet` is per button, not per capability. Desktop browsers expose
+  // `navigator.share` too, so gating on it alone would send a PC user to an OS
+  // sheet and they would never see the URL field the panel button promises.
+  // The mobile bar and the panel already exist on opposite sides of the
+  // breakpoint, so the button that was pressed is the honest signal.
+  async function handleShare(e: ReactMouseEvent<HTMLButtonElement>, useShareSheet: boolean) {
+    shareLastFocusRef.current = e.currentTarget;
+    const { url, problem } = buildShareUrl();
+    if (problem) {
+      setShareModal({ url, problem, clipboardOk: false, copiedAt: null });
+      return;
+    }
+    if (useShareSheet && navigator.share) {
+      try {
+        // `title` and `url` only. Targets that take both `text` and `url`
+        // tend to concatenate them rather than pick one, so passing the link
+        // as `text` as well puts it in the message twice.
+        await navigator.share({ title: "EvoChess position", url });
+        return;
+      } catch (err) {
+        // A dismissed sheet is an answer, not a failure: don't follow it with
+        // a fallback dialog. Anything else means the sheet never happened.
+        if ((err as Error)?.name === "AbortError") return;
+      }
+    }
+    setShareModal({ url, problem: null, clipboardOk: true, copiedAt: null });
+    copyShareUrl(url);
+  }
+
+  function closeShareModal() {
+    setShareModal(null);
+    shareLastFocusRef.current?.focus();
+  }
+
   function resetClock(minutes: number) {
     clockRef.current = { w: minutes * 60, b: minutes * 60 };
   }
 
+  /**
+   * Drops `?p=` from the address bar: the shared game has just become the live
+   * one, so a reload must not put the base position back over moves the
+   * recipient has played (spec §3, §6.5).
+   *
+   * Until this point the parameter is deliberately left in the URL. Stripping
+   * it on load would mean a reload or a mobile tab restore silently discarded
+   * the shared game, since it is only ever held in memory before now.
+   */
+  function goLive() {
+    setSharedPending(false);
+    savedGameRef.current = null;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("p");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
+
+  /**
+   * The recipient's first move on a shared board, which is the moment the
+   * autosave changes hands. Their own game moves to the parked slot first, so
+   * "back to my game" survives both the move and any later reload.
+   */
+  function parkOwnGameAndGoLive() {
+    setParked(parkSavedGame());
+    goLive();
+  }
+
+  /**
+   * Puts the recipient's own game back, discarding the shared one. Reads the
+   * parked slot once the shared game has gone live, and the in-memory copy
+   * before that, when nothing has been parked because nothing was at risk.
+   */
+  function backToMyGame() {
+    const saved = savedGameRef.current ?? loadParkedGame();
+    if (!saved) return;
+    clearParkedGame();
+    setParked(false);
+    gameRef.current = saved.game;
+    if (saved.game.isGameOver()) scoredGameRef.current = saved.game;
+    historyRef.current = [];
+    clockHistoryRef.current = [];
+    // Usually false, since the game being restored is the recipient's own. Not
+    // always: open a second link after playing on a first, and the game parked
+    // for this button is itself from an unverified position. The lockout follows
+    // the position, not the sequence of events.
+    const lockedOut = saved.unverified ?? false;
+    engineLockedRef.current = lockedOut;
+    setUnverified(lockedOut);
+    setLinkNotice(null);
+    setFromShared(saved.fromShared ?? false);
+    setMode(lockedOut ? "human-human" : saved.mode);
+    setAiColor(saved.aiColor);
+    setLevel(saved.level);
+    clockRef.current = saved.clock ?? { w: (saved.timerMinutes ?? 10) * 60, b: (saved.timerMinutes ?? 10) * 60 };
+    setModal(null);
+    setSelected(null);
+    setTimeUp(null);
+    resetPonder(); // a different position entirely (ponder-spec.md §5.3, §6.2)
+    // Same two steps as goLive, for the opposite reason: the shared position is
+    // gone, so a reload must not bring it back over the game just restored.
+    goLive();
+    rerender();
+    setTimeout(
+      () =>
+        maybeAiMove({
+          mode: lockedOut ? "human-human" : saved.mode,
+          aiColor: saved.aiColor,
+          level: saved.level,
+        }),
+      0
+    );
+  }
+
   useEffect(() => {
     const saved = loadGame();
+    // A game parked by an earlier visit on a link, if the recipient never went
+    // back to it. The offer outlives the reload that made it necessary.
+    setParked(hasParkedGame());
+    // `?p=` is read before the autosave is used, and decoded before anything
+    // else can claim the board (share-links-spec.md §6).
+    const param = readShareParam(window.location.search);
+    const shared = param ? decodeShareLink(param) : null;
+    if (shared && !shared.ok) {
+      console.warn(`evochess: shared link refused [${shared.code}]`);
+      setLinkNotice(shared.message);
+    }
     if (saved) {
-      gameRef.current = saved.game;
-      // A finished game was already scored live before the page was saved/
-      // reloaded (the scores effect runs the moment isGameOver() first goes
-      // true). Mark it pre-scored so that effect doesn't record it again on
-      // every subsequent reload of the same finished game.
-      if (saved.game.isGameOver()) scoredGameRef.current = saved.game;
+      // Applied whichever game wins the board below: a position-only link
+      // carries no extras block (share-links-spec.md §4.5), so orientation, mode
+      // and level are the recipient's own.
       setMode(saved.mode);
       setAiColor(saved.aiColor);
       setLevel(saved.level);
@@ -287,8 +483,55 @@ function App() {
       setTimerMinutes(saved.timerMinutes ?? 10);
       clockRef.current = saved.clock ?? { w: (saved.timerMinutes ?? 10) * 60, b: (saved.timerMinutes ?? 10) * 60 };
       setPonderEnabled(saved.ponderEnabled ?? true);
+    }
+    if (shared?.ok) {
+      savedGameRef.current = saved;
+      gameRef.current = shared.game;
+      setSharedPending(true);
+      setFromShared(true);
+      // Nothing in the payload says who moves next, and there is no extras
+      // block to lean on, so the rule is positional: the recipient always moves
+      // first. This is also what keeps loading a link from triggering an engine
+      // search.
+      setAiColor(shared.game.turn === "w" ? "b" : "w");
+      // Whatever time was left on the recipient's own clock has nothing to do
+      // with this position.
+      resetClock(saved?.timerMinutes ?? 10);
+      if (!shared.legal) {
+        // Logged verbatim so "the link is weird" is diagnosable from a
+        // screenshot of the console (spec §5.2).
+        console.warn(`evochess: shared link failed legality check [${shared.reasons.join(", ")}]`);
+        engineLockedRef.current = true;
+        setUnverified(true);
+        setMode("human-human");
+      }
+      resetPonder(); // a position from outside this session (ponder-spec.md §5.3)
+    } else if (saved) {
+      gameRef.current = saved.game;
+      setFromShared(saved.fromShared ?? false);
+      // The lockout has to come back with the position. `engineLockedRef` is
+      // memory-only, and three of the legality failures (over nine pieces per
+      // side, side-not-to-move-in-check, en passant incoherence) produce FENs
+      // chess.js loads happily, so a reload would otherwise hand the search a
+      // board it must never see. `setMode` overrides the one set above: a saved
+      // `human-ai` here can only come from a save written before the lockout was
+      // persisted, or from one edited by hand.
+      if (saved.unverified) {
+        console.warn("evochess: resuming a game played from an unverified shared position");
+        engineLockedRef.current = true;
+        setUnverified(true);
+        setMode("human-human");
+      }
+      // A finished game was already scored live before the page was saved/
+      // reloaded (the scores effect runs the moment isGameOver() first goes
+      // true). Mark it pre-scored so that effect doesn't record it again on
+      // every subsequent reload of the same finished game.
+      if (saved.game.isGameOver()) scoredGameRef.current = saved.game;
       resetPonder(); // loading a save (ponder-spec.md §5.3, §6.2)
     } else if (!loadProgress().seen) {
+      // Deliberately not offered on top of a shared board (spec §11): someone
+      // arriving on a link came to look at a position, and the invite would
+      // cover it. A later visit without a link still gets the offer.
       setShowInvite(true);
     }
     setLoaded(true);
@@ -298,7 +541,22 @@ function App() {
 
   useEffect(() => {
     if (!loaded) return;
-    saveGame(gameRef.current, mode, aiColor, level, autoFlip, timerEnabled, timerMinutes, clockRef.current, ponderEnabled);
+    // A shared position stays in memory until the recipient commits to it, so
+    // their own game is still in localStorage and still restorable (spec §6.4).
+    if (sharedPending) return;
+    saveGame({
+      game: gameRef.current,
+      mode,
+      aiColor,
+      level,
+      autoFlip,
+      timerEnabled,
+      timerMinutes,
+      clock: clockRef.current,
+      ponderEnabled,
+      fromShared,
+      unverified,
+    });
   });
 
   // Resumes an AI-to-move position on load (e.g. reloading mid-game with the
@@ -355,6 +613,10 @@ function App() {
   useEffect(() => {
     if (!loaded) return;
     if (mode !== "human-ai") return;
+    // A game played from a shared position started from whatever advantage the
+    // sharer chose, so beating or losing to the AI there says nothing about the
+    // level and is not recorded.
+    if (fromShared) return;
     const game = gameRef.current;
     if (!game.isGameOver()) return;
     if (scoredGameRef.current === game) return;
@@ -367,7 +629,7 @@ function App() {
       : "win";
     setScores(recordResult(level, outcome));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, mode, aiColor, level, gameRef.current, gameRef.current.moveLog.length]);
+  }, [loaded, mode, aiColor, level, fromShared, gameRef.current, gameRef.current.moveLog.length]);
 
   // Reveals the score 2.5s after the game ends (matching the CSS dim-in), and
   // hides it again as soon as play resumes (new game / takeback).
@@ -401,6 +663,32 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [widget, modal]);
+
+  // Escape and focus for the share dialog: focus lands on Copy when it opens,
+  // and returns to whichever share button opened it when it closes. There is
+  // no Copy button when there is no link, so Close takes the focus instead.
+  // Otherwise it would stay outside the dialog it just opened.
+  useEffect(() => {
+    if (!shareModal) return;
+    (shareCopyBtnRef.current ?? shareCloseBtnRef.current)?.focus();
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") closeShareModal();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shareModal !== null]);
+
+  // The "Copied!" confirmation fades on its own; re-copying (Copy button or
+  // clicking the input again) restarts the timer via a fresh copiedAt.
+  useEffect(() => {
+    if (shareModal?.copiedAt == null) return;
+    const at = shareModal.copiedAt;
+    const t = setTimeout(() => {
+      setShareModal((m) => (m && m.copiedAt === at ? { ...m, copiedAt: null } : m));
+    }, 1800);
+    return () => clearTimeout(t);
+  }, [shareModal?.copiedAt]);
 
   // The sheet is position:fixed, so nothing stops the page scrolling behind
   // it; and a rotate/resize past the breakpoint would leave it stranded over
@@ -436,6 +724,8 @@ function App() {
     const effLevel = overrides?.level ?? level;
     const game = gameRef.current;
     if (game.isGameOver()) return;
+    // An unverified shared position never reaches the search (spec §5.2).
+    if (engineLockedRef.current) return;
     if (effMode !== "human-ai") return;
     if (game.turn !== effAiColor) return;
     setSelected(null);
@@ -483,6 +773,10 @@ function App() {
     }
     // Only record the snapshot once the move actually applied.
     dismissInvite();
+    // The recipient has played from the shared position, so it becomes the
+    // live game and normal autosaving resumes (spec §6.4). Their own game is
+    // parked rather than lost, so they can still go back to it.
+    if (sharedPending) parkOwnGameAndGoLive();
     historyRef.current.push(snapshot);
     clockHistoryRef.current.push({ ...clockRef.current });
     rerender();
@@ -643,6 +937,17 @@ function App() {
     historyRef.current = [];
     clockHistoryRef.current = [];
     resetPonder(); // new game discards the old position (ponder-spec.md §5.3, §6.2)
+    // A fresh game is a well-formed position, so the engine is allowed back.
+    engineLockedRef.current = false;
+    setUnverified(false);
+    setLinkNotice(null);
+    // A new game starts from the opening, so it counts again.
+    setFromShared(false);
+    // Starting a new game is an explicit choice to leave the shared position
+    // and the game it displaced, so "back to my game" retires here too.
+    if (sharedPending) goLive();
+    clearParkedGame();
+    setParked(false);
     setMode(newMode);
     setAiColor(newAiColor);
     setLevel(newLevel);
@@ -676,7 +981,10 @@ function App() {
   const hasScoreHistory = currentRecord.wins + currentRecord.losses + currentRecord.draws > 0;
   // The overlay mounts as soon as the game ends and dims in over 2.5s (CSS);
   // `scoreOverlayReady` then reveals the score text and the button.
-  const showScoreOverlay = mode === "human-ai" && gameOver && hasScoreHistory;
+  // Suppressed for a game played from a shared position: that result was never
+  // recorded, so the score would be the running total of unrelated games, and
+  // "play again" would start from the opening rather than from the position.
+  const showScoreOverlay = mode === "human-ai" && gameOver && hasScoreHistory && !fromShared;
   const levelLabel = level.charAt(0).toUpperCase() + level.slice(1);
 
   const rw = game.rightsFor("w");
@@ -734,6 +1042,9 @@ function App() {
             key={opt.value}
             type="button"
             className={mode === opt.value ? "active" : ""}
+            // The engine lockout is what makes rendering an impossible position
+            // safe at all, so vs-AI is not reachable from one (spec §5.2).
+            disabled={unverified && opt.value === "human-ai"}
             onClick={() => {
               const newMode = opt.value;
               if (newMode === mode) return;
@@ -860,6 +1171,16 @@ function App() {
     </div>
   );
 
+  // Kept short: the banner sits above the board, and every extra line of it is
+  // a line the board loses on a phone.
+  const sharedStatusText = [
+    sharedPending && (savedGameRef.current ? "Shared position. Your own game is saved." : "Shared position."),
+    unverified &&
+      "This position could not have occurred in a game, so the computer opponent is unavailable for it.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   const squareStyles: Record<string, CSSProperties> = {};
   if (selected) {
     squareStyles[selected] = { background: "rgba(255, 255, 0, 0.4)" };
@@ -885,6 +1206,36 @@ function App() {
           }
           launchY={boardWrapRef.current?.getBoundingClientRect().bottom}
         />
+      )}
+      {/* Everything a shared link has to say, in one banner: on a phone this
+          sits between the top of the page and the board, so a second one would
+          push the board under the fold. Non-blocking either way. */}
+      {(linkNotice || sharedPending || unverified) && (
+        <div className={`link-banner${unverified ? " unverified" : ""}`} role="status">
+          <p>{linkNotice ?? sharedStatusText}</p>
+          {linkNotice ? (
+            <button className="invite-skip-btn" onClick={() => setLinkNotice(null)}>
+              Dismiss
+            </button>
+          ) : (
+            sharedPending &&
+            savedGameRef.current && (
+              <button className="invite-skip-btn" onClick={backToMyGame}>
+                Back to my game
+              </button>
+            )
+          )}
+        </div>
+      )}
+      {/* Once the shared game is live the offer stays, but as a single compact
+          button rather than a banner: it has to survive the whole game, and a
+          banner above the board that long is space the board needs on a phone. */}
+      {!sharedPending && parked && (
+        <div className="parked-game-row">
+          <button className="parked-game-btn" onClick={backToMyGame}>
+            ↩ Back to my game
+          </button>
+        </div>
       )}
       {/* Sits above the board rather than inside the panel: on a phone the
           panel is below the board, which would put the offer under the fold
@@ -993,6 +1344,17 @@ function App() {
               <Icon />
             </button>
           ))}
+          {/* Not a widget: it never opens the sheet above, so `widget` stays
+              "rules" | "log" | "settings". */}
+          <button
+            type="button"
+            className="widget-btn"
+            aria-label="Share position"
+            title="Share position"
+            onClick={(e) => handleShare(e, true)}
+          >
+            <ShareIcon />
+          </button>
         </div>
       </div>
       <div className="panel">
@@ -1002,6 +1364,17 @@ function App() {
             Learn Evo Basics
           </button>
         )}
+        {/* The panel is desktop-only, so this one always opens the dialog: the
+            URL field is the point of it. */}
+        <button
+          type="button"
+          className="learn-btn share-btn"
+          aria-label="Share position"
+          title="Share position"
+          onClick={(e) => handleShare(e, false)}
+        >
+          <ShareIcon /> Share
+        </button>
         {renderControls()}
         <details
           className="collapsible"
@@ -1132,6 +1505,50 @@ function App() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {shareModal && (
+        <div className="modal-backdrop" onClick={closeShareModal}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Share this position" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <p>Share this position</p>
+              <button className="modal-close" aria-label="Close" onClick={closeShareModal}>
+                ×
+              </button>
+            </div>
+            {shareModal.problem ? (
+              <p>
+                {shareModal.problem === "too-long"
+                  ? "This position is too large to fit in a link."
+                  : "This position can't be put into a link."}
+              </p>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  className="share-url"
+                  readOnly
+                  value={shareModal.url}
+                  onClick={(e) => {
+                    e.currentTarget.select();
+                    copyShareUrl(shareModal.url);
+                  }}
+                />
+                <div className="share-status" aria-live="polite">
+                  {shareModal.copiedAt != null
+                    ? "Copied!"
+                    : !shareModal.clipboardOk && "Press Ctrl-C to copy"}
+                </div>
+                <button ref={shareCopyBtnRef} onClick={() => copyShareUrl(shareModal.url)}>
+                  Copy
+                </button>
+              </>
+            )}
+            <button ref={shareCloseBtnRef} onClick={closeShareModal}>
+              Close
+            </button>
           </div>
         </div>
       )}

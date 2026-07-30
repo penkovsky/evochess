@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { EvoChessGame } from "../game";
-import { saveGame, loadGame, clearSavedGame } from "../persistence";
+import { saveGame, loadGame, clearSavedGame, type SaveOptions } from "../persistence";
 import type { Square } from "chess.js";
 
 // This project's jsdom environment provides `window` but not `localStorage`,
@@ -12,8 +12,22 @@ const store = new Map<string, string>();
   removeItem: (k: string) => void store.delete(k),
 };
 
-const save = (game: EvoChessGame) =>
-  saveGame(game, "human-ai", "b", "zen", false, false, 5, { w: 0, b: 0 }, true);
+const baseOptions: Omit<SaveOptions, "game"> = {
+  mode: "human-ai",
+  aiColor: "b",
+  level: "zen",
+  autoFlip: false,
+  timerEnabled: false,
+  timerMinutes: 5,
+  clock: { w: 0, b: 0 },
+  ponderEnabled: true,
+  fromShared: false,
+  unverified: false,
+};
+
+/** Saves with the defaults above, so each test states only what it varies. */
+const save = (game: EvoChessGame, overrides: Partial<SaveOptions> = {}) =>
+  saveGame({ game, ...baseOptions, ...overrides });
 
 describe("persistence of the evolved en passant", () => {
   beforeEach(() => {
@@ -49,7 +63,39 @@ describe("persistence of the evolved en passant", () => {
 
   it("round-trips ponderEnabled", () => {
     const game = new EvoChessGame();
-    saveGame(game, "human-ai", "b", "fun", false, false, 5, { w: 0, b: 0 }, false);
+    save(game, { ponderEnabled: false });
     expect(loadGame()!.ponderEnabled).toBe(false);
+  });
+
+  // A game that began on a shared link must still be marked as such after a
+  // reload, or its result would start counting against the local score.
+  it("round-trips fromShared", () => {
+    const game = new EvoChessGame();
+    save(game, { fromShared: true });
+    expect(loadGame()!.fromShared).toBe(true);
+    save(game, { fromShared: false });
+    expect(loadGame()!.fromShared).toBe(false);
+  });
+
+  // The engine lockout for an impossible position (share-links-spec.md §5.2) is
+  // memory-only in App.tsx, so it has to be persisted or a reload re-enables the
+  // search on a board the bitboard layer must never see.
+  it("round-trips unverified", () => {
+    const game = new EvoChessGame();
+    save(game, { unverified: true });
+    expect(loadGame()!.unverified).toBe(true);
+    save(game, { unverified: false });
+    expect(loadGame()!.unverified).toBe(false);
+  });
+
+  // Saves written before the flag existed must not read as unverified, or every
+  // pre-existing game would lose its AI opponent on the next reload.
+  it("treats a save with no unverified field as verified", () => {
+    const game = new EvoChessGame();
+    save(game);
+    const raw = JSON.parse(store.get("evochess-save-v3")!);
+    delete raw.unverified;
+    store.set("evochess-save-v3", JSON.stringify(raw));
+    expect(loadGame()!.unverified).toBeUndefined();
   });
 });

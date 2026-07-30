@@ -15,8 +15,8 @@ test("the widget bar replaces the side panel on a phone", async ({ page }) => {
 
   const bar = page.locator(".mobile-bar");
   await expect(bar).toBeVisible();
-  await expect(bar.locator(".widget-btn")).toHaveCount(4);
-  for (const name of ["Learn Evo Basics", "Rules summary", "Move log", "Settings"]) {
+  await expect(bar.locator(".widget-btn")).toHaveCount(5);
+  for (const name of ["Learn Evo Basics", "Rules summary", "Move log", "Settings", "Share position"]) {
     await expect(bar.getByRole("button", { name })).toBeVisible();
   }
 
