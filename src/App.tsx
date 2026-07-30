@@ -6,9 +6,8 @@ import {
   type MouseEvent as ReactMouseEvent,
   type TouchEvent as ReactTouchEvent,
 } from "react";
-import { Chessboard } from "react-chessboard";
 import type { Color, Square } from "chess.js";
-import { EvoChessGame, EvoChessError, ROOK_CHARGES, type ApplyMoveOptions, type ForcedPromo, type MinorPromo } from "./evochess/game";
+import { EvoChessGame, EvoChessError, ROOK_CHARGES, type ApplyMoveOptions } from "./evochess/game";
 import { serializeGame } from "./evochess/serialize";
 import type {
   AiCandidate,
@@ -31,136 +30,29 @@ import {
   hasParkedGame,
   clearParkedGame,
 } from "./evochess/persistence";
-import { RULES_SUMMARY } from "./evochess/tutorial";
 import { loadProgress, markSeen } from "./evochess/tutorialProgress";
 import { Fireworks } from "./Fireworks";
-import { EvoStrip } from "./EvoStrip";
 import { Tutorial } from "./Tutorial";
-import { PIECE_GLYPH } from "./pieceGlyph";
+import { ShareIcon } from "./Icons";
 import {
-  CapIcon,
-  ScrollIcon,
-  BookIcon,
-  GearIcon,
-  ShareIcon,
-  UndoIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  PawnIcon,
-} from "./Icons";
+  type ConfirmState,
+  type MobileWidget,
+  type Mode,
+  type PromoModalState,
+  type RestartReason,
+  type ShareModalState,
+  type ShareProblem,
+} from "./appTypes";
+import { MoveLog } from "./components/MoveLog";
+import { RulesSummary } from "./components/RulesSummary";
+import { ControlsPanel } from "./components/ControlsPanel";
+import { TopBanners } from "./components/TopBanners";
+import { BoardArea } from "./components/BoardArea";
+import { MobileWidgetSheet } from "./components/MobileWidgetSheet";
+import { PromoModal } from "./components/PromoModal";
+import { ShareModal } from "./components/ShareModal";
+import { ConfirmModal } from "./components/ConfirmModal";
 import "./App.css";
-
-type Mode = "human-ai" | "human-human";
-
-/** Which widget the mobile bar is showing in the sheet, if any. */
-type MobileWidget = "rules" | "log" | "settings";
-
-/**
- * The move log, owning its own scroll-to-bottom. A component rather than a
- * render helper because the panel copy and the mobile copy are both mounted
- * (one is hidden by CSS), and a single shared ref cannot serve two elements.
- */
-function MoveLog({
-  moveLog,
-  browsePly,
-  browsable,
-  onSelectPly,
-}: {
-  moveLog: string[];
-  /** null means live; a ply is highlighted and scrolled to when set. */
-  browsePly: number | null;
-  /**
-   * Whether the snapshots browsing needs actually exist. They are built as
-   * moves are played and are not persisted, so a game resumed from the
-   * autosave has a move log and no positions to go with it. The entries are
-   * rendered as plain text then, rather than as tap targets that do nothing.
-   */
-  browsable: boolean;
-  onSelectPly: (ply: number) => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const currentPly = browsePly ?? moveLog.length;
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (browsePly !== null) {
-      el.querySelector<HTMLButtonElement>(".log-move.current")?.scrollIntoView({ block: "nearest" });
-    } else {
-      el.scrollTop = el.scrollHeight;
-    }
-  });
-  return (
-    <div className="log" ref={ref}>
-      {/* Without this the sheet's height:auto log collapses to nothing on an
-          unplayed game, leaving a drawer with a title and no body. Not a
-          <div>: the e2e specs count `.log > div` to mean "moves played". */}
-      {moveLog.length === 0 && <p className="log-empty">No moves yet.</p>}
-      {moveLog
-        .filter((_, i) => i % 2 === 0)
-        .map((white, n) => {
-          const black = moveLog[n * 2 + 1];
-          const whitePly = n * 2 + 1;
-          const blackPly = n * 2 + 2;
-          const entry = (san: string, ply: number) =>
-            browsable ? (
-              <button
-                type="button"
-                className={`log-move${currentPly === ply ? " current" : ""}`}
-                onClick={() => onSelectPly(ply)}
-              >
-                {san}
-              </button>
-            ) : (
-              san
-            );
-          return (
-            <div key={n}>
-              {n + 1}. {entry(white, whitePly)}
-              {black && <> {entry(black, blackPly)}</>}
-            </div>
-          );
-        })}
-    </div>
-  );
-}
-
-interface PromoModalState {
-  from: Square;
-  to: Square;
-  kind: "forced" | "optional" | "downgrade";
-  color: Color;
-  canMinor: boolean;
-  canRook: boolean;
-}
-
-/** Why there is no link to hand over. `null` is the ordinary case. */
-type ShareProblem = "too-long" | "unencodable" | null;
-
-interface ShareModalState {
-  url: string;
-  problem: ShareProblem;
-  clipboardOk: boolean;
-  copiedAt: number | null;
-}
-
-/** Why a restart is being proposed. Only the dialog's wording depends on it. */
-type RestartReason = "new-game" | "mode" | "color" | "level";
-
-/**
- * The actions that discard moves, and so are asked about before they run.
- * `restart` carries the settings to start with, since a switch applies its own
- * new value while New Game reuses the current ones.
- */
-type ConfirmState =
-  | { kind: "play-here"; ply: number }
-  | { kind: "restart"; what: RestartReason; mode: Mode; aiColor: Color; level: AiLevel };
-
-const RESTART_TITLE: Record<RestartReason, string> = {
-  "new-game": "Start a new game?",
-  mode: "Switch mode?",
-  color: "Switch colors?",
-  level: "Switch level?",
-};
 
 function App() {
   const [, forceRender] = useState(0);
@@ -1297,197 +1189,6 @@ function App() {
     }
   };
 
-  const renderActionPicker = (extraClass: string) => (
-    <div className={`action-picker ${extraClass}`}>
-      {/* Four slots, the same widths whichever state the row is in, so nothing
-          moves under the thumb when browsing starts. The first two swap: the
-          captioned button becomes the way out of browsing, and the takeback
-          (unusable while browsing) gives its place to "play from here". */}
-      {browsing ? (
-        <button className="back-btn" onClick={browseLive} title="Back to the live position">
-          Back
-        </button>
-      ) : (
-        <button className="new-game-btn" onClick={() => restart("new-game", { mode, aiColor, level })}>
-          New Game
-        </button>
-      )}
-      {browsing ? (
-        <button
-          className="play-here-btn icon-btn"
-          onClick={() => setConfirmAction({ kind: "play-here", ply: browsePly! })}
-          aria-label="Play from here"
-          title="Play from here"
-        >
-          <PawnIcon />
-        </button>
-      ) : (
-        <button
-          className="takeback-btn icon-btn"
-          onClick={takeback}
-          aria-label="Takeback"
-          title="Takeback"
-          disabled={totalPlies === 0 || aiThinking}
-        >
-          <UndoIcon />
-        </button>
-      )}
-      {/* The way into history browsing on a phone: always on screen, next to
-          the board, no sheet to open first. Stepping back from the live
-          position enters browsing (see `browsePrev`). Holding either one runs
-          it to the end of the history in that direction. */}
-      <button
-        className="browse-step-btn icon-btn"
-        aria-label="Previous move"
-        title="Previous move (hold for the start)"
-        disabled={totalPlies === 0 || browsePly === 0}
-        {...holdable(browseHome, browsePrev)}
-      >
-        <ChevronLeftIcon />
-      </button>
-      <button
-        className="browse-step-btn icon-btn"
-        aria-label="Next move"
-        title="Next move (hold for the live position)"
-        disabled={!browsing}
-        {...holdable(browseLive, browseNext)}
-      >
-        <ChevronRightIcon />
-      </button>
-    </div>
-  );
-
-  // Shared by the desktop panel and the mobile widget bar, which mount the
-  // same content in two different containers.
-  const renderRules = () => (
-    <ul>
-      {RULES_SUMMARY.map((rule) => (
-        <li key={rule}>{rule}</li>
-      ))}
-    </ul>
-  );
-
-  const renderControls = () => (
-    <div className="controls">
-      <div className="mode-picker" role="group" aria-label="Mode">
-        {(
-          [
-            { label: "vs AI", value: "human-ai" },
-            { label: "vs Human", value: "human-human" },
-          ] as const
-        ).map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            className={mode === opt.value ? "active" : ""}
-            // The engine lockout is what makes rendering an impossible position
-            // safe at all, so vs-AI is not reachable from one (spec §5.2).
-            disabled={unverified && opt.value === "human-ai"}
-            onClick={() => {
-              const newMode = opt.value;
-              if (newMode === mode) return;
-              restart("mode", { mode: newMode, aiColor, level }, () => setMode(newMode));
-            }}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-      {mode === "human-ai" && (
-        <>
-          <div className="color-picker" role="group" aria-label="Your color">
-            {(
-              [
-                { label: "White", value: "b" },
-                { label: "Black", value: "w" },
-              ] as const
-            ).map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={aiColor === opt.value ? "active" : ""}
-                onClick={() => {
-                  const newAiColor = opt.value;
-                  if (newAiColor === aiColor) return;
-                  restart("color", { mode, aiColor: newAiColor, level }, () => setAiColor(newAiColor));
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          <div className="level-picker" role="group" aria-label="AI level">
-            {(
-              [
-                { label: "Easy", value: "easy" },
-                { label: "Zen", value: "zen" },
-                { label: "Fun", value: "fun" },
-              ] as const
-            ).map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={level === opt.value ? "active" : ""}
-                onClick={() => {
-                  const newLevel = opt.value;
-                  if (newLevel === level) return;
-                  restart("level", { mode, aiColor, level: newLevel }, () => setLevel(newLevel));
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-      {mode === "human-human" && (
-        <div className="controls-row">
-          <button
-            type="button"
-            className={`toggle-btn ${autoFlip ? "pressed" : ""}`}
-            aria-pressed={autoFlip}
-            onClick={() => setAutoFlip((v) => !v)}
-          >
-            Flip board
-          </button>
-          <button
-            type="button"
-            className={`toggle-btn ${timerEnabled ? "pressed" : ""}`}
-            aria-pressed={timerEnabled}
-            disabled={historyRef.current.length > 0}
-            onClick={() => {
-              const enabled = !timerEnabled;
-              setTimerEnabled(enabled);
-              if (enabled) {
-                setTimeUp(null);
-                resetClock(timerMinutes);
-              }
-            }}
-          >
-            Clock
-          </button>
-        </div>
-      )}
-      {mode === "human-human" && timerEnabled && (
-        <label>
-          Minutes per side:
-          <input
-            type="number"
-            min={1}
-            max={180}
-            value={timerMinutes}
-            disabled={historyRef.current.length > 0}
-            onChange={(e) => {
-              const minutes = Number(e.target.value);
-              setTimerMinutes(minutes);
-              resetClock(minutes);
-            }}
-          />
-        </label>
-      )}
-    </div>
-  );
-
   // Kept short: the banner sits above the board, and every extra line of it is
   // a line the board loses on a phone.
   const sharedStatusText = [
@@ -1524,161 +1225,60 @@ function App() {
           launchY={boardWrapRef.current?.getBoundingClientRect().bottom}
         />
       )}
-      {/* Everything a shared link has to say, in one banner: on a phone this
-          sits between the top of the page and the board, so a second one would
-          push the board under the fold. Non-blocking either way. */}
-      {(linkNotice || sharedPending || unverified) && (
-        <div className={`link-banner${unverified ? " unverified" : ""}`} role="status">
-          <p>{linkNotice ?? sharedStatusText}</p>
-          {linkNotice ? (
-            <button className="invite-skip-btn" onClick={() => setLinkNotice(null)}>
-              Dismiss
-            </button>
-          ) : (
-            sharedPending &&
-            savedGameRef.current && (
-              <button className="invite-skip-btn" onClick={backToMyGame}>
-                Back to my game
-              </button>
-            )
-          )}
-        </div>
-      )}
-      {/* Once the shared game is live the offer stays, but as a single compact
-          button rather than a banner: it has to survive the whole game, and a
-          banner above the board that long is space the board needs on a phone. */}
-      {!sharedPending && parked && (
-        <div className="parked-game-row">
-          <button className="parked-game-btn" onClick={backToMyGame}>
-            ↩ Back to my game
-          </button>
-        </div>
-      )}
-      {/* Sits above the board rather than inside the panel: on a phone the
-          panel is below the board, which would put the offer under the fold
-          for exactly the visitors who most need it. */}
-      {showInvite && (
-        <div className="tutorial-invite">
-          <div className="tutorial-invite-text">
-            <h2>New to EvoChess?</h2>
-            <p>
-              It's chess, but you start with only Pawns and a King — everything else has to be
-              earned mid-game. Three one-minute lessons, or just start playing and pick it up.
-            </p>
-          </div>
-          <div className="tutorial-invite-actions">
-            <button className="learn-btn" onClick={openTutorial}>
-              Show me how
-            </button>
-            <button className="invite-skip-btn" onClick={dismissInvite}>
-              No thanks
-            </button>
-          </div>
-        </div>
-      )}
-      <div className="board-wrap" ref={boardWrapRef}>
-        {mode === "human-human" && timerEnabled && (
-          <ClockDisplay clock={clockRef.current} turn={game.turn} gameOver={gameOver} />
-        )}
-        <div className="board-status">{status}</div>
-        <div
-          className={`board-status-underline${
-            aiThinking ? " thinking" : level === "easy" ? " easy" : nnueReady ? " nnue-ready" : ""
-          }`}
-        />
-        <EvoStrip
-          color={topColor}
-          game={displayGame}
-          rights={rightsFor[topColor]}
-          active={displayGame.turn === topColor}
-        />
-        <div className="board-container" onTouchStart={onBoardTouchStart} onTouchEnd={onBoardTouchEnd}>
-          <Chessboard
-            options={{
-              position: displayGame.chess.fen(),
-              onPieceDrop,
-              onSquareClick,
-              squareRenderer: ({ square, children }) => {
-                const charges = displayGame.rookCharges.get(square as Square);
-                return (
-                  <div style={{ width: "100%", height: "100%", position: "relative", ...squareStyles[square] }}>
-                    {children}
-                    {charges !== undefined && (
-                      <span className={`rook-charge-badge ${charges === 1 ? "low" : ""}`}>{charges}</span>
-                    )}
-                  </div>
-                );
-              },
-              boardOrientation,
-              allowDragging: !browsing && !(mode === "human-ai" && game.turn === aiColor) && !gameOver,
-            }}
-          />
-          {showScoreOverlay && (
-            <div className={`score-overlay${scoreOverlayReady ? " revealed" : ""}`}>
-              <div className="score-overlay-text">
-                {levelLabel} <span className="score-win">{currentRecord.wins}</span>-{currentRecord.draws}-
-                <span className="score-loss">{currentRecord.losses}</span>
-              </div>
-              <button className="play-again-btn" onClick={() => startNewGame(mode, aiColor, level)}>
-                Play again?
-              </button>
-            </div>
-          )}
-        </div>
-        <EvoStrip
-          color={bottomColor}
-          game={displayGame}
-          rights={rightsFor[bottomColor]}
-          active={displayGame.turn === bottomColor}
-        />
-        {renderActionPicker("action-picker-below-board")}
-        {/* Phone-only: the panel below is hidden at this width, so its widgets
-            are reached here instead. Tapping an icon slides that widget up
-            from the bottom edge as a sheet. While a sheet is open its backdrop
-            covers this bar, so the next tap anywhere — including on an icon —
-            dismisses it rather than switching widgets. */}
-        <div className="mobile-bar" role="group" aria-label="Widgets">
-          <button
-            type="button"
-            className="widget-btn primary"
-            aria-label="Learn Evo Basics"
-            title="Learn Evo Basics"
-            onClick={openTutorial}
-          >
-            <CapIcon />
-          </button>
-          {(
-            [
-              { id: "settings", label: "Settings", Icon: GearIcon },
-              { id: "log", label: "Move log", Icon: BookIcon },
-              { id: "rules", label: "Rules summary", Icon: ScrollIcon },
-            ] as const
-          ).map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              type="button"
-              className="widget-btn"
-              aria-label={label}
-              title={label}
-              aria-haspopup="dialog"
-              onClick={() => setWidget(id)}
-            >
-              <Icon />
-            </button>
-          ))}
-          {/* Not a widget: it never opens the sheet above, so `widget` stays
-              "rules" | "log" | "settings". */}
-          <button
-            type="button"
-            className="widget-btn"
-            aria-label="Share position"
-            title="Share position"
-            onClick={(e) => handleShare(e, true)}
-          >
-            <ShareIcon />
-          </button>
-        </div>
-      </div>
+      <TopBanners
+        linkNotice={linkNotice}
+        sharedPending={sharedPending}
+        unverified={unverified}
+        sharedStatusText={sharedStatusText}
+        hasSavedGame={savedGameRef.current !== null}
+        setLinkNotice={setLinkNotice}
+        backToMyGame={backToMyGame}
+        parked={parked}
+        showInvite={showInvite}
+        openTutorial={openTutorial}
+        dismissInvite={dismissInvite}
+      />
+      <BoardArea
+        boardWrapRef={boardWrapRef}
+        mode={mode}
+        timerEnabled={timerEnabled}
+        clock={clockRef.current}
+        turn={game.turn}
+        gameOver={gameOver}
+        status={status}
+        aiThinking={aiThinking}
+        level={level}
+        nnueReady={nnueReady}
+        topColor={topColor}
+        bottomColor={bottomColor}
+        displayGame={displayGame}
+        rightsFor={rightsFor}
+        onBoardTouchStart={onBoardTouchStart}
+        onBoardTouchEnd={onBoardTouchEnd}
+        boardPosition={displayGame.chess.fen()}
+        onPieceDrop={onPieceDrop}
+        onSquareClick={onSquareClick}
+        squareStyles={squareStyles}
+        boardOrientation={boardOrientation}
+        allowDragging={!browsing && !(mode === "human-ai" && game.turn === aiColor) && !gameOver}
+        showScoreOverlay={showScoreOverlay}
+        scoreOverlayReady={scoreOverlayReady}
+        levelLabel={levelLabel}
+        currentRecord={currentRecord}
+        onPlayAgain={() => startNewGame(mode, aiColor, level)}
+        browsing={browsing}
+        browsePly={browsePly}
+        totalPlies={totalPlies}
+        onRestart={() => restart("new-game", { mode, aiColor, level })}
+        onTakeback={takeback}
+        onBrowseLive={browseLive}
+        browsePrevHoldable={holdable(browseHome, browsePrev)}
+        browseNextHoldable={holdable(browseLive, browseNext)}
+        setConfirmAction={setConfirmAction}
+        openTutorial={openTutorial}
+        openWidget={setWidget}
+        onShare={handleShare}
+      />
       <div className="panel">
         {/* The banner is already asking; this is the permanent way back in. */}
         {!showInvite && (
@@ -1697,7 +1297,25 @@ function App() {
         >
           <ShareIcon /> Share
         </button>
-        {renderControls()}
+        <ControlsPanel
+          mode={mode}
+          aiColor={aiColor}
+          level={level}
+          unverified={unverified}
+          autoFlip={autoFlip}
+          timerEnabled={timerEnabled}
+          timerMinutes={timerMinutes}
+          hasHistory={historyRef.current.length > 0}
+          onRestart={restart}
+          setMode={setMode}
+          setAiColor={setAiColor}
+          setLevel={setLevel}
+          setAutoFlip={setAutoFlip}
+          setTimerEnabled={setTimerEnabled}
+          setTimerMinutes={setTimerMinutes}
+          setTimeUp={setTimeUp}
+          resetClock={resetClock}
+        />
         <details
           className="collapsible"
           open={openPanel === "log"}
@@ -1717,263 +1335,78 @@ function App() {
           onToggle={(e) => togglePanel("rules", e.currentTarget.open)}
         >
           <summary>Rules summary</summary>
-          {renderRules()}
+          <RulesSummary />
         </details>
       </div>
 
-      {/* The mobile widget drawer: same idea as a hamburger side menu, but
-          anchored to the bottom edge, where the thumb and the bar that opened
-          it already are. It scrolls inside itself so the page never does. */}
       {widget && (
-        <div className="sheet-backdrop" onClick={() => setWidget(null)}>
-          <div
-            className="sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-label={
-              widget === "rules" ? "Rules summary" : widget === "log" ? "Move log" : "Settings"
-            }
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sheet-header">
-              <h2>
-                {widget === "rules" ? "Rules summary" : widget === "log" ? "Move log" : "Settings"}
-              </h2>
-              <button
-                type="button"
-                className="sheet-close"
-                aria-label="Close"
-                onClick={() => setWidget(null)}
-              >
-                ×
-              </button>
+        <MobileWidgetSheet widget={widget} onClose={() => setWidget(null)}>
+          {widget === "rules" && (
+            <div className="rules-summary">
+              <RulesSummary />
             </div>
-            <div className="sheet-body">
-              {widget === "rules" && <div className="rules-summary">{renderRules()}</div>}
-              {widget === "log" && (
-                <MoveLog
-                  moveLog={game.moveLog}
-                  browsePly={browsePly}
-                  browsable={totalPlies > 0}
-                  onSelectPly={(ply) => {
-                    enterBrowse(ply);
-                    setWidget(null);
-                  }}
-                />
-              )}
-              {widget === "settings" && renderControls()}
-            </div>
-          </div>
-        </div>
+          )}
+          {widget === "log" && (
+            <MoveLog
+              moveLog={game.moveLog}
+              browsePly={browsePly}
+              browsable={totalPlies > 0}
+              onSelectPly={(ply) => {
+                enterBrowse(ply);
+                setWidget(null);
+              }}
+            />
+          )}
+          {widget === "settings" && (
+            <ControlsPanel
+              mode={mode}
+              aiColor={aiColor}
+              level={level}
+              unverified={unverified}
+              autoFlip={autoFlip}
+              timerEnabled={timerEnabled}
+              timerMinutes={timerMinutes}
+              hasHistory={historyRef.current.length > 0}
+              onRestart={restart}
+              setMode={setMode}
+              setAiColor={setAiColor}
+              setLevel={setLevel}
+              setAutoFlip={setAutoFlip}
+              setTimerEnabled={setTimerEnabled}
+              setTimerMinutes={setTimerMinutes}
+              setTimeUp={setTimeUp}
+              resetClock={resetClock}
+            />
+          )}
+        </MobileWidgetSheet>
       )}
 
-      {modal && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            {modal.kind === "downgrade" ? (
-              <>
-                <p>Rook charges exhausted — it must downgrade:</p>
-                <button onClick={() => finishModalMove({ downgradeTo: "n" as MinorPromo })}>
-                  Downgrade to Knight
-                </button>
-                <button onClick={() => finishModalMove({ downgradeTo: "b" as MinorPromo })}>
-                  Downgrade to Bishop
-                </button>
-              </>
-            ) : modal.kind === "forced" ? (
-              <>
-                <p>Pawn reaches the last rank — choose promotion:</p>
-                <div className="promo-icons">
-                  {(["q", "r", "b", "n"] as ForcedPromo[]).map((p) => (
-                    <button
-                      key={p}
-                      className="promo-icon"
-                      title={p.toUpperCase()}
-                      onClick={() => finishModalMove({ forcedPromo: p })}
-                    >
-                      {PIECE_GLYPH[modal.color][p]}
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="modal-header">
-                  <p>Promote (optional)</p>
-                  <button
-                    className="modal-close"
-                    aria-label="Close (no promotion)"
-                    onClick={() => finishModalMove({})}
-                  >
-                    ×
-                  </button>
-                </div>
-                <div className="promo-icons">
-                  {modal.canMinor && (
-                    <button
-                      className="promo-icon"
-                      title="Promote moved pawn → Knight"
-                      onClick={() => finishModalMove({ minorPromo: "n" as MinorPromo })}
-                    >
-                      {PIECE_GLYPH[modal.color].n}
-                    </button>
-                  )}
-                  {modal.canMinor && (
-                    <button
-                      className="promo-icon"
-                      title="Promote moved pawn → Bishop"
-                      onClick={() => finishModalMove({ minorPromo: "b" as MinorPromo })}
-                    >
-                      {PIECE_GLYPH[modal.color].b}
-                    </button>
-                  )}
-                  {modal.canRook && (
-                    <button
-                      className="promo-icon"
-                      title="Promote moved minor piece → Rook"
-                      onClick={() => finishModalMove({ rookPromo: true })}
-                    >
-                      {PIECE_GLYPH[modal.color].r}
-                    </button>
-                  )}
-                  <button className="promo-icon promo-none" title="No promotion" onClick={() => finishModalMove({})}>
-                    None
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      {modal && <PromoModal modal={modal} finishModalMove={finishModalMove} />}
 
       {shareModal && (
-        <div className="modal-backdrop" onClick={closeShareModal}>
-          <div className="modal" role="dialog" aria-modal="true" aria-label="Share this position" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <p>Share this position</p>
-              <button className="modal-close" aria-label="Close" onClick={closeShareModal}>
-                ×
-              </button>
-            </div>
-            {shareModal.problem ? (
-              <p>
-                {shareModal.problem === "too-long"
-                  ? "This position is too large to fit in a link."
-                  : "This position can't be put into a link."}
-              </p>
-            ) : (
-              <>
-                <input
-                  type="text"
-                  className="share-url"
-                  readOnly
-                  value={shareModal.url}
-                  onClick={(e) => {
-                    e.currentTarget.select();
-                    copyShareUrl(shareModal.url);
-                  }}
-                />
-                <div className="share-status" aria-live="polite">
-                  {shareModal.copiedAt != null
-                    ? "Copied!"
-                    : !shareModal.clipboardOk && "Press Ctrl-C to copy"}
-                </div>
-                <button ref={shareCopyBtnRef} onClick={() => copyShareUrl(shareModal.url)}>
-                  Copy
-                </button>
-              </>
-            )}
-            <button ref={shareCloseBtnRef} onClick={closeShareModal}>
-              Close
-            </button>
-          </div>
-        </div>
+        <ShareModal
+          shareModal={shareModal}
+          closeShareModal={closeShareModal}
+          copyShareUrl={copyShareUrl}
+          shareCopyBtnRef={shareCopyBtnRef}
+          shareCloseBtnRef={shareCloseBtnRef}
+        />
       )}
-      {confirmAction &&
-        (() => {
-          // The discarded count is recomputed here rather than captured with
-          // the ply, so it stays true if the AI adds a move while the dialog
-          // is open.
-          const isPlayHere = confirmAction.kind === "play-here";
-          const discarded = isPlayHere ? totalPlies - confirmAction.ply : totalPlies;
-          const title = isPlayHere ? "Play from here?" : RESTART_TITLE[confirmAction.what];
-          const close = () => setConfirmAction(null);
-          return (
-            <div className="modal-backdrop" onClick={close}>
-              <div
-                className="modal"
-                role="dialog"
-                aria-modal="true"
-                aria-label={title}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="modal-header">
-                  <p>{title}</p>
-                  <button className="modal-close" aria-label="Close" onClick={close}>
-                    ×
-                  </button>
-                </div>
-                <p>
-                  This discards the {discarded} move{discarded === 1 ? "" : "s"}{" "}
-                  {isPlayHere ? "played after this position" : "of the game in progress"}. It cannot
-                  be undone.
-                </p>
-                <div className="modal-actions">
-                  <button ref={confirmCancelBtnRef} onClick={close}>
-                    Cancel
-                  </button>
-                  <button
-                    className="danger-btn"
-                    onClick={() => {
-                      if (confirmAction.kind === "play-here") playFromHere(confirmAction.ply);
-                      else {
-                        setConfirmAction(null);
-                        startNewGame(confirmAction.mode, confirmAction.aiColor, confirmAction.level);
-                      }
-                    }}
-                  >
-                    {isPlayHere
-                      ? "Discard and play"
-                      : confirmAction.what === "new-game"
-                      ? "Discard and start"
-                      : "Switch and restart"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-    </div>
-  );
-}
-
-function formatClock(seconds: number): string {
-  const total = Math.max(0, Math.ceil(seconds));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-function ClockDisplay({
-  clock,
-  turn,
-  gameOver,
-}: {
-  clock: Record<Color, number>;
-  turn: Color;
-  gameOver: boolean;
-}) {
-  return (
-    <div className="clocks">
-      {(["w", "b"] as Color[]).map((color) => (
-        <div
-          key={color}
-          className={`clock ${!gameOver && turn === color ? "active" : ""} ${clock[color] <= 10 ? "low" : ""}`}
-        >
-          <span className="clock-label">{color === "w" ? "White" : "Black"}</span>
-          <span className="clock-time">{formatClock(clock[color])}</span>
-        </div>
-      ))}
+      {confirmAction && (
+        <ConfirmModal
+          confirmAction={confirmAction}
+          totalPlies={totalPlies}
+          close={() => setConfirmAction(null)}
+          confirmCancelBtnRef={confirmCancelBtnRef}
+          onPlayHere={playFromHere}
+          onStartNewGame={() => {
+            setConfirmAction(null);
+            if (confirmAction.kind === "restart") {
+              startNewGame(confirmAction.mode, confirmAction.aiColor, confirmAction.level);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
