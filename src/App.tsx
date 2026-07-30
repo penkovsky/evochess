@@ -81,7 +81,7 @@ function App() {
   const clockHistoryRef = useRef<Record<Color, number>[]>([]);
   const [mode, setMode] = useState<Mode>("human-ai");
   const [aiColor, setAiColor] = useState<Color>("b");
-  const [level, setLevel] = useState<AiLevel>("fun");
+  const [level, setLevel] = useState<AiLevel>("zen");
   const [modal, setModal] = useState<PromoModalState | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
