@@ -1,26 +1,8 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type MouseEvent as ReactMouseEvent,
-  type TouchEvent as ReactTouchEvent,
-} from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Color, Square } from "chess.js";
 import { EvoChessGame, EvoChessError, ROOK_CHARGES, type ApplyMoveOptions } from "./evochess/game";
-import { serializeGame } from "./evochess/serialize";
-import type {
-  AiCandidate,
-  AiSearchRequest,
-  AiSearchResponse,
-  NnueStatusMessage,
-  PonderPredictionMessage,
-  PonderStatusMessage,
-  WorkerRequest,
-} from "./evochess/ai.worker";
 import type { AiLevel } from "./evochess/ai";
-import { decodeShareLink, encodeShareLink, MAX_SHARE_PARAM_CHARS, readShareParam } from "./evochess/shareLink";
-import { loadScores, recordResult, type Scores } from "./evochess/scores";
+import { decodeShareLink, readShareParam } from "./evochess/shareLink";
 import {
   saveGame,
   loadGame,
@@ -36,13 +18,16 @@ import { Tutorial } from "./Tutorial";
 import { ShareIcon } from "./Icons";
 import {
   type ConfirmState,
-  type MobileWidget,
   type Mode,
   type PromoModalState,
   type RestartReason,
-  type ShareModalState,
-  type ShareProblem,
 } from "./appTypes";
+import { useShareModal } from "./hooks/useShareModal";
+import { useGameClock } from "./hooks/useGameClock";
+import { useMobileWidget } from "./hooks/useMobileWidget";
+import { useHistoryBrowse } from "./hooks/useHistoryBrowse";
+import { useGameOutcome } from "./hooks/useGameOutcome";
+import { useAiWorker } from "./hooks/useAiWorker";
 import { MoveLog } from "./components/MoveLog";
 import { RulesSummary } from "./components/RulesSummary";
 import { ControlsPanel } from "./components/ControlsPanel";
@@ -56,29 +41,20 @@ import "./App.css";
 
 function App() {
   const [, forceRender] = useState(0);
+  // Game state lives in refs, not React state, so anything that mutates it in
+  // place has to ask for the repaint itself.
+  const rerender = () => forceRender((n) => n + 1);
   const gameRef = useRef<EvoChessGame>(new EvoChessGame());
   // Snapshots taken just before each applied move, for takeback. In-memory
   // only (not persisted): copy() captures the full EvoChess state — position,
   // evolution rights/counters, and move log — which chess.js's own undo can't.
   const historyRef = useRef<EvoChessGame[]>([]);
-  // Clock reading captured alongside each historyRef snapshot (same index),
-  // so takeback can restore each side's remaining time instead of resetting it.
-  const clockHistoryRef = useRef<Record<Color, number>[]>([]);
-  // Which ply of the current game is on screen. null means live (the actual
-  // gameRef.current position); otherwise an index into historyRef, which
-  // holds the position after that many plies. Not persisted: a reload always
-  // lands on the live position. Deliberately a free-floating index rather than
-  // "steps back from live", so a move arriving while browsing (own or the
-  // AI's) grows historyRef underneath it without moving what's on screen.
-  const [browsePly, setBrowsePly] = useState<number | null>(null);
   const [mode, setMode] = useState<Mode>("human-ai");
   const [aiColor, setAiColor] = useState<Color>("b");
   const [level, setLevel] = useState<AiLevel>("zen");
   const [modal, setModal] = useState<PromoModalState | null>(null);
-  const [shareModal, setShareModal] = useState<ShareModalState | null>(null);
-  const shareLastFocusRef = useRef<HTMLElement | null>(null);
-  const shareCopyBtnRef = useRef<HTMLButtonElement>(null);
-  const shareCloseBtnRef = useRef<HTMLButtonElement>(null);
+  const { shareModal, handleShare, copyShareUrl, closeShareModal, shareCopyBtnRef, shareCloseBtnRef } =
+    useShareModal(gameRef);
   // The action waiting on confirmation, or null. Both of these throw away
   // moves, and neither can be undone. `play-here` carries its ply rather than
   // reading `browsePly` at the end, so the dialog commits to the position the
@@ -87,43 +63,32 @@ function App() {
   const confirmCancelBtnRef = useRef<HTMLButtonElement>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [showFireworks, setShowFireworks] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   // The rules are the whole point of the variant and take longer to read than
   // a first-time visitor will give us — so a first visit offers the tutorial
   // beside a live board rather than in front of it. The offer never blocks
   // play: making a move dismisses it (see dismissInvite).
   const [showInvite, setShowInvite] = useState(false);
-  // Win/loss/draw record vs the AI, kept separately per level and persisted
-  // to localStorage (see evochess/scores.ts).
-  const [scores, setScores] = useState<Scores>(loadScores);
-  // Tracks which finished game instance has already been recorded, so the
-  // scores effect below records each game-over exactly once (new game /
-  // takeback reassign gameRef.current, giving a fresh instance to compare).
-  const scoredGameRef = useRef<EvoChessGame | null>(null);
-  // The score overlay covers the board, so its dim fades in over 2.5s and the
-  // score itself is only revealed at the end — long enough to see the final
-  // position / mating move.
-  const [scoreOverlayReady, setScoreOverlayReady] = useState(false);
-  // Reflects the AI worker's NNUE weights fetch, purely for the status
-  // underline color — the worker owns the weights and posts this once its
-  // own `nnueReady` promise settles (see ai.worker.ts).
-  const [nnueReady, setNnueReady] = useState(false);
   // In human-vs-human, flip the board after every move so the side to move
   // sees their pieces at the bottom. Can be disabled by the user.
   const [autoFlip, setAutoFlip] = useState(true);
-  // Human-vs-human clock. Off by default; remaining time lives in a ref
-  // (like gameRef) and is pushed to the screen via rerender(), not React
-  // state, since it changes many times per second.
-  const [timerEnabled, setTimerEnabled] = useState(false);
-  const [timerMinutes, setTimerMinutes] = useState(10);
   // Let the AI keep searching the current position in the background while
   // it's the human's turn, warming the TT for its next real search
   // (docs/ponder-spec.md). Only takes effect at Fun level; persisted like the
   // other settings, default on.
   const [ponderEnabled, setPonderEnabled] = useState(true);
-  const [timeUp, setTimeUp] = useState<Color | null>(null);
-  const clockRef = useRef<Record<Color, number>>({ w: 600, b: 600 });
+  // Human-vs-human clock. Off by default; the promotion prompt pauses it.
+  const {
+    clockRef,
+    clockHistoryRef,
+    timerEnabled,
+    setTimerEnabled,
+    timerMinutes,
+    setTimerMinutes,
+    timeUp,
+    setTimeUp,
+    resetClock,
+  } = useGameClock({ gameRef, loaded, mode, paused: !!modal, rerender });
   const boardWrapRef = useRef<HTMLDivElement>(null);
   // Rules summary and move log share panel space, so only one is expanded
   // at a time — opening one collapses the other.
@@ -131,10 +96,28 @@ function App() {
   // On a phone the side panel is hidden entirely (CSS) and its widgets are
   // reached through the icon bar under the board, which opens one of them in
   // a bottom sheet over the page. null = no sheet open.
-  const [widget, setWidget] = useState<MobileWidget | null>(null);
+  const { widget, setWidget } = useMobileWidget(!!modal || !!confirmAction);
   // Click-to-move: square selected by tapping a piece, awaiting a target
   // square tap. Cleared on every move attempt (successful or not).
   const [selected, setSelected] = useState<Square | null>(null);
+  // Which ply of the current game is on screen, and the ways to step through
+  // them. null means live (the actual gameRef.current position); otherwise an
+  // index into historyRef, which holds the position after that many plies.
+  const {
+    browsePly,
+    enterBrowse,
+    browsePrev,
+    browseNext,
+    browseHome,
+    browseLive,
+    holdable,
+    onBoardTouchStart,
+    onBoardTouchEnd,
+  } = useHistoryBrowse({
+    historyRef,
+    setSelected,
+    blocked: !!modal || !!shareModal || !!widget || !!confirmAction,
+  });
   // -- shared positions (?p=…), docs/share-links-spec.md ---------------
   // A shared position is held in memory only until the recipient makes a move:
   // their own autosave stays intact and restorable until then, so
@@ -164,122 +147,30 @@ function App() {
   // Whether a game of the recipient's own is sitting in the parked slot, which
   // is what "back to my game" offers once the shared game has gone live.
   const [parked, setParked] = useState(false);
-  // Runs chooseMove off the main thread so the board stays responsive while
-  // the AI is thinking. searchIdRef tags each request so a stale response
-  // (e.g. after a takeback) can't be mistaken for the latest one.
-  const aiWorkerRef = useRef<Worker | null>(null);
-  const searchIdRef = useRef(0);
-
-  useEffect(() => {
-    const worker = new Worker(new URL("./evochess/ai.worker.ts", import.meta.url), { type: "module" });
-    aiWorkerRef.current = worker;
-    const handleStatus = (e: MessageEvent<NnueStatusMessage | PonderStatusMessage | unknown>) => {
-      const data = e.data as { kind?: string; ready?: boolean };
-      if (data?.kind === "nnue-status") setNnueReady(!!data.ready);
-      if (data?.kind === "ponder-status") {
-        // The depth a ponder chain reaches is otherwise invisible — it posts
-        // no result, and its whole product is transposition-table entries.
-        // `phase` names which of the two searches a chain runs got there:
-        // "position" is the one the human is looking at, "predicted" the one
-        // their most likely reply leads to (ponder-spec.md §8).
-        const p = data as PonderStatusMessage;
-        console.log(
-          `[EvoChess ponder] phase=${p.phase} depth=${p.depth} elapsed=${p.elapsedMs}ms`
-        );
-      }
-      if (data?.kind === "ponder-prediction") {
-        // Whether the "predicted" phase above was pondering the position the
-        // human actually went on to reach. `actual` is printed on a hit too,
-        // so both outcomes read identically.
-        const p = data as PonderPredictionMessage;
-        console.log(
-          `[EvoChess ponder] predicted? ${p.hit ? "True" : "False"} ` +
-            `(guessed ${p.predicted} at depth ${p.depth}, played ${p.actual})`
-        );
-      }
-    };
-    worker.addEventListener("message", handleStatus);
-    return () => {
-      worker.removeEventListener("message", handleStatus);
-      worker.terminate();
-    };
-  }, []);
-
-  function searchInWorker(game: EvoChessGame, level: AiLevel, seed: number): Promise<AiCandidate | null> {
-    return new Promise((resolve) => {
-      const worker = aiWorkerRef.current;
-      if (!worker) {
-        resolve(null);
-        return;
-      }
-      const id = ++searchIdRef.current;
-      const handleMessage = (e: MessageEvent<AiSearchResponse>) => {
-        if (e.data.id !== id) return;
-        worker.removeEventListener("message", handleMessage);
-        const r = e.data;
-        const nps = r.timeMs > 0 ? Math.round((r.nodes / r.timeMs) * 1000) : r.nodes;
-        console.log(
-          `[EvoChess AI] level=${level} method=${r.method} depth=${r.depth} nodes=${r.nodes} ` +
-            `time=${r.timeMs.toFixed(0)}ms speed=${nps.toLocaleString()} nodes/sec score=${r.score.toFixed(2)}`
-        );
-        resolve(r.candidate);
-      };
-      worker.addEventListener("message", handleMessage);
-      const request: AiSearchRequest = { kind: "search", id, game: serializeGame(game), level, seed };
-      worker.postMessage(request);
-    });
-  }
-
-  // Every discontinuity in game state (new game, takeback, mode/color/level
-  // change, loading a save) must invalidate the worker's ponder TT — stale
-  // analysis from a position that no longer exists on this board must never
-  // be reused (ponder-spec.md §5.3, §6.2).
-  function resetPonder() {
-    const req: WorkerRequest = { kind: "reset" };
-    aiWorkerRef.current?.postMessage(req);
-  }
-
-  // Ends a running ponder chain but keeps its warm TT — the human has
-  // committed to something, so the analysis is still valid and reusable.
-  function stopPonder() {
-    const req: WorkerRequest = { kind: "stop" };
-    aiWorkerRef.current?.postMessage(req);
-  }
-
-  // Starts a ponder chain if this is a position worth pondering: the human is
-  // on move against the AI at Fun level, with the setting on (§5.5). Called
-  // both when the AI's move lands and when a move the human attempted turned
-  // out to be illegal — in the latter case the position is unchanged, so the
-  // chain we stopped on the way in should resume.
-  // `overrides` exists for callers holding a value React state hasn't caught
-  // up to yet — the same pattern (and reason) as `maybeAiMove`'s.
-  function maybeStartPonder(
-    game: EvoChessGame,
-    overrides?: { mode?: Mode; aiColor?: Color; level?: AiLevel; ponderEnabled?: boolean }
-  ) {
-    const effMode = overrides?.mode ?? mode;
-    const effAiColor = overrides?.aiColor ?? aiColor;
-    const effLevel = overrides?.level ?? level;
-    const effPonder = overrides?.ponderEnabled ?? ponderEnabled;
-    if (engineLockedRef.current) return;
-    if (
-      effMode === "human-ai" &&
-      effLevel === "fun" &&
-      effPonder &&
-      gameRef.current === game &&
-      game.turn !== effAiColor &&
-      !game.isGameOver()
-    ) {
-      const req: WorkerRequest = { kind: "ponder", game: serializeGame(game) };
-      aiWorkerRef.current?.postMessage(req);
-    }
-  }
+  // What happens when a game ends: the score record, the fireworks, and the
+  // delayed reveal of the score overlay.
+  const { scores, scoreOverlayReady, showFireworks, setShowFireworks, scoredGameRef } = useGameOutcome({
+    gameRef,
+    loaded,
+    mode,
+    aiColor,
+    level,
+    fromShared,
+    timeUp,
+  });
+  // The search worker and its ponder protocol (docs/ponder-spec.md).
+  const { nnueReady, searchInWorker, resetPonder, stopPonder, maybeStartPonder } = useAiWorker({
+    gameRef,
+    engineLockedRef,
+    mode,
+    aiColor,
+    level,
+    ponderEnabled,
+  });
 
   function togglePanel(key: "rules" | "log", isOpen: boolean) {
     setOpenPanel((prev) => (isOpen ? key : prev === key ? null : prev));
   }
-
-  const rerender = () => forceRender((n) => n + 1);
 
   // Someone who has started playing has answered the question the invitation
   // was asking, so it gets out of the way and doesn't come back.
@@ -296,72 +187,6 @@ function App() {
     resetPonder();
     setShowInvite(false);
     setShowTutorial(true);
-  }
-
-  // Never throws. `encodeShareLink` does, for a position the format cannot
-  // represent, and the caller is an async click handler: an escaping throw
-  // becomes an unhandled rejection, so the button would silently do nothing.
-  function buildShareUrl(): { url: string; problem: ShareProblem } {
-    let param: string;
-    try {
-      param = encodeShareLink(gameRef.current);
-    } catch {
-      return { url: "", problem: "unencodable" };
-    }
-    // The same comparison the decoder makes, so a link that would be refused
-    // on arrival is never handed over.
-    if (param.length > MAX_SHARE_PARAM_CHARS) return { url: "", problem: "too-long" };
-    const url = new URL(window.location.href);
-    url.search = "";
-    url.searchParams.set("p", param);
-    return { url: url.toString(), problem: null };
-  }
-
-  async function copyShareUrl(url: string) {
-    try {
-      await navigator.clipboard.writeText(url);
-      setShareModal((m) => (m ? { ...m, clipboardOk: true, copiedAt: Date.now() } : m));
-    } catch {
-      setShareModal((m) => (m ? { ...m, clipboardOk: false } : m));
-    }
-  }
-
-  // `useShareSheet` is per button, not per capability. Desktop browsers expose
-  // `navigator.share` too, so gating on it alone would send a PC user to an OS
-  // sheet and they would never see the URL field the panel button promises.
-  // The mobile bar and the panel already exist on opposite sides of the
-  // breakpoint, so the button that was pressed is the honest signal.
-  async function handleShare(e: ReactMouseEvent<HTMLButtonElement>, useShareSheet: boolean) {
-    shareLastFocusRef.current = e.currentTarget;
-    const { url, problem } = buildShareUrl();
-    if (problem) {
-      setShareModal({ url, problem, clipboardOk: false, copiedAt: null });
-      return;
-    }
-    if (useShareSheet && navigator.share) {
-      try {
-        // `title` and `url` only. Targets that take both `text` and `url`
-        // tend to concatenate them rather than pick one, so passing the link
-        // as `text` as well puts it in the message twice.
-        await navigator.share({ title: "EvoChess position", url });
-        return;
-      } catch (err) {
-        // A dismissed sheet is an answer, not a failure: don't follow it with
-        // a fallback dialog. Anything else means the sheet never happened.
-        if ((err as Error)?.name === "AbortError") return;
-      }
-    }
-    setShareModal({ url, problem: null, clipboardOk: true, copiedAt: null });
-    copyShareUrl(url);
-  }
-
-  function closeShareModal() {
-    setShareModal(null);
-    shareLastFocusRef.current?.focus();
-  }
-
-  function resetClock(minutes: number) {
-    clockRef.current = { w: minutes * 60, b: minutes * 60 };
   }
 
   /**
@@ -549,79 +374,6 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
-  // Ticks the clock for whichever side is to move. Restarts (with a fresh
-  // reference timestamp) whenever the turn changes, the modal opens/closes,
-  // or the timer is toggled, so no stale elapsed time leaks across a pause.
-  useEffect(() => {
-    if (!loaded || !timerEnabled || mode !== "human-human" || timeUp) return;
-    const game = gameRef.current;
-    if (game.isGameOver() || modal) return;
-    if (game.moveLog.length === 0) return;
-    let last = Date.now();
-    const id = setInterval(() => {
-      const now = Date.now();
-      const elapsed = (now - last) / 1000;
-      last = now;
-      const turn = game.turn;
-      const remaining = Math.max(0, clockRef.current[turn] - elapsed);
-      clockRef.current[turn] = remaining;
-      if (remaining <= 0) {
-        setTimeUp(turn);
-        clearInterval(id);
-      }
-      rerender();
-    }, 200);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, timerEnabled, mode, modal, timeUp, gameRef.current.turn, gameRef.current.moveLog.length]);
-
-  // Fires the fireworks once when the human checkmates the AI. Keyed on the
-  // EvoChessGame instance so a new game / takeback (which reassigns
-  // gameRef.current) resets the trigger even if the win condition repeats.
-  useEffect(() => {
-    if (!loaded) return;
-    const game = gameRef.current;
-    if (mode === "human-ai" && game.isGameOver() && game.chess.isCheckmate() && game.turn === aiColor) {
-      setShowFireworks(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, mode, aiColor, gameRef.current, gameRef.current.moveLog.length]);
-
-  // Records the outcome of a finished vs-AI game against the current level's
-  // score, once per game instance.
-  useEffect(() => {
-    if (!loaded) return;
-    if (mode !== "human-ai") return;
-    // A game played from a shared position started from whatever advantage the
-    // sharer chose, so beating or losing to the AI there says nothing about the
-    // level and is not recorded.
-    if (fromShared) return;
-    const game = gameRef.current;
-    if (!game.isGameOver()) return;
-    if (scoredGameRef.current === game) return;
-    scoredGameRef.current = game;
-    const humanColor: Color = aiColor === "w" ? "b" : "w";
-    const outcome: "win" | "loss" | "draw" = !game.chess.isCheckmate()
-      ? "draw"
-      : game.turn === humanColor
-      ? "loss"
-      : "win";
-    setScores(recordResult(level, outcome));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, mode, aiColor, level, fromShared, gameRef.current, gameRef.current.moveLog.length]);
-
-  // Reveals the score 2.5s after the game ends (matching the CSS dim-in), and
-  // hides it again as soon as play resumes (new game / takeback).
-  const gameIsOver = gameRef.current.isGameOver() || !!timeUp;
-  useEffect(() => {
-    if (!gameIsOver) {
-      setScoreOverlayReady(false);
-      return;
-    }
-    const id = setTimeout(() => setScoreOverlayReady(true), 2500);
-    return () => clearTimeout(id);
-  }, [gameIsOver]);
-
   useEffect(() => {
     if (!modal || modal.kind !== "optional") return;
     function onKeyDown(e: KeyboardEvent) {
@@ -631,19 +383,6 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modal]);
-
-  // Escape closes the widget sheet — but not while the promotion prompt or a
-  // confirmation is up, which bind Escape for themselves and take priority.
-  // The settings switches open a confirmation from inside the sheet, so
-  // without this Escape would dismiss both at once.
-  useEffect(() => {
-    if (!widget || modal || confirmAction) return;
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setWidget(null);
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [widget, modal, confirmAction]);
 
   // Escape and focus for the confirmation dialog. Focus lands on Cancel, not
   // on the destructive action, so a stray Enter or Space does nothing.
@@ -656,88 +395,6 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [confirmAction]);
-
-  // Desktop history browsing: left/right steps a ply, Home/End jump to the
-  // ends. Skipped while a modal/sheet is open or a text input has focus, so
-  // it never steals keys from the promotion prompt, the widget sheet, or the
-  // minutes-per-side field.
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (modal || shareModal || widget || confirmAction) return;
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        browsePrev();
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        browseNext();
-      } else if (e.key === "Home") {
-        e.preventDefault();
-        browseHome();
-      } else if (e.key === "End") {
-        e.preventDefault();
-        browseLive();
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modal, shareModal, widget, browsePly, confirmAction]);
-
-  // Escape and focus for the share dialog: focus lands on Copy when it opens,
-  // and returns to whichever share button opened it when it closes. There is
-  // no Copy button when there is no link, so Close takes the focus instead.
-  // Otherwise it would stay outside the dialog it just opened.
-  useEffect(() => {
-    if (!shareModal) return;
-    (shareCopyBtnRef.current ?? shareCloseBtnRef.current)?.focus();
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") closeShareModal();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shareModal !== null]);
-
-  // The "Copied!" confirmation fades on its own; re-copying (Copy button or
-  // clicking the input again) restarts the timer via a fresh copiedAt.
-  useEffect(() => {
-    if (shareModal?.copiedAt == null) return;
-    const at = shareModal.copiedAt;
-    const t = setTimeout(() => {
-      setShareModal((m) => (m && m.copiedAt === at ? { ...m, copiedAt: null } : m));
-    }, 1800);
-    return () => clearTimeout(t);
-  }, [shareModal?.copiedAt]);
-
-  // The sheet is position:fixed, so nothing stops the page scrolling behind
-  // it; and a rotate/resize past the breakpoint would leave it stranded over
-  // the desktop layout, where the bar that opened it no longer exists.
-  //
-  // iOS Safari ignores `overflow: hidden` on the body for touch scrolling, so
-  // the lock has to pin the body itself — which drops the scroll position, and
-  // so has to carry it in `top` and restore it on the way out.
-  useEffect(() => {
-    if (!widget) return;
-    const { style } = document.body;
-    const previous = { overflow: style.overflow, position: style.position, top: style.top, width: style.width };
-    const scrollY = window.scrollY;
-    style.overflow = "hidden";
-    style.position = "fixed";
-    style.top = `-${scrollY}px`;
-    style.width = "100%";
-    const mq = window.matchMedia("(max-width: 600px)");
-    const onChange = () => {
-      if (!mq.matches) setWidget(null);
-    };
-    mq.addEventListener("change", onChange);
-    return () => {
-      Object.assign(style, previous);
-      window.scrollTo(0, scrollY);
-      mq.removeEventListener("change", onChange);
-    };
-  }, [widget]);
 
   async function maybeAiMove(overrides?: { mode?: Mode; aiColor?: Color; level?: AiLevel }) {
     const effMode = overrides?.mode ?? mode;
@@ -843,96 +500,6 @@ function App() {
     }
   }
 
-  // Lands on `ply`, clamped to live if it has reached or passed the end of
-  // the recorded history (historyRef only holds positions strictly before the
-  // live one — see browsePly's declaration).
-  function enterBrowse(ply: number) {
-    setSelected(null);
-    const total = historyRef.current.length;
-    setBrowsePly(ply >= total ? null : Math.max(0, ply));
-  }
-
-  function browsePrev() {
-    const total = historyRef.current.length;
-    if (browsePly === null) {
-      if (total > 0) enterBrowse(total - 1);
-    } else if (browsePly > 0) {
-      enterBrowse(browsePly - 1);
-    }
-  }
-
-  function browseNext() {
-    if (browsePly === null) return;
-    enterBrowse(browsePly + 1);
-  }
-
-  function browseHome() {
-    if (historyRef.current.length > 0) enterBrowse(0);
-  }
-
-  function browseLive() {
-    setSelected(null);
-    setBrowsePly(null);
-  }
-
-  // Hold a chevron to jump to the end of the history it steps towards, the
-  // way holding a rewind button seeks. The click that follows the release is
-  // swallowed, or the jump would be undone by a step in the same direction.
-  const LONG_PRESS_MS = 500;
-  const longPressRef = useRef<{ timer: number | null; fired: boolean }>({ timer: null, fired: false });
-
-  function cancelLongPress() {
-    if (longPressRef.current.timer !== null) {
-      clearTimeout(longPressRef.current.timer);
-      longPressRef.current.timer = null;
-    }
-  }
-
-  /** Handlers for a button whose hold does `onHold` and whose tap does `onTap`. */
-  function holdable(onHold: () => void, onTap: () => void) {
-    return {
-      onPointerDown: () => {
-        cancelLongPress();
-        longPressRef.current.fired = false;
-        longPressRef.current.timer = window.setTimeout(() => {
-          longPressRef.current = { timer: null, fired: true };
-          onHold();
-        }, LONG_PRESS_MS);
-      },
-      onPointerUp: cancelLongPress,
-      onPointerLeave: cancelLongPress,
-      onPointerCancel: cancelLongPress,
-      // A long press on a touch screen otherwise raises the selection or
-      // context menu on top of the jump.
-      onContextMenu: (e: ReactMouseEvent) => e.preventDefault(),
-      onClick: () => {
-        if (longPressRef.current.fired) {
-          longPressRef.current.fired = false;
-          return;
-        }
-        onTap();
-      },
-    };
-  }
-
-  // Swipe-to-step on the board, while browsing only. Safe to enable
-  // unconditionally on the container: the board is read-only in that state,
-  // so there is no drag gesture for it to collide with. Not used to *enter*
-  // browsing — that would fire by accident on a drag from an empty square.
-  const touchStartXRef = useRef<number | null>(null);
-  const SWIPE_THRESHOLD_PX = 40;
-  function onBoardTouchStart(e: ReactTouchEvent) {
-    touchStartXRef.current = browsePly !== null ? e.touches[0].clientX : null;
-  }
-  function onBoardTouchEnd(e: ReactTouchEvent) {
-    const startX = touchStartXRef.current;
-    touchStartXRef.current = null;
-    if (startX === null) return;
-    const dx = e.changedTouches[0].clientX - startX;
-    if (dx > SWIPE_THRESHOLD_PX) browsePrev();
-    else if (dx < -SWIPE_THRESHOLD_PX) browseNext();
-  }
-
   // Truncates the line at the browsed ply and goes live there — the one way
   // browsing is allowed to change the game, and only via this explicit action
   // (spec: the board itself stays read-only while browsing).
@@ -956,7 +523,7 @@ function App() {
     setSelected(null);
     setTimeUp(null);
     setShowFireworks(false);
-    setBrowsePly(null);
+    browseLive();
     rerender();
     const restored = gameRef.current;
     if (mode === "human-ai" && !restored.isGameOver() && restored.turn === aiColor) {
@@ -1133,7 +700,7 @@ function App() {
       status = `${timeUp === "w" ? "White" : "Black"} ran out of time. ${winner} wins!`;
     } else if (aiThinking) status += " (AI thinking...)";
   }
-  const gameOver = gameIsOver;
+  const gameOver = gameRef.current.isGameOver() || !!timeUp;
 
   const currentRecord = scores[level];
   const hasScoreHistory = currentRecord.wins + currentRecord.losses + currentRecord.draws > 0;
