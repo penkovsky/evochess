@@ -161,6 +161,15 @@ export class EvoChessGame {
     return this.chess.turn();
   }
 
+  /**
+   * Whether the first ply in `moveLog` was Black's — true for a game that
+   * started from a shared position with Black to move. The log has to open
+   * with "1. ..." then, so Black's plies stay in the second slot.
+   */
+  get logStartsWithBlack(): boolean {
+    return (this.turn === "b") === (this.moveLog.length % 2 === 0);
+  }
+
   rightsFor(color: Color): Rights {
     return { minor: this.minorRights[color], rook: this.rookRights[color] };
   }

@@ -9,7 +9,7 @@ export interface UseShareModal {
   /** Opens the dialog. `useShareSheet` decides whether it offers the OS sheet. */
   handleShare: (e: ReactMouseEvent<HTMLButtonElement>, useShareSheet: boolean) => Promise<void>;
   copyShareUrl: (url: string) => Promise<void>;
-  copyMoveLog: (moveLog: string[]) => Promise<void>;
+  copyMoveLog: (moveLog: string[], blackFirst: boolean) => Promise<void>;
   shareViaSheet: (url: string) => Promise<void>;
   closeShareModal: () => void;
   shareCopyBtnRef: RefObject<HTMLButtonElement | null>;
@@ -61,8 +61,8 @@ export function useShareModal(gameRef: RefObject<EvoChessGame>): UseShareModal {
     await copyText(url, "url");
   }
 
-  async function copyMoveLog(moveLog: string[]) {
-    await copyText(formatMoveLog(moveLog), "log");
+  async function copyMoveLog(moveLog: string[], blackFirst: boolean) {
+    await copyText(formatMoveLog(moveLog, blackFirst), "log");
   }
 
   // Never rejects: a dismissed sheet is an answer, not a failure, and the
@@ -85,13 +85,15 @@ export function useShareModal(gameRef: RefObject<EvoChessGame>): UseShareModal {
   async function handleShare(e: ReactMouseEvent<HTMLButtonElement>, useShareSheet: boolean) {
     shareLastFocusRef.current = e.currentTarget;
     const moveLog = [...gameRef.current.moveLog];
+    const blackFirst = gameRef.current.logStartsWithBlack;
     const { url, problem } = buildShareUrl();
     const canShareSheet = useShareSheet && !!navigator.share;
+    const base = { canShareSheet, moveLog, blackFirst, copiedAt: null, copiedKind: null };
     if (problem) {
-      setShareModal({ url, problem, clipboardOk: false, copiedAt: null, copiedKind: null, canShareSheet, moveLog });
+      setShareModal({ ...base, url, problem, clipboardOk: false });
       return;
     }
-    setShareModal({ url, problem: null, clipboardOk: true, copiedAt: null, copiedKind: null, canShareSheet, moveLog });
+    setShareModal({ ...base, url, problem: null, clipboardOk: true });
     copyShareUrl(url);
   }
 

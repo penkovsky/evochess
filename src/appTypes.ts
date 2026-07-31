@@ -34,6 +34,8 @@ export interface ShareModalState {
   canShareSheet: boolean;
   /** The move log, snapshotted when the dialog opened. */
   moveLog: string[];
+  /** Whether that log's first ply is Black's, as on a shared Black-to-move position. */
+  blackFirst: boolean;
 }
 
 /** Why a restart is being proposed. Only the dialog's wording depends on it. */

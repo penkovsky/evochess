@@ -7,11 +7,18 @@ import { useEffect, useRef } from "react";
  */
 export function MoveLog({
   moveLog,
+  blackFirst,
   browsePly,
   browsable,
   onSelectPly,
 }: {
   moveLog: string[];
+  /**
+   * Whether the first ply is Black's, as it is on a shared position with Black
+   * to move. The first pair then opens with a "..." placeholder so Black's
+   * plies stay in the second column.
+   */
+  blackFirst: boolean;
   /** null means live; a ply is highlighted and scrolled to when set. */
   browsePly: number | null;
   /**
@@ -25,6 +32,13 @@ export function MoveLog({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const currentPly = browsePly ?? moveLog.length;
+  // null is the placeholder standing in for the White move that never
+  // happened, so pairs line up with the columns either way. An empty log stays
+  // empty: a shared position with Black to move has `blackFirst` before any
+  // move is played, and the placeholder alone would render a phantom "1. ..."
+  // row next to "No moves yet.".
+  const plies: (string | null)[] = blackFirst && moveLog.length > 0 ? [null, ...moveLog] : moveLog;
+  const offset = blackFirst ? 1 : 0;
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -40,14 +54,18 @@ export function MoveLog({
           unplayed game, leaving a drawer with a title and no body. Not a
           <div>: the e2e specs count `.log > div` to mean "moves played". */}
       {moveLog.length === 0 && <p className="log-empty">No moves yet.</p>}
-      {moveLog
+      {plies
         .filter((_, i) => i % 2 === 0)
         .map((white, n) => {
-          const black = moveLog[n * 2 + 1];
-          const whitePly = n * 2 + 1;
-          const blackPly = n * 2 + 2;
-          const entry = (san: string, ply: number) =>
-            browsable ? (
+          const black = plies[n * 2 + 1];
+          // Ply numbers are 1-based over `moveLog`, so the placeholder shifts
+          // every entry back by one.
+          const whitePly = n * 2 + 1 - offset;
+          const blackPly = n * 2 + 2 - offset;
+          const entry = (san: string | null, ply: number) =>
+            san === null ? (
+              "..."
+            ) : browsable ? (
               <button
                 type="button"
                 className={`log-move${currentPly === ply ? " current" : ""}`}

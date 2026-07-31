@@ -18,7 +18,7 @@ export function ShareModal({
   shareModal: ShareModalState;
   closeShareModal: () => void;
   copyShareUrl: (url: string) => void;
-  copyMoveLog: (moveLog: string[]) => void;
+  copyMoveLog: (moveLog: string[], blackFirst: boolean) => void;
   shareViaSheet: (url: string) => void;
   shareCopyBtnRef: RefObject<HTMLButtonElement | null>;
   shareCloseBtnRef: RefObject<HTMLButtonElement | null>;
@@ -83,7 +83,7 @@ export function ShareModal({
           <div className="share-status" aria-live="polite">
             {status("log")}
           </div>
-          <button disabled={moves === 0} onClick={() => copyMoveLog(shareModal.moveLog)}>
+          <button disabled={moves === 0} onClick={() => copyMoveLog(shareModal.moveLog, shareModal.blackFirst)}>
             Copy move log
           </button>
         </section>

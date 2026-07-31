@@ -1031,6 +1031,7 @@ function App() {
           <summary>Move log</summary>
           <MoveLog
             moveLog={game.moveLog}
+            blackFirst={game.logStartsWithBlack}
             browsePly={browsePly}
             browsable={totalPlies > 0}
             onSelectPly={enterBrowse}
@@ -1056,6 +1057,7 @@ function App() {
           {widget === "log" && (
             <MoveLog
               moveLog={game.moveLog}
+              blackFirst={game.logStartsWithBlack}
               browsePly={browsePly}
               browsable={totalPlies > 0}
               onSelectPly={(ply) => {
