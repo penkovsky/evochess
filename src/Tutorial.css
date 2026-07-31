@@ -172,6 +172,7 @@
 
 .tutorial-lesson .board-wrap {
   margin: 0;
+  touch-action: auto;
 }
 
 .tutorial-lesson-head {

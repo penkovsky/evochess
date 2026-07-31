@@ -15,6 +15,11 @@
      would spread the grid rows apart and expose the page background as
      black lines between them. */
   align-self: flex-start;
+  /* Without this, touch-dragging a piece also scrolls the page on mobile,
+     since react-chessboard only sets touch-action: none on the piece being
+     dragged, not the board container itself. The tutorial overrides this
+     back to auto since its lessons need page scrolling. */
+  touch-action: none;
 }
 
 .panel {
