@@ -44,19 +44,47 @@ function illegalLink(): string {
   return encodeShareLink(game);
 }
 
+/**
+ * The settings half of a save. Every field a save has is required, so a fixture
+ * that omits one is discarded on load rather than restored with a hole in it,
+ * and the test it was written for would silently exercise the no-save path.
+ */
+const SAVE_SETTINGS = {
+  mode: "human-human",
+  aiColor: "b",
+  level: "zen",
+  autoFlip: true,
+  timerEnabled: false,
+  timerMinutes: 10,
+  clock: { w: 600, b: 600 },
+  ponderEnabled: true,
+  fromShared: false,
+  unverified: false,
+} as const;
+
+/** Telemetry meta for a fixture game: a started game that has not been logged. */
+function saveMeta(startFen: string) {
+  return {
+    uid: `e2e-${startFen.slice(0, 8)}`,
+    startFen,
+    startParam: null,
+    activeMs: 0,
+    lastPlyAt: null,
+    lastPlies: 0,
+    takebacks: 0,
+    started: true,
+    logged: false,
+  };
+}
+
 /** An autosave for the recipient's own in-progress game, one move deep. */
 function ownGameSave(): string {
   const game = new EvoChessGame();
   game.applyMove("e2", "e4");
   return JSON.stringify({
     ...serializeGame(game),
-    mode: "human-human",
-    aiColor: "b",
-    level: "zen",
-    autoFlip: true,
-    timerEnabled: false,
-    timerMinutes: 10,
-    ponderEnabled: true,
+    ...SAVE_SETTINGS,
+    telemetry: saveMeta(new EvoChessGame().chess.fen()),
   });
 }
 
@@ -68,17 +96,16 @@ function aiGameSave(): string {
 
 /** A vs-AI game that is already over: two bare kings, so drawn on sight. */
 function drawnGameSave(): string {
+  const fen = "4k3/8/8/8/8/8/8/4K3 w - - 0 1";
   const game = new EvoChessGame();
-  game.chess.load("4k3/8/8/8/8/8/8/4K3 w - - 0 1", { skipValidation: true });
+  game.chess.load(fen, { skipValidation: true });
   return JSON.stringify({
     ...serializeGame(game),
+    ...SAVE_SETTINGS,
     mode: "human-ai",
-    aiColor: "b",
-    level: "zen",
-    autoFlip: true,
-    timerEnabled: false,
-    timerMinutes: 10,
-    ponderEnabled: true,
+    // Already scored and already sent, which is what a finished save on disk
+    // means: the effects must not record or log it again on this reload.
+    telemetry: { ...saveMeta(fen), logged: true },
   });
 }
 

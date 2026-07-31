@@ -2,6 +2,7 @@ import type { Color } from "chess.js";
 import { EvoChessGame } from "./game";
 import type { AiLevel } from "./ai";
 import { serializeGame, deserializeGame, type SerializedGame } from "./serialize";
+import type { GameMeta } from "../telemetry";
 
 const STORAGE_KEY = "evochess-save-v3";
 // A second slot, holding the game that was in STORAGE_KEY when a shared
@@ -15,32 +16,28 @@ export interface SavedState extends SerializedGame {
   mode: "human-ai" | "human-human";
   aiColor: Color;
   level: AiLevel;
-  // Optional for backward compatibility with saves written before the
-  // board-flip preference existed.
-  autoFlip?: boolean;
-  // Optional for backward compatibility with saves written before the
-  // human-vs-human clock existed. Only the settings are persisted, not the
-  // remaining time — like moveLog, the in-progress clock isn't reconstructed.
-  timerEnabled?: boolean;
-  timerMinutes?: number;
-  // Optional for backward compatibility with saves written before the clock's
-  // remaining time was persisted (it used to reset to timerMinutes on reload).
-  clock?: Record<Color, number>;
-  // Optional for backward compatibility with saves written before pondering
-  // existed (ponder-spec.md §5.5). Defaults to on when absent.
-  ponderEnabled?: boolean;
+  autoFlip: boolean;
+  timerEnabled: boolean;
+  timerMinutes: number;
+  // The clock's remaining time, not just its settings. Unlike moveLog, an
+  // in-progress clock cannot be reconstructed from the position.
+  clock: Record<Color, number>;
+  ponderEnabled: boolean;
   // True when this game began from a shared `?p=` position rather than from the
   // opening. Persisted because the flag has to survive a reload: the result of
   // a game played from someone else's position is not recorded against the
   // local score, and the score is not shown when it ends.
-  fromShared?: boolean;
+  fromShared: boolean;
   // True when the position this game was played from could not have occurred
   // (share-links-spec.md §5.2). Persisted for the same reason as `fromShared`,
   // but the stake is higher: the engine lockout is what makes rendering an
   // impossible position safe, and the search assumes a well-formed board. Three
   // of the legality failures produce FENs chess.js accepts, so without this the
   // position comes back after a reload with the engine re-enabled.
-  unverified?: boolean;
+  unverified: boolean;
+  // Persisted so a reload neither re-logs a game already sent, nor re-counts
+  // one already started, nor loses the position the log replays from.
+  telemetry: GameMeta;
 }
 
 /**
@@ -63,6 +60,7 @@ export interface SaveOptions {
   ponderEnabled: boolean;
   fromShared: boolean;
   unverified: boolean;
+  telemetry: GameMeta;
 }
 
 export function saveGame({ game, ...settings }: SaveOptions) {
@@ -75,25 +73,32 @@ export interface LoadedGame {
   mode: "human-ai" | "human-human";
   aiColor: Color;
   level: AiLevel;
-  autoFlip?: boolean;
-  timerEnabled?: boolean;
-  timerMinutes?: number;
-  clock?: Record<Color, number>;
-  ponderEnabled?: boolean;
-  fromShared?: boolean;
-  unverified?: boolean;
+  autoFlip: boolean;
+  timerEnabled: boolean;
+  timerMinutes: number;
+  clock: Record<Color, number>;
+  ponderEnabled: boolean;
+  fromShared: boolean;
+  unverified: boolean;
+  telemetry: GameMeta;
 }
 
 function parseSave(raw: string | null): LoadedGame | null {
   if (!raw) return null;
   try {
     const saved: SavedState = JSON.parse(raw);
+    // Every field is required, so a save written to an older shape is dropped
+    // rather than restored with holes in it. `telemetry` is the youngest field
+    // and so the one that says which shape this is. The cost is one abandoned
+    // game the first time such a save is loaded; the alternative is a
+    // half-restored set of preferences and a game the funnel cannot account
+    // for, both of which are worse than starting over.
+    if (saved.telemetry === undefined) return null;
     return {
       game: deserializeGame(saved),
       mode: saved.mode,
       aiColor: saved.aiColor,
-      // Default for saves written before difficulty was a named level.
-      level: saved.level ?? "fun",
+      level: saved.level,
       autoFlip: saved.autoFlip,
       timerEnabled: saved.timerEnabled,
       timerMinutes: saved.timerMinutes,
@@ -101,6 +106,7 @@ function parseSave(raw: string | null): LoadedGame | null {
       ponderEnabled: saved.ponderEnabled,
       fromShared: saved.fromShared,
       unverified: saved.unverified,
+      telemetry: saved.telemetry,
     };
   } catch {
     return null;

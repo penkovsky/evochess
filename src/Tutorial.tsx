@@ -13,7 +13,7 @@ import {
   type ScriptedMove,
   type StepMove,
 } from "./evochess/tutorial";
-import { loadProgress, markCompleted, markSeen } from "./evochess/tutorialProgress";
+import { loadProgress, markCompleted, markSeen, trackTutorialOpened } from "./evochess/tutorialProgress";
 import { EvoStrip } from "./EvoStrip";
 import { PIECE_GLYPH } from "./pieceGlyph";
 import "./Tutorial.css";
@@ -72,10 +72,19 @@ export function Tutorial({ onExit, onSearch }: { onExit: () => void; onSearch?: 
   const [lessonIndex, setLessonIndex] = useState<number | null>(null);
   const [progress, setProgress] = useState(loadProgress);
 
+  // Per mount, so StrictMode's second pass in development is not a second open.
+  // A ref rather than a module flag: reopening the tutorial is a real open.
+  const openLogged = useRef(false);
+
   useEffect(() => {
     // Opening the tutorial at all counts as seeing it, so the invitation on
     // the board isn't offered again on the next visit.
-    setProgress(markSeen());
+    const opened = markSeen();
+    setProgress(opened);
+    if (!openLogged.current) {
+      openLogged.current = true;
+      trackTutorialOpened(opened);
+    }
   }, []);
 
   if (lessonIndex === null) {

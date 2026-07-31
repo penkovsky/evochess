@@ -58,6 +58,17 @@ export interface Rights {
   rook: number;
 }
 
+/** Machine-replayable encoding of an `applyMove` call. */
+export function moveToken(from: Square, to: Square, options: ApplyMoveOptions): string {
+  const { forcedPromo, minorPromo, rookPromo, downgradeTo } = options;
+  let tag = "";
+  if (forcedPromo) tag = `f${forcedPromo}`;
+  else if (minorPromo) tag = `m${minorPromo}`;
+  else if (rookPromo) tag = "r";
+  else if (downgradeTo) tag = `d${downgradeTo}`;
+  return `${from}${to}${tag}`;
+}
+
 /**
  * An en passant opportunity that chess.js cannot represent: the pawn that
  * double-moved evolved into a minor piece at the end of that move, so the
@@ -103,6 +114,8 @@ export class EvoChessGame {
   pawnMoveProgress: Record<Color, number>;
   minorMoveProgress: Record<Color, number>;
   moveLog: string[];
+  /** One token per ply, kept in lockstep with `moveLog`. */
+  moveTokens: string[];
   // Charges remaining on each rook currently on the board, keyed by square.
   // The key follows the piece across moves; a rook with no entry is treated
   // as freshly-promoted (full charges) — this covers rooks placed directly
@@ -123,6 +136,7 @@ export class EvoChessGame {
     this.pawnMoveProgress = { w: 0, b: 0 };
     this.minorMoveProgress = { w: 0, b: 0 };
     this.moveLog = [];
+    this.moveTokens = [];
     this.rookCharges = new Map();
     this.rookLocked = new Set();
     this.epEvolved = null;
@@ -136,6 +150,7 @@ export class EvoChessGame {
     g.pawnMoveProgress = { ...this.pawnMoveProgress };
     g.minorMoveProgress = { ...this.minorMoveProgress };
     g.moveLog = [...this.moveLog];
+    g.moveTokens = [...this.moveTokens];
     g.rookCharges = new Map(this.rookCharges);
     g.rookLocked = new Set(this.rookLocked);
     g.epEvolved = this.epEvolved ? { ...this.epEvolved } : null;
@@ -427,6 +442,7 @@ export class EvoChessGame {
     this.epEvolved = epEvolvedNext;
 
     this.moveLog.push(note);
+    this.moveTokens.push(moveToken(from, to, options));
     return note;
   }
 

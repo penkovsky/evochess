@@ -25,6 +25,9 @@ jobs:
       - run: npm ci
       - run: npm test -- run
       - run: npm run build
+        env:
+          VITE_TELEMETRY_URL: ${{ vars.VITE_TELEMETRY_URL }}
+          VITE_TELEMETRY_KEY: ${{ vars.VITE_TELEMETRY_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

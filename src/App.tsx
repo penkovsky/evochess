@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Color, Square } from "chess.js";
-import { EvoChessGame, EvoChessError, ROOK_CHARGES, type ApplyMoveOptions } from "./evochess/game";
+import { EvoChessGame, EvoChessError, ROOK_CHARGES, START_FEN, type ApplyMoveOptions } from "./evochess/game";
 import type { AiLevel } from "./evochess/ai";
 import { decodeShareLink, readShareParam } from "./evochess/shareLink";
 import {
@@ -11,8 +11,21 @@ import {
   loadParkedGame,
   hasParkedGame,
   clearParkedGame,
+  type LoadedGame,
 } from "./evochess/persistence";
 import { loadProgress, markSeen } from "./evochess/tutorialProgress";
+import {
+  accruePlyTime,
+  initTelemetry,
+  logFinishedGame,
+  msSinceSessionStart,
+  newGameMeta,
+  reportedDurationMs,
+  track,
+  trackOnce,
+  trackSessionOnce,
+  type GameMeta,
+} from "./telemetry";
 import { Fireworks } from "./Fireworks";
 import { Tutorial } from "./Tutorial";
 import { ShareIcon } from "./Icons";
@@ -39,6 +52,14 @@ import { ShareModal } from "./components/ShareModal";
 import { ConfirmModal } from "./components/ConfirmModal";
 import "./App.css";
 
+/**
+ * Restores the meta of a game being resumed. The ply anchor is dropped, so the
+ * time the game sat closed is not counted as play.
+ */
+function resumeMeta(saved: LoadedGame): GameMeta {
+  return { ...saved.telemetry, lastPlyAt: null };
+}
+
 function App() {
   const [, forceRender] = useState(0);
   // Game state lives in refs, not React state, so anything that mutates it in
@@ -49,6 +70,13 @@ function App() {
   // only (not persisted): copy() captures the full EvoChess state — position,
   // evolution rights/counters, and move log — which chess.js's own undo can't.
   const historyRef = useRef<EvoChessGame[]>([]);
+  // Identity of the game being played, for the finished-game log. A ref, so a
+  // takeback (which swaps gameRef.current for an earlier copy) stays the same
+  // game.
+  const gameMetaRef = useRef<GameMeta>(newGameMeta(START_FEN));
+  // Whether the board holds a game restored from a save rather than one begun
+  // in this session. Read by `first_move`.
+  const resumedRef = useRef(false);
   const [mode, setMode] = useState<Mode>("human-ai");
   const [aiColor, setAiColor] = useState<Color>("b");
   const [level, setLevel] = useState<AiLevel>("zen");
@@ -235,6 +263,8 @@ function App() {
     clearParkedGame();
     setParked(false);
     gameRef.current = saved.game;
+    gameMetaRef.current = resumeMeta(saved);
+    resumedRef.current = true;
     if (saved.game.isGameOver()) scoredGameRef.current = saved.game;
     historyRef.current = [];
     clockHistoryRef.current = [];
@@ -242,15 +272,15 @@ function App() {
     // always: open a second link after playing on a first, and the game parked
     // for this button is itself from an unverified position. The lockout follows
     // the position, not the sequence of events.
-    const lockedOut = saved.unverified ?? false;
+    const lockedOut = saved.unverified;
     engineLockedRef.current = lockedOut;
     setUnverified(lockedOut);
     setLinkNotice(null);
-    setFromShared(saved.fromShared ?? false);
+    setFromShared(saved.fromShared);
     setMode(lockedOut ? "human-human" : saved.mode);
     setAiColor(saved.aiColor);
     setLevel(saved.level);
-    clockRef.current = saved.clock ?? { w: (saved.timerMinutes ?? 10) * 60, b: (saved.timerMinutes ?? 10) * 60 };
+    clockRef.current = saved.clock;
     setModal(null);
     setSelected(null);
     setTimeUp(null);
@@ -271,6 +301,7 @@ function App() {
   }
 
   useEffect(() => {
+    initTelemetry();
     const saved = loadGame();
     // A game parked by an earlier visit on a link, if the recipient never went
     // back to it. The offer outlives the reload that made it necessary.
@@ -283,6 +314,23 @@ function App() {
       console.warn(`evochess: shared link refused [${shared.code}]`);
       setLinkNotice(shared.message);
     }
+    // After the decode, since `from_share` and `share_refused` depend on it.
+    // The device class is the pointer and the viewport: no user agent string,
+    // which is a fingerprint and answers nothing these do not.
+    const tutorial = loadProgress();
+    // A valid link takes the board, and the autosave is left where it is.
+    resumedRef.current = !!saved && !shared?.ok;
+    trackOnce("page_load", "page_load", {
+      from_share: !!param,
+      share_refused: !!shared && !shared.ok,
+      resumed_game: resumedRef.current,
+      viewport_w: window.innerWidth,
+      viewport_h: window.innerHeight,
+      dpr: Math.round(window.devicePixelRatio * 100) / 100,
+      coarse_pointer: window.matchMedia("(pointer: coarse)").matches,
+      tutorial_seen: tutorial.seen,
+      lessons_done: tutorial.completed.length,
+    });
     if (saved) {
       // Applied whichever game wins the board below: a position-only link
       // carries no extras block (share-links-spec.md §4.5), so orientation, mode
@@ -290,15 +338,16 @@ function App() {
       setMode(saved.mode);
       setAiColor(saved.aiColor);
       setLevel(saved.level);
-      setAutoFlip(saved.autoFlip ?? true);
-      setTimerEnabled(saved.timerEnabled ?? false);
-      setTimerMinutes(saved.timerMinutes ?? 10);
-      clockRef.current = saved.clock ?? { w: (saved.timerMinutes ?? 10) * 60, b: (saved.timerMinutes ?? 10) * 60 };
-      setPonderEnabled(saved.ponderEnabled ?? true);
+      setAutoFlip(saved.autoFlip);
+      setTimerEnabled(saved.timerEnabled);
+      setTimerMinutes(saved.timerMinutes);
+      clockRef.current = saved.clock;
+      setPonderEnabled(saved.ponderEnabled);
     }
     if (shared?.ok) {
       savedGameRef.current = saved;
       gameRef.current = shared.game;
+      gameMetaRef.current = newGameMeta(shared.game.chess.fen(), param);
       setSharedPending(true);
       setFromShared(true);
       // Nothing in the payload says who moves next, and there is no extras
@@ -320,14 +369,14 @@ function App() {
       resetPonder(); // a position from outside this session (ponder-spec.md §5.3)
     } else if (saved) {
       gameRef.current = saved.game;
-      setFromShared(saved.fromShared ?? false);
+      gameMetaRef.current = resumeMeta(saved);
+      setFromShared(saved.fromShared);
       // The lockout has to come back with the position. `engineLockedRef` is
       // memory-only, and three of the legality failures (over nine pieces per
       // side, side-not-to-move-in-check, en passant incoherence) produce FENs
       // chess.js loads happily, so a reload would otherwise hand the search a
       // board it must never see. `setMode` overrides the one set above: a saved
-      // `human-ai` here can only come from a save written before the lockout was
-      // persisted, or from one edited by hand.
+      // `human-ai` here can only come from a save edited by hand.
       if (saved.unverified) {
         console.warn("evochess: resuming a game played from an unverified shared position");
         engineLockedRef.current = true;
@@ -356,6 +405,8 @@ function App() {
     // A shared position stays in memory until the recipient commits to it, so
     // their own game is still in localStorage and still restorable (spec §6.4).
     if (sharedPending) return;
+    const meta = gameMetaRef.current;
+    accruePlyTime(meta, gameRef.current.moveLog.length);
     saveGame({
       game: gameRef.current,
       mode,
@@ -368,8 +419,62 @@ function App() {
       ponderEnabled,
       fromShared,
       unverified,
+      telemetry: meta,
     });
   });
+
+  // Sends the move log and the `game_end` event of a finished game, once.
+  // Deliberately wider than the
+  // scoring effect, which skips human-vs-human and shared games: those are
+  // finished games too. `logged` rides in the save, so a reload of a game
+  // already sent does not send it again.
+  useEffect(() => {
+    if (!loaded) return;
+    // Same rule as the save effect: nothing about a shared position is recorded
+    // until the recipient plays from it. A link to a position that is already
+    // mate would otherwise log a nought-move game, and log it again on every
+    // reload, since `logged` is only persisted once the game goes live.
+    if (sharedPending) return;
+    const game = gameRef.current;
+    if (!game.isGameOver() && !timeUp) return;
+    const meta = gameMetaRef.current;
+    if (meta.logged) return;
+    meta.logged = true;
+    const humanColor: Color = mode === "human-ai" ? (aiColor === "w" ? "b" : "w") : "w";
+    const outcome = timeUp
+      ? "timeout"
+      : !game.chess.isCheckmate()
+      ? "draw"
+      : game.turn === humanColor
+      ? "loss"
+      : "win";
+    logFinishedGame({
+      meta,
+      mode,
+      level,
+      aiColor,
+      fromShared,
+      outcome,
+      moves: game.moveLog,
+      moveTokens: game.moveTokens,
+    });
+    track(
+      "game_end",
+      {
+        outcome,
+        plies: game.moveLog.length,
+        duration_ms: reportedDurationMs(meta),
+        mode,
+        level: mode === "human-ai" ? level : null,
+        ai_color: aiColor,
+        from_shared: fromShared,
+        takebacks: meta.takebacks,
+      },
+      meta.uid
+    );
+    rerender(); // persists `logged` now rather than at the next move
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, mode, aiColor, level, fromShared, sharedPending, timeUp, gameRef.current, gameRef.current.moveLog.length]);
 
   // Resumes an AI-to-move position on load (e.g. reloading mid-game with the
   // AI to move). Deliberately NOT re-run when mode/aiColor change: toggling
@@ -459,6 +564,28 @@ function App() {
     }
     // Only record the snapshot once the move actually applied.
     dismissInvite();
+    // The top of the funnel. Only this path: the AI applies its own moves.
+    trackSessionOnce("first_move", "first_move", {
+      ms_since_load: msSinceSessionStart(),
+      resumed_game: resumedRef.current,
+    });
+    // A game begins when it is played, so the human's first move is the event.
+    // Not the first ply: the AI opens for itself when it has White, and a
+    // takeback to the opening would otherwise start the same game twice.
+    if (!gameMetaRef.current.started) {
+      gameMetaRef.current.started = true;
+      track(
+        "game_start",
+        {
+          mode,
+          level: mode === "human-ai" ? level : null,
+          ai_color: aiColor,
+          from_shared: fromShared,
+          unverified,
+        },
+        gameMetaRef.current.uid
+      );
+    }
     // The recipient has played from the shared position, so it becomes the
     // live game and normal autosaving resumes (spec §6.4). Their own game is
     // parked rather than lost, so they can still go back to it.
@@ -488,6 +615,9 @@ function App() {
       restoredClock = clockHist.pop();
     }
     if (!restored) return;
+    // One per takeback, not per ply undone: a vs-AI takeback rolls back the
+    // AI's reply too.
+    gameMetaRef.current.takebacks += 1;
     gameRef.current = restored;
     resetPonder(); // takeback discards game state (ponder-spec.md §5.3, §6.2)
     setModal(null);
@@ -655,6 +785,8 @@ function App() {
 
   function startNewGame(newMode: Mode, newAiColor: Color, newLevel: AiLevel) {
     gameRef.current = new EvoChessGame();
+    gameMetaRef.current = newGameMeta(START_FEN);
+    resumedRef.current = false;
     historyRef.current = [];
     clockHistoryRef.current = [];
     resetPonder(); // new game discards the old position (ponder-spec.md §5.3, §6.2)

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { EvoChessGame } from "../game";
+import { EvoChessGame, START_FEN } from "../game";
 import { saveGame, loadGame, clearSavedGame, type SaveOptions } from "../persistence";
 import type { Square } from "chess.js";
 
@@ -23,6 +23,7 @@ const baseOptions: Omit<SaveOptions, "game"> = {
   ponderEnabled: true,
   fromShared: false,
   unverified: false,
+  telemetry: { uid: "test-uid", startFen: START_FEN, startParam: null, activeMs: 0, lastPlyAt: null, lastPlies: 0, takebacks: 0, started: true, logged: false },
 };
 
 /** Saves with the defaults above, so each test states only what it varies. */
@@ -88,14 +89,25 @@ describe("persistence of the evolved en passant", () => {
     expect(loadGame()!.unverified).toBe(false);
   });
 
-  // Saves written before the flag existed must not read as unverified, or every
-  // pre-existing game would lose its AI opponent on the next reload.
-  it("treats a save with no unverified field as verified", () => {
+  // Every field of a save is required. One written to an older shape is dropped
+  // rather than restored with holes in it, which would mean a half-set of
+  // preferences and a game the funnel cannot account for.
+  it("drops a save with no telemetry field", () => {
     const game = new EvoChessGame();
     save(game);
     const raw = JSON.parse(store.get("evochess-save-v3")!);
-    delete raw.unverified;
+    delete raw.telemetry;
     store.set("evochess-save-v3", JSON.stringify(raw));
-    expect(loadGame()!.unverified).toBeUndefined();
+    expect(loadGame()).toBeNull();
+  });
+
+  it("round-trips telemetry, so a resumed game is neither re-counted nor re-logged", () => {
+    const game = new EvoChessGame();
+    save(game, { telemetry: { ...baseOptions.telemetry, started: true, logged: true, takebacks: 3 } });
+    const meta = loadGame()!.telemetry;
+    expect(meta.started).toBe(true);
+    expect(meta.logged).toBe(true);
+    expect(meta.takebacks).toBe(3);
+    expect(meta.uid).toBe("test-uid");
   });
 });

@@ -1,11 +1,23 @@
 /// <reference types="vitest/config" />
+import { execSync } from 'node:child_process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+
+function gitSha() {
+  try {
+    return execSync('git rev-parse --short HEAD').toString().trim()
+  } catch {
+    return 'unknown'
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
   base: '/evochess/',
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(gitSha()),
+  },
   test: {
     environment: 'jsdom',
     globals: true,

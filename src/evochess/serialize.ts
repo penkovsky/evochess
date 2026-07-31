@@ -12,6 +12,7 @@ export interface SerializedGame {
   pawnMoveProgress: Record<Color, number>;
   minorMoveProgress: Record<Color, number>;
   moveLog: string[];
+  moveTokens?: string[];
   rookCharges: Record<string, number>;
   rookLocked: string[];
   epEvolved?: EvolvedEnPassant | null;
@@ -25,6 +26,7 @@ export function serializeGame(game: EvoChessGame): SerializedGame {
     pawnMoveProgress: game.pawnMoveProgress,
     minorMoveProgress: game.minorMoveProgress,
     moveLog: game.moveLog,
+    moveTokens: game.moveTokens,
     rookCharges: Object.fromEntries(game.rookCharges),
     rookLocked: [...game.rookLocked],
     epEvolved: game.epEvolved,
@@ -39,6 +41,7 @@ export function deserializeGame(saved: SerializedGame): EvoChessGame {
   game.pawnMoveProgress = saved.pawnMoveProgress;
   game.minorMoveProgress = saved.minorMoveProgress;
   game.moveLog = saved.moveLog;
+  game.moveTokens = saved.moveTokens ?? [];
   game.rookCharges = new Map(Object.entries(saved.rookCharges ?? {})) as Map<Square, number>;
   game.rookLocked = new Set((saved.rookLocked ?? []) as Square[]);
   game.epEvolved = saved.epEvolved ?? null;
