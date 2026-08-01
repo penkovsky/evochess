@@ -6,7 +6,17 @@
  * model.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { fetchDailyPuzzle, puzzleOutcome, resolvePuzzle } from "../dailyPuzzle";
+import {
+  cachePuzzle,
+  countAttempt,
+  fetchDailyPuzzle,
+  formatPuzzleDate,
+  loadCachedPuzzle,
+  puzzleOutcome,
+  resolvePuzzle,
+} from "../dailyPuzzle";
+
+const CACHE_KEY = "evochess-puzzle-v1";
 
 const URL_BASE = "https://collector.example";
 const KEY = "anon-key";
@@ -105,6 +115,96 @@ describe("fetchDailyPuzzle", () => {
     vi.stubEnv("VITE_TELEMETRY_KEY", "");
     expect(await fetchDailyPuzzle()).toBeNull();
     expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+describe("the cache", () => {
+  // An in-memory store, as in telemetry.test.ts: the test environment does not
+  // hand one over.
+  let store: Record<string, string> = {};
+  const localStorage = {
+    getItem: (k: string) => store[k] ?? null,
+    setItem: (k: string, v: string) => {
+      store[k] = v;
+    },
+    removeItem: (k: string) => {
+      delete store[k];
+    },
+  };
+
+  beforeEach(() => {
+    store = {};
+    vi.stubGlobal("localStorage", localStorage);
+    vi.stubEnv("VITE_TELEMETRY_URL", URL_BASE);
+    vi.stubEnv("VITE_TELEMETRY_KEY", KEY);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("reads back what was written", () => {
+    cachePuzzle({ date: "2026-08-01", param: "AQABBB", mateIn: 2 });
+    expect(loadCachedPuzzle()).toEqual({ date: "2026-08-01", param: "AQABBB", mateIn: 2 });
+  });
+
+  it("takes a fetched row, so the next load has the entry point at once", async () => {
+    stubFetch([ROW]);
+    const row = await fetchDailyPuzzle();
+    cachePuzzle(row!);
+    expect(loadCachedPuzzle()).toEqual({ date: "2026-08-01", param: "AQABBB", mateIn: 2 });
+  });
+
+  it("reads an absent or malformed entry as no cache, and throws nothing", () => {
+    expect(loadCachedPuzzle()).toBeNull();
+    localStorage.setItem(CACHE_KEY, "{not json");
+    expect(loadCachedPuzzle()).toBeNull();
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ date: "2026-08-01" }));
+    expect(loadCachedPuzzle()).toBeNull();
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ date: 20260801, param: "AQABBB", mateIn: 2 }));
+    expect(loadCachedPuzzle()).toBeNull();
+    localStorage.setItem(CACHE_KEY, JSON.stringify([]));
+    expect(loadCachedPuzzle()).toBeNull();
+  });
+
+  it("is left alone by a failed request", async () => {
+    cachePuzzle({ date: "2026-07-31", param: "AQABBB", mateIn: 3 });
+    stubFetch(null, { ok: false, status: 500 });
+    expect(await fetchDailyPuzzle()).toBeNull();
+    // Nothing expires it: a stale entry reads as an old puzzle, not a wrong one.
+    expect(loadCachedPuzzle()).toEqual({ date: "2026-07-31", param: "AQABBB", mateIn: 3 });
+  });
+});
+
+describe("formatPuzzleDate", () => {
+  it("formats the row's date in UTC", () => {
+    expect(formatPuzzleDate("2026-08-01")).toBe("1 August 2026");
+    // Just past midnight UTC is still the same day west of Greenwich, which is
+    // the whole reason the zone is pinned rather than taken from the browser.
+    expect(formatPuzzleDate("2026-01-01")).toBe("1 January 2026");
+  });
+
+  it("hands back anything it cannot parse", () => {
+    expect(formatPuzzleDate("not-a-date")).toBe("not-a-date");
+  });
+});
+
+describe("countAttempt", () => {
+  it("starts at 1", () => {
+    expect(countAttempt(null, "2026-08-01")).toEqual({ date: "2026-08-01", count: 1 });
+  });
+
+  it("increments on a reload of the same date", () => {
+    let attempts = countAttempt(null, "2026-08-01");
+    attempts = countAttempt(attempts, "2026-08-01");
+    attempts = countAttempt(attempts, "2026-08-01");
+    expect(attempts).toEqual({ date: "2026-08-01", count: 3 });
+  });
+
+  it("resets when the date changes", () => {
+    const attempts = countAttempt({ date: "2026-07-31", count: 4 }, "2026-08-01");
+    expect(attempts).toEqual({ date: "2026-08-01", count: 1 });
   });
 });
 

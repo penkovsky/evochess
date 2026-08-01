@@ -51,6 +51,85 @@ export async function fetchDailyPuzzle(): Promise<DailyPuzzle | null> {
   }
 }
 
+// ------------------------------------------------------------------ cache
+
+const CACHE_KEY = "evochess-puzzle-v1";
+
+/**
+ * The last row that came back, if any.
+ *
+ * The cache is a fallback for offline and for the moment before the response
+ * lands, so the entry point can be on screen from the first paint. It is not a
+ * reason to skip the request: the client cannot tell whether its own idea of
+ * today is right, and one request per load is cheap.
+ *
+ * Nothing expires it. The row's own `date` is what the UI shows, so a stale
+ * entry reads as an old puzzle rather than a wrong one.
+ */
+export function loadCachedPuzzle(): DailyPuzzle | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    return parseCached(JSON.parse(raw));
+  } catch {
+    // Malformed, unparseable, or storage unavailable: no cache.
+    return null;
+  }
+}
+
+export function cachePuzzle(puzzle: DailyPuzzle): void {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ...puzzle, fetchedAt: Date.now() }));
+  } catch {
+    // A full or blocked store costs the entry point one paint, nothing more.
+  }
+}
+
+function parseCached(entry: unknown): DailyPuzzle | null {
+  if (!entry || typeof entry !== "object") return null;
+  const { date, param, mateIn } = entry as Record<string, unknown>;
+  if (typeof date !== "string" || date.length === 0) return null;
+  if (typeof param !== "string" || param.length === 0) return null;
+  if (typeof mateIn !== "number" || !Number.isFinite(mateIn)) return null;
+  return { date, param, mateIn };
+}
+
+/**
+ * "1 August 2026", from the row's own date string.
+ *
+ * Parsed as UTC and formatted in UTC. Never in the local zone: a player just
+ * west of Greenwich would otherwise be told the puzzle is for yesterday. One
+ * global boundary is what makes "today's puzzle" mean the same thing
+ * everywhere, which is also why the UI says so.
+ */
+export function formatPuzzleDate(date: string): string {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return parsed.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+// --------------------------------------------------------------- attempts
+
+/** How many times this date has been loaded in this session. */
+export interface PuzzleAttempts {
+  date: string;
+  count: number;
+}
+
+/**
+ * The attempt number of the load about to happen, counting from 1. Nothing
+ * persists, so a reload starts the count over — consistent with the attempt
+ * itself not surviving a reload.
+ */
+export function countAttempt(prev: PuzzleAttempts | null, date: string): PuzzleAttempts {
+  return prev && prev.date === date ? { date, count: prev.count + 1 } : { date, count: 1 };
+}
+
 // ------------------------------------------------------- solved / failed
 
 /** The attempt in progress. `resolved` is the once-per-load guard. */

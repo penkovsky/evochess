@@ -4,6 +4,7 @@ export function TopBanners({
   unverified,
   sharedStatusText,
   hasSavedGame,
+  puzzleActive,
   setLinkNotice,
   backToMyGame,
   parked,
@@ -16,6 +17,12 @@ export function TopBanners({
   unverified: boolean;
   sharedStatusText: string;
   hasSavedGame: boolean;
+  /**
+   * Whether a puzzle owns the board. It outlives `sharedPending`, which the
+   * solver's first move clears, and the banner is where the day it is for is
+   * said — so the banner has to outlive it too.
+   */
+  puzzleActive: boolean;
   setLinkNotice: (notice: string | null) => void;
   backToMyGame: () => void;
   parked: boolean;
@@ -28,7 +35,7 @@ export function TopBanners({
       {/* Everything a shared link has to say, in one banner: on a phone this
           sits between the top of the page and the board, so a second one would
           push the board under the fold. Non-blocking either way. */}
-      {(linkNotice || sharedPending || unverified) && (
+      {(linkNotice || sharedPending || unverified || puzzleActive) && (
         <div className={`link-banner${unverified ? " unverified" : ""}`} role="status">
           <p>{linkNotice ?? sharedStatusText}</p>
           {linkNotice ? (
@@ -36,7 +43,7 @@ export function TopBanners({
               Dismiss
             </button>
           ) : (
-            sharedPending &&
+            (sharedPending || puzzleActive) &&
             hasSavedGame && (
               <button className="invite-skip-btn" onClick={backToMyGame}>
                 Back to my game
@@ -47,8 +54,10 @@ export function TopBanners({
       )}
       {/* Once the shared game is live the offer stays, but as a single compact
           button rather than a banner: it has to survive the whole game, and a
-          banner above the board that long is space the board needs on a phone. */}
-      {!sharedPending && parked && (
+          banner above the board that long is space the board needs on a phone.
+          Not while a puzzle is on the board: the banner above is still up, and
+          it is already carrying the same button. */}
+      {!sharedPending && !puzzleActive && parked && (
         <div className="parked-game-row">
           <button className="parked-game-btn" onClick={backToMyGame}>
             ↩ Back to my game

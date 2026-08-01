@@ -98,6 +98,15 @@ export function PawnIcon() {
   );
 }
 
+/** Jigsaw piece — a tab on one edge, a socket on another — the daily puzzle. */
+export function PuzzleIcon() {
+  return (
+    <Svg {...stroke}>
+      <path d="M4.5 9.2V5.4a.9.9 0 0 1 .9-.9h3.8a2 2 0 1 1 4 0h3.4a.9.9 0 0 1 .9.9v3.8a2 2 0 1 1 0 4v4.4a.9.9 0 0 1-.9.9h-4.4a2 2 0 1 0-4 0H5.4a.9.9 0 0 1-.9-.9v-3.4a2 2 0 1 1 0-4z" />
+    </Svg>
+  );
+}
+
 /** Share graph — one node fanning out to two — the outbound share dialog. */
 export function ShareIcon() {
   return (

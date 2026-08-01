@@ -4,8 +4,12 @@ import type { AiLevel } from "./evochess/ai";
 
 export type Mode = "human-ai" | "human-human";
 
-/** Which widget the mobile bar is showing in the sheet, if any. */
-export type MobileWidget = "rules" | "log" | "settings";
+/**
+ * Which widget the mobile bar is showing in the sheet, if any. The rules
+ * summary is not one of them: the puzzle button took its place in the bar, so
+ * on a phone the rules are reached from inside the settings sheet.
+ */
+export type MobileWidget = "log" | "settings";
 
 export interface PromoModalState {
   from: Square;

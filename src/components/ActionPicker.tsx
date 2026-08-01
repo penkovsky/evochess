@@ -14,6 +14,7 @@ export function ActionPicker({
   browsePrevHoldable,
   browseNextHoldable,
   setConfirmAction,
+  puzzleActive,
 }: {
   extraClass: string;
   browsing: boolean;
@@ -28,6 +29,12 @@ export function ActionPicker({
   /** Handlers for the next-move chevron: hold jumps to the live position. */
   browseNextHoldable: HTMLAttributes<HTMLButtonElement>;
   setConfirmAction: (action: ConfirmState) => void;
+  /**
+   * A puzzle owns the board, which takes away both of the actions that change
+   * the game: takeback makes the failure state unreachable, and "play from
+   * here" is a takeback wearing a different label.
+   */
+  puzzleActive: boolean;
 }) {
   return (
     <div className={`action-picker ${extraClass}`}>
@@ -44,7 +51,12 @@ export function ActionPicker({
           New Game
         </button>
       )}
-      {browsing ? (
+      {/* The slot stays occupied while a puzzle is on the board: the row is
+          four fixed widths so that nothing moves under the thumb, so the
+          button is replaced rather than removed. */}
+      {puzzleActive ? (
+        <span className="action-slot-empty" aria-hidden="true" />
+      ) : browsing ? (
         <button
           className="play-here-btn icon-btn"
           onClick={() => setConfirmAction({ kind: "play-here", ply: browsePly! })}

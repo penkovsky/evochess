@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import type { MobileWidget } from "../appTypes";
 
 const TITLE: Record<MobileWidget, string> = {
-  rules: "Rules summary",
   log: "Move log",
   settings: "Settings",
 };

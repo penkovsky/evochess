@@ -15,21 +15,27 @@ test("the widget bar replaces the side panel on a phone", async ({ page }) => {
 
   const bar = page.locator(".mobile-bar");
   await expect(bar).toBeVisible();
-  await expect(bar.locator(".widget-btn")).toHaveCount(5);
-  for (const name of ["Learn Evo Basics", "Rules summary", "Move log", "Settings", "Share position"]) {
+  // Four, not five: nothing has answered the puzzle query here, so the puzzle
+  // button is hidden entirely. The rules summary is no longer in the bar at
+  // all — it moved into the settings sheet to make room for it.
+  await expect(bar.locator(".widget-btn")).toHaveCount(4);
+  for (const name of ["Learn Evo Basics", "Move log", "Settings", "Share position"]) {
     await expect(bar.getByRole("button", { name })).toBeVisible();
   }
+  await expect(bar.getByRole("button", { name: "Rules summary" })).toHaveCount(0);
 
   await page.screenshot({ path: "e2e/__screenshots__/mobile-widget-bar.png", fullPage: true });
 });
 
 test("tapping a widget icon slides up a sheet; the backdrop closes it", async ({ page }) => {
-  const rules = page.locator(".mobile-bar").getByRole("button", { name: "Rules summary" });
+  const settings = page.locator(".mobile-bar").getByRole("button", { name: "Settings" });
   await expect(page.locator(".sheet")).toHaveCount(0);
 
-  await rules.click();
+  await settings.click();
   const sheet = page.locator(".sheet");
   await expect(sheet).toBeVisible();
+  // The rules ride along below the settings switches, which is the phone route
+  // to them now the puzzle button has the slot they used to have.
   await expect(sheet).toContainText("Castling is not defined.");
   // The board stays visible above the sheet — that's the point of a drawer.
   await expect(page.locator("[data-column]").first()).toBeVisible();

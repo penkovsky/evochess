@@ -191,6 +191,20 @@
   height: auto;
 }
 
+/* The rules sit below the settings in the same sheet, so they need a rule of
+   their own to be told apart from the switches above them. */
+.sheet-rules {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.sheet-rules h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: var(--text-h);
+}
+
 /* The log stays its own scroller even in the sheet: MoveLog pins it to the
    bottom on open and after each move, which only works if the element with
    the ref is the one that scrolls. It grows with the game up to the cap. */
@@ -283,6 +297,42 @@
   font-size: 28px;
   font-weight: bold;
   letter-spacing: 0.5px;
+}
+
+/* The puzzle outcome, in the same slot and with the same treatment as the
+   score overlay: over the board, so it costs no layout above or below it and
+   cannot push the board under the fold on a phone. Unlike the score it appears
+   at once — there is no result to keep readable underneath, and "Try again" is
+   what the player is waiting for. */
+.puzzle-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 0 12px;
+  background-color: rgba(0, 0, 0, 0.55);
+  color: white;
+  pointer-events: none;
+  z-index: 5;
+  border-radius: 4px;
+  animation: score-overlay-dim 400ms ease-in forwards;
+}
+
+.puzzle-overlay-text {
+  font-size: 24px;
+  font-weight: bold;
+  text-align: center;
+  text-wrap: balance;
+}
+
+/* No pulse on this one. "Play again?" has to draw the eye out of a board the
+   player has stopped looking at; a retry is already the only thing on screen,
+   and a button that never sits still is one the thumb has to chase. */
+.puzzle-overlay .play-again-btn {
+  animation: none;
 }
 
 .score-win {
@@ -746,8 +796,17 @@
 
 .action-picker .takeback-btn,
 .action-picker .play-here-btn,
-.action-picker .browse-step-btn {
+.action-picker .browse-step-btn,
+.action-picker .action-slot-empty {
   width: 44px;
+}
+
+/* Holds the slot open while a puzzle owns the board and neither of the two
+   buttons that live there may be offered. */
+.action-picker .action-slot-empty {
+  display: inline-block;
+  height: 44px;
+  flex: 0 0 auto;
 }
 
 /* Themed off the root variables, like the widget bar directly below: these

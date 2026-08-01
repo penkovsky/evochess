@@ -55,6 +55,11 @@ export function BoardArea({
   setConfirmAction,
   openTutorial,
   openWidget,
+  onPuzzle,
+  onPuzzleRetry,
+  puzzleActive,
+  puzzleMateIn,
+  puzzleResult,
   onShare,
 }: {
   boardWrapRef: RefObject<HTMLDivElement | null>;
@@ -95,6 +100,12 @@ export function BoardArea({
   setConfirmAction: (action: ConfirmState) => void;
   openTutorial: () => void;
   openWidget: (widget: MobileWidget) => void;
+  /** Null when there is no puzzle to offer, which hides the bar's button. */
+  onPuzzle: (() => void) | null;
+  onPuzzleRetry: () => void;
+  puzzleActive: boolean;
+  puzzleMateIn: number;
+  puzzleResult: null | "solved" | "failed";
   onShare: (e: ReactMouseEvent<HTMLButtonElement>, useShareSheet: boolean) => void;
 }) {
   return (
@@ -139,6 +150,24 @@ export function BoardArea({
             </button>
           </div>
         )}
+        {/* Over the board, like the score overlay, so the outcome costs no
+            layout above or below it and cannot push the board under the fold.
+            The two can never collide: a puzzle is always `fromShared`, and the
+            score overlay is suppressed for those. */}
+        {puzzleResult && (
+          <div className="puzzle-overlay" role="status">
+            <div className="puzzle-overlay-text">
+              {puzzleResult === "solved"
+                ? `Solved! Mate in ${puzzleMateIn}.`
+                : `Not mate in ${puzzleMateIn}.`}
+            </div>
+            {puzzleResult === "failed" && (
+              <button className="play-again-btn" onClick={onPuzzleRetry}>
+                Try again
+              </button>
+            )}
+          </div>
+        )}
       </div>
       <EvoStrip
         color={bottomColor}
@@ -158,8 +187,14 @@ export function BoardArea({
         browsePrevHoldable={browsePrevHoldable}
         browseNextHoldable={browseNextHoldable}
         setConfirmAction={setConfirmAction}
+        puzzleActive={puzzleActive}
       />
-      <MobileBar openTutorial={openTutorial} openWidget={openWidget} onShare={onShare} />
+      <MobileBar
+        openTutorial={openTutorial}
+        openWidget={openWidget}
+        onPuzzle={onPuzzle}
+        onShare={onShare}
+      />
     </div>
   );
 }

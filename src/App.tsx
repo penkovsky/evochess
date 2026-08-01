@@ -14,7 +14,17 @@ import {
   type LoadedGame,
 } from "./evochess/persistence";
 import { loadProgress, markSeen } from "./evochess/tutorialProgress";
-import { fetchDailyPuzzle, resolvePuzzle, type DailyPuzzle, type PuzzleState } from "./evochess/dailyPuzzle";
+import {
+  cachePuzzle,
+  countAttempt,
+  fetchDailyPuzzle,
+  formatPuzzleDate,
+  loadCachedPuzzle,
+  resolvePuzzle,
+  type DailyPuzzle,
+  type PuzzleAttempts,
+  type PuzzleState,
+} from "./evochess/dailyPuzzle";
 import {
   accruePlyTime,
   initTelemetry,
@@ -29,7 +39,7 @@ import {
 } from "./telemetry";
 import { Fireworks } from "./Fireworks";
 import { Tutorial } from "./Tutorial";
-import { ShareIcon } from "./Icons";
+import { PuzzleIcon, ShareIcon } from "./Icons";
 import {
   type ConfirmState,
   type Mode,
@@ -189,6 +199,18 @@ function App() {
   // Nothing persists — a reload resumes the puzzle as an ordinary shared game
   // and it stops counting as a puzzle.
   const puzzleRef = useRef<PuzzleState | null>(null);
+  // The puzzle the entry point offers, from the cache on the first paint and
+  // from the response once it lands. Null hides the entry point entirely: a
+  // player who has never loaded a puzzle and is offline sees the app exactly as
+  // it was before this existed.
+  const [puzzle, setPuzzle] = useState<DailyPuzzle | null>(null);
+  // The outcome of the attempt on the board, which the banner over it reads.
+  // Set by `checkPuzzle` alongside the event, so there is only ever one
+  // implementation of the ply arithmetic.
+  const [puzzleResult, setPuzzleResult] = useState<null | "solved" | "failed">(null);
+  // Loads of one date within this session, counting from 1. Nothing persists,
+  // consistent with the attempt itself not surviving a reload.
+  const attemptsRef = useRef<PuzzleAttempts | null>(null);
   // Whether a game of the recipient's own is sitting in the parked slot, which
   // is what "back to my game" offers once the shared game has gone live.
   const [parked, setParked] = useState(false);
@@ -257,7 +279,13 @@ function App() {
    * "back to my game" survives both the move and any later reload.
    */
   function parkOwnGameAndGoLive() {
-    setParked(parkSavedGame());
+    // Only when there is a game of the player's own being held. `parkSavedGame`
+    // copies the autosave, and `savedGameRef` is null in exactly the cases where
+    // the autosave is no longer theirs: a retried puzzle, or a second link
+    // opened on top of a first. Parking then would put the position they have
+    // just left over their real game, and "back to my game" would hand back the
+    // failed attempt.
+    if (savedGameRef.current) setParked(parkSavedGame());
     goLive();
   }
 
@@ -272,8 +300,10 @@ function App() {
     clearParkedGame();
     setParked(false);
     // The game coming back is the player's own, not the puzzle, so the tag must
-    // not follow it onto the `games` row.
+    // not follow it onto the `games` row — nor the banner the position it
+    // described has just left.
     puzzleRef.current = null;
+    setPuzzleResult(null);
     gameRef.current = saved.game;
     gameMetaRef.current = resumeMeta(saved);
     resumedRef.current = true;
@@ -369,24 +399,54 @@ function App() {
       startPly: shared.game.moveLog.length,
       resolved: false,
     };
+    // A fresh attempt, so the next outcome fires again and the banner from the
+    // last one goes.
+    attemptsRef.current = countAttempt(attemptsRef.current, puzzle.date);
+    setPuzzleResult(null);
     setModal(null);
     setSelected(null);
     setTimeUp(null);
-    track("puzzle_open", { date: puzzle.date, mate_in: puzzle.mateIn });
+    track("puzzle_open", {
+      date: puzzle.date,
+      mate_in: puzzle.mateIn,
+      attempts: attemptsRef.current.count,
+    });
     rerender();
   }
 
   /**
-   * Fires `puzzle_solved` or `puzzle_failed`, once. Called straight after a
-   * move and before the reply: a ply later would call a mate-in-2 failed on the
-   * move that delivers mate.
+   * The entry point, and "Try again" with it: one call site, so the button,
+   * `?daily` and the retry all go down the same path.
    *
-   * Nothing is shown either way. These events exist to answer whether a puzzle
-   * was too hard.
+   * No confirmation, ever. Loading a puzzle over a game in progress does not
+   * lose it — the shared-position path holds the player's own game and "back to
+   * my game" brings it back — so a dialog here would be asking about a risk
+   * that does not exist.
+   *
+   * Which game is handed over is the one thing that differs from `?daily`,
+   * which passes the autosave read at page load. By the time this runs the
+   * player may have played twenty moves, and that snapshot would rewind past
+   * them, so the live save is read at the moment of the press. Once a puzzle
+   * already owns the board, `loadGame()` would return the puzzle itself, so the
+   * game already being held is passed through unchanged.
    */
-  function checkPuzzle(overrides?: { aiColor?: Color }) {
-    const puzzle = puzzleRef.current;
+  function openPuzzle() {
     if (!puzzle) return;
+    loadDailyPuzzle(puzzle, puzzleRef.current ? savedGameRef.current : loadGame());
+  }
+
+  /**
+   * Fires `puzzle_solved` or `puzzle_failed`, once, and raises the banner over
+   * the board. Called straight after a move and before the reply: a ply later
+   * would call a mate-in-2 failed on the move that delivers mate.
+   *
+   * Returns the outcome so the caller can hold the engine back: a failure can
+   * land with the game still playable, since running out of moves is not the
+   * game ending.
+   */
+  function checkPuzzle(overrides?: { aiColor?: Color }): "solved" | "failed" | null {
+    const puzzle = puzzleRef.current;
+    if (!puzzle) return null;
     const game = gameRef.current;
     const effAiColor = overrides?.aiColor ?? aiColor;
     const outcome = resolvePuzzle(puzzle, {
@@ -396,11 +456,16 @@ function App() {
       humanColor: effAiColor === "w" ? "b" : "w",
       plies: game.moveLog.length,
     });
-    if (!outcome) return;
+    if (!outcome) return null;
+    setPuzzleResult(outcome);
     track(outcome === "solved" ? "puzzle_solved" : "puzzle_failed", {
       date: puzzle.date,
       mate_in: puzzle.mateIn,
+      // The same number the open carried. Redundant, and it means a solve or a
+      // failure can be read on its own without joining back to the open.
+      attempts: attemptsRef.current?.count ?? 1,
     });
+    return outcome;
   }
 
   useEffect(() => {
@@ -508,24 +573,64 @@ function App() {
       const url = new URL(window.location.href);
       url.searchParams.delete("daily");
       window.history.replaceState(null, "", url.pathname + url.search + url.hash);
-      // gameRef is whichever game took the board above, so this is the ply count
-      // the request is racing.
-      const plyAtLoad = gameRef.current.moveLog.length;
-      // Not awaited, and it does not gate `setLoaded`: the board renders and
-      // resumes as normal, and the puzzle takes it when it arrives.
-      void fetchDailyPuzzle().then((puzzle) => {
-        // A game in progress wins. The player can be playing while this is in
-        // flight, and taking the board then would lose the moves they just
-        // made: `savedGameRef` would hold the snapshot from page load, so "back
-        // to my game" would rewind past them. A dropped puzzle is a load
-        // without one, and the next `?daily` gets it.
-        //
-        // The ply count, not `gameMetaRef.current.started`, which `resumeMeta`
-        // carries over from the save and which is therefore already true for
-        // any resumed game in progress.
-        if (puzzle && gameRef.current.moveLog.length === plyAtLoad) loadDailyPuzzle(puzzle, saved);
-      });
     }
+    // gameRef is whichever game took the board above, so this is the ply count
+    // the request is racing.
+    const plyAtLoad = gameRef.current.moveLog.length;
+    // The entry point is hidden when there is no puzzle, so the client has to
+    // know about one on an ordinary load and not only under `?daily`. The cache
+    // puts the button on screen from the first paint; `?daily` takes its puzzle
+    // from there too, rather than waiting for a response it already has an
+    // answer for.
+    const cached = loadCachedPuzzle();
+    if (cached) {
+      setPuzzle(cached);
+      // Deferred rather than applied here, so it lands at the same point in the
+      // life of the page the response's own load does. Everything above is
+      // still deciding what the board holds, and swapping the position in
+      // before `loaded` would leave the mount-time `maybeAiMove` running
+      // against the colours of the game the puzzle displaced — which is the
+      // engine taking the solver's first move.
+      if (daily) setTimeout(() => loadDailyPuzzle(cached, saved), 0);
+    }
+    // Fired on every load, not awaited, and it does not gate `setLoaded`. The
+    // cache is a fallback for offline and for the moment before this lands, not
+    // a reason to skip it: the client cannot tell whether its own idea of today
+    // is right, and one request per load is cheap.
+    void fetchDailyPuzzle().then((row) => {
+      // Null: keep whatever the cache held.
+      if (!row) return;
+      cachePuzzle(row);
+      // A response that lands while a puzzle is already on the board stops
+      // here: it must not swap the position out from under a player who is
+      // mid-solve. The exception is the puzzle it has just found to be a day
+      // stale, sitting untouched on the board because the cache is what `?daily`
+      // and the button had to go on — that one is replaced with today's, which
+      // is the puzzle the player asked for.
+      const onBoard = puzzleRef.current;
+      const staleOnBoard =
+        onBoard !== null &&
+        onBoard.date < row.date &&
+        gameRef.current.moveLog.length === onBoard.startPly;
+      if (onBoard && !staleOnBoard) return;
+      setPuzzle(row);
+      // A game in progress wins, and only under `?daily`: the player never
+      // asked for the puzzle at that moment, and taking the board would lose
+      // the moves they just made, since `savedGameRef` would hold the snapshot
+      // from page load and "back to my game" would rewind past them. A dropped
+      // puzzle is a load without one, and the next `?daily` gets it. The button
+      // is the player asking, so it has no such rule.
+      //
+      // The ply count, not `gameMetaRef.current.started`, which `resumeMeta`
+      // carries over from the save and which is therefore already true for any
+      // resumed game in progress.
+      // The replacement takes the game already being held for the puzzle on the
+      // board, not the page-load autosave: the player may have reached the
+      // stale one through the button after twenty moves, and `saved` would
+      // rewind past them.
+      if (staleOnBoard) loadDailyPuzzle(row, savedGameRef.current);
+      else if (daily && gameRef.current.moveLog.length === plyAtLoad) loadDailyPuzzle(row, saved);
+    });
     setLoaded(true);
     rerender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -731,10 +836,15 @@ function App() {
     if (sharedPending) parkOwnGameAndGoLive();
     // Straight after the solver's move and before the reply, which is the only
     // moment at which a mate-in-N delivered on move N still counts.
-    checkPuzzle();
+    const outcome = checkPuzzle();
     historyRef.current.push(snapshot);
     clockHistoryRef.current.push({ ...clockRef.current });
     rerender();
+    // A failed attempt ends the attempt, so the engine does not reply. The game
+    // is usually still playable — running out of moves is not the game ending —
+    // and playing on under a banner saying it is over is not a thing to leave a
+    // player doing. The board stops taking moves too (see `attemptMove`).
+    if (outcome === "failed") return;
     setTimeout(maybeAiMove, 0);
   }
 
@@ -825,6 +935,8 @@ function App() {
     if (from === to) return false;
     if (mode === "human-ai" && game.turn === aiColor) return false;
     if (game.isGameOver()) return false;
+    // A resolved puzzle is over even when the position is still playable.
+    if (puzzleResult) return false;
 
     const piece = game.chess.get(from);
     if (!piece) return false;
@@ -889,7 +1001,11 @@ function App() {
     const game = gameRef.current;
     const sq = square as Square;
     const humanCanMove =
-      browsePly === null && !(mode === "human-ai" && game.turn === aiColor) && !game.isGameOver() && !modal;
+      browsePly === null &&
+      !(mode === "human-ai" && game.turn === aiColor) &&
+      !game.isGameOver() &&
+      !puzzleResult &&
+      !modal;
     if (!humanCanMove) {
       setSelected(null);
       return;
@@ -941,8 +1057,10 @@ function App() {
     // Starting a new game is an explicit choice to leave the shared position
     // and the game it displaced, so "back to my game" retires here too.
     if (sharedPending) goLive();
-    // …and out of the puzzle with it, so the new game is not tagged as one.
+    // …and out of the puzzle with it, so the new game is not tagged as one and
+    // no stale banner outlives the position it described.
     puzzleRef.current = null;
+    setPuzzleResult(null);
     clearParkedGame();
     setParked(false);
     setMode(newMode);
@@ -975,8 +1093,17 @@ function App() {
   // With no bar under the board, this line is the only readout of where in
   // the game you are, so ply 0 says what it is rather than "Move 0 of N".
   const browsingStatus = browsePly === 0 ? "Start position" : `Move ${browsePly} of ${totalPlies}`;
+  // A puzzle owns the board until it resolves, at which point the banner over
+  // the board carries the news and this line goes back to saying what it says
+  // for any other game.
+  const activePuzzle = puzzleResult ? null : puzzleRef.current;
   let status = browsing ? browsingStatus : `${turnLabel} to move.`;
-  if (!browsing) {
+  if (!browsing && activePuzzle) {
+    // The solver's colour, not whoever is to move: this line is the label of the
+    // puzzle and it has to hold still. Taken from the live turn it would flip to
+    // "Black to play, mate in 2" for the length of every engine reply.
+    status = `${aiColor === "w" ? "Black" : "White"} to play, mate in ${activePuzzle.mateIn}`;
+  } else if (!browsing) {
     if (game.chess.isCheck()) status += " Check!";
     if (game.isGameOver()) status = game.resultString();
     else if (timeUp) {
@@ -1042,13 +1169,25 @@ function App() {
 
   // Kept short: the banner sits above the board, and every extra line of it is
   // a line the board loses on a phone.
-  const sharedStatusText = [
-    sharedPending && (savedGameRef.current ? "Shared position. Your own game is saved." : "Shared position."),
-    unverified &&
-      "This position could not have occurred in a game, so the computer opponent is unavailable for it.",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  // A puzzle replaces the shared-position wording with the day it is for. The
+  // zone is spelled out because one global boundary is what makes "today's
+  // puzzle" mean the same thing everywhere.
+  const sharedStatusText = puzzleRef.current
+    ? `Puzzle of ${formatPuzzleDate(puzzleRef.current.date)} (UTC)`
+    : [
+        sharedPending &&
+          (savedGameRef.current ? "Shared position. Your own game is saved." : "Shared position."),
+        unverified &&
+          "This position could not have occurred in a game, so the computer opponent is unavailable for it.",
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+  // Whether there is a game of the player's own to go back to. The parked slot
+  // counts: retrying a puzzle sets `sharedPending` again, and by then their own
+  // game has already moved there, so without the second half the way back would
+  // vanish for the rest of the session.
+  const hasSavedGame = savedGameRef.current !== null || parked;
 
   const squareStyles: Record<string, CSSProperties> = {};
   if (selected) {
@@ -1081,7 +1220,8 @@ function App() {
         sharedPending={sharedPending}
         unverified={unverified}
         sharedStatusText={sharedStatusText}
-        hasSavedGame={savedGameRef.current !== null}
+        hasSavedGame={hasSavedGame}
+        puzzleActive={puzzleRef.current !== null}
         setLinkNotice={setLinkNotice}
         backToMyGame={backToMyGame}
         parked={parked}
@@ -1111,7 +1251,9 @@ function App() {
         onSquareClick={onSquareClick}
         squareStyles={squareStyles}
         boardOrientation={boardOrientation}
-        allowDragging={!browsing && !(mode === "human-ai" && game.turn === aiColor) && !gameOver}
+        allowDragging={
+          !browsing && !(mode === "human-ai" && game.turn === aiColor) && !gameOver && !puzzleResult
+        }
         showScoreOverlay={showScoreOverlay}
         scoreOverlayReady={scoreOverlayReady}
         levelLabel={levelLabel}
@@ -1128,6 +1270,11 @@ function App() {
         setConfirmAction={setConfirmAction}
         openTutorial={openTutorial}
         openWidget={setWidget}
+        onPuzzle={puzzle ? openPuzzle : null}
+        onPuzzleRetry={openPuzzle}
+        puzzleActive={puzzleRef.current !== null}
+        puzzleMateIn={puzzleRef.current?.mateIn ?? 0}
+        puzzleResult={puzzleResult}
         onShare={handleShare}
       />
       <div className="panel">
@@ -1135,6 +1282,20 @@ function App() {
         {!showInvite && (
           <button className="learn-btn" onClick={openTutorial}>
             Learn Evo Basics
+          </button>
+        )}
+        {/* Hidden entirely when there is no puzzle: no disabled state, no
+            spinner, no placeholder. Someone who has never loaded one and is
+            offline sees the panel exactly as it was. */}
+        {puzzle && (
+          <button
+            type="button"
+            className="learn-btn share-btn"
+            aria-label="Puzzle of the day"
+            title="Puzzle of the day"
+            onClick={openPuzzle}
+          >
+            <PuzzleIcon /> Puzzle of the day
           </button>
         )}
         {/* The panel is desktop-only, so this one always opens the dialog: the
@@ -1193,11 +1354,6 @@ function App() {
 
       {widget && (
         <MobileWidgetSheet widget={widget} onClose={() => setWidget(null)}>
-          {widget === "rules" && (
-            <div className="rules-summary">
-              <RulesSummary />
-            </div>
-          )}
           {widget === "log" && (
             <MoveLog
               moveLog={game.moveLog}
@@ -1211,25 +1367,34 @@ function App() {
             />
           )}
           {widget === "settings" && (
-            <ControlsPanel
-              mode={mode}
-              aiColor={aiColor}
-              level={level}
-              unverified={unverified}
-              autoFlip={autoFlip}
-              timerEnabled={timerEnabled}
-              timerMinutes={timerMinutes}
-              hasHistory={historyRef.current.length > 0}
-              onRestart={restart}
-              setMode={setMode}
-              setAiColor={setAiColor}
-              setLevel={setLevel}
-              setAutoFlip={setAutoFlip}
-              setTimerEnabled={setTimerEnabled}
-              setTimerMinutes={setTimerMinutes}
-              setTimeUp={setTimeUp}
-              resetClock={resetClock}
-            />
+            <>
+              <ControlsPanel
+                mode={mode}
+                aiColor={aiColor}
+                level={level}
+                unverified={unverified}
+                autoFlip={autoFlip}
+                timerEnabled={timerEnabled}
+                timerMinutes={timerMinutes}
+                hasHistory={historyRef.current.length > 0}
+                onRestart={restart}
+                setMode={setMode}
+                setAiColor={setAiColor}
+                setLevel={setLevel}
+                setAutoFlip={setAutoFlip}
+                setTimerEnabled={setTimerEnabled}
+                setTimerMinutes={setTimerMinutes}
+                setTimeUp={setTimeUp}
+                resetClock={resetClock}
+              />
+              {/* The puzzle button took the rules' slot in the bar, so this is
+                  the phone route to them. The sheet already scrolls inside
+                  itself, and the wrapper is what keeps their styling. */}
+              <div className="rules-summary sheet-rules">
+                <h3>Rules summary</h3>
+                <RulesSummary />
+              </div>
+            </>
           )}
         </MobileWidgetSheet>
       )}
