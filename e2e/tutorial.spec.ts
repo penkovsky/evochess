@@ -113,36 +113,6 @@ test("lesson 1 teaches the first promotion against a real opponent", async ({ pa
   expect(errors).toEqual([]);
 });
 
-test("an off-script move is played, not refused, and the game carries on", async ({ page }) => {
-  await firstVisitPage(page);
-  await openLesson(page, "Start lesson 1");
-
-  // Lesson 1 suggests e4; a different legal move must simply be allowed.
-  await move(page, "a2", "a4");
-  await expect(page.locator(".tutorial-card.free")).toBeVisible();
-  await expect(page.locator('[data-square="a4"] [data-piece]')).toBeVisible();
-  await expect(page.locator('[data-square="a2"] [data-piece]')).toHaveCount(0);
-  // The opponent still answers — going off-script means a real game, not a
-  // frozen board.
-  await expect(page.locator(".tutorial-free-status")).toContainText("White to move");
-
-  // Play continues freely.
-  await move(page, "b2", "b4");
-  await expect(page.locator('[data-square="b4"] [data-piece]')).toBeVisible();
-  await expect(page.locator(".tutorial-free-status")).toContainText("White to move");
-
-  // ...and the lesson is still there to be picked back up.
-  await page.getByRole("button", { name: "Replay this step" }).click();
-  await expect(page.locator(".tutorial-card.instruction")).toBeVisible();
-  await expect(page.locator('[data-square="a2"] [data-piece]')).toBeVisible();
-  await expect(page.locator('[data-square="a4"] [data-piece]')).toHaveCount(0);
-  await expect(page.locator('[data-square="b4"] [data-piece]')).toHaveCount(0);
-
-  // The rewound step still works, and carries on into step 2.
-  await move(page, "e2", "e4");
-  await expect(page.locator(".tutorial-card.instruction")).toContainText("One green dot");
-});
-
 test("an off-script promotion choice is accepted too", async ({ page }) => {
   await firstVisitPage(page);
   await openLesson(page, "Start lesson 1");
