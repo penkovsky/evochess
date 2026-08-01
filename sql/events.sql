@@ -21,11 +21,15 @@ create index if not exists events_name_created_idx on public.events (name, creat
 create index if not exists events_game_uid_idx on public.events (game_uid);
 
 alter table public.events
-  -- So a typo or a spammer cannot invent event types. Phase 2's three names
-  -- are here already, so shipping them needs no migration.
+  -- So a typo or a spammer cannot invent event types. This list is the end
+  -- state, not what a live table already has: a name added here reaches an
+  -- existing collector only by dropping and re-adding the constraint, as
+  -- `sql/migrate-daily-puzzle.sql` does for the three puzzle names. Until then
+  -- the insert is rejected, and telemetry swallows the error.
   add constraint events_name_known check (name in (
     'page_load', 'first_move', 'game_start', 'game_end', 'game_abandon',
-    'tutorial_progress', 'share_open', 'share_copy'
+    'tutorial_progress', 'share_open', 'share_copy',
+    'puzzle_open', 'puzzle_solved', 'puzzle_failed'
   )),
   -- Plausibility bounds, so one bored person cannot fill the table with junk.
   add constraint events_props_sane check (length(props::text) <= 4096),

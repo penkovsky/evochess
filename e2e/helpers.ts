@@ -29,3 +29,18 @@ export async function freshGamePage(page: Page) {
 export async function firstVisitPage(page: Page) {
   await page.goto("./");
 }
+
+/** The collector the e2e build points at — keep in sync with `playwright.config.ts`. */
+export const COLLECTOR_URL = "http://127.0.0.1:59999";
+
+/**
+ * Answers every collector request with a 201, so nothing is actually sent.
+ *
+ * Nothing listens on that host, and Chromium reports a refused connection as a
+ * console error — which a spec asserting on console output would otherwise
+ * count as the app's. Only such specs need this; everywhere else the failure is
+ * swallowed by telemetry.ts and the row simply stays queued.
+ */
+export async function silenceCollector(page: Page) {
+  await page.route(`${COLLECTOR_URL}/**`, (route) => route.fulfill({ status: 201, body: "" }));
+}

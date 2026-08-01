@@ -50,6 +50,13 @@ export interface FinishedGame {
   level: string | null;
   aiColor: string;
   fromShared: boolean;
+  /**
+   * The `publish_date` of the daily puzzle this game is an attempt at, or null.
+   * A puzzle arrives on the shared-position path, so without this tag it would
+   * be indistinguishable from a real share link, and a failed attempt would
+   * read as a player being beaten from someone else's position.
+   */
+  puzzleDate: string | null;
   /** From the human's side; from White's side in human-human. */
   outcome: "win" | "loss" | "draw" | "timeout";
   moves: string[];
@@ -65,7 +72,10 @@ export type EventName =
   | "game_abandon"
   | "tutorial_progress"
   | "share_open"
-  | "share_copy";
+  | "share_copy"
+  | "puzzle_open"
+  | "puzzle_solved"
+  | "puzzle_failed";
 
 export type Props = Record<string, string | number | boolean | null>;
 
@@ -90,6 +100,7 @@ interface GameRow {
   level: string | null;
   ai_color: string;
   from_shared: boolean;
+  puzzle_date: string | null;
   start_fen: string;
   start_param: string | null;
   moves: string;
@@ -343,6 +354,7 @@ export function logFinishedGame(game: FinishedGame) {
       level: game.mode === "human-ai" ? game.level : null,
       ai_color: game.aiColor,
       from_shared: game.fromShared,
+      puzzle_date: game.puzzleDate,
       start_fen: game.meta.startFen,
       start_param: game.meta.startParam ?? null,
       moves: game.moves.join(" "),

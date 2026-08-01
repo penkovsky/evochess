@@ -39,6 +39,7 @@ function finished(uid: string) {
     level: "zen",
     aiColor: "b",
     fromShared: false,
+    puzzleDate: null,
     outcome: "win" as const,
     moves: ["e4", "e5"],
     moveTokens: ["e2e4", "e7e5"],

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { freshGamePage } from "./helpers";
+import { freshGamePage, silenceCollector } from "./helpers";
 
 // Milestone 4 verification (docs/ponder-spec.md §9): a takeback during a deep
 // ponder must yield a legal, playable position promptly, with no console
@@ -7,6 +7,9 @@ import { freshGamePage } from "./helpers";
 // the instant the human moves"), exercised end-to-end against the real
 // worker rather than through a direct-call harness.
 test.beforeEach(async ({ page }) => {
+  // Before the first navigation, so the load-time telemetry is caught too: a
+  // refused collector request would show up in the console assertion below.
+  await silenceCollector(page);
   await freshGamePage(page);
   // Pondering runs at Fun only (`maybeStartPonder`), and the app opens on Zen,
   // so every test here has to select the level rather than inherit it. Safe

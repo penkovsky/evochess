@@ -14,6 +14,7 @@ import {
   type LoadedGame,
 } from "./evochess/persistence";
 import { loadProgress, markSeen } from "./evochess/tutorialProgress";
+import { fetchDailyPuzzle, resolvePuzzle, type DailyPuzzle, type PuzzleState } from "./evochess/dailyPuzzle";
 import {
   accruePlyTime,
   initTelemetry,
@@ -180,6 +181,14 @@ function App() {
   // Persisted with the save, so a reload does not turn it back into a scored
   // game (persistence.ts `fromShared`).
   const [fromShared, setFromShared] = useState(false);
+  // The daily puzzle on the board, if the game was opened with `?daily`.
+  // `resolved` is the once-per-load guard on the solved/failed event: a
+  // takeback can walk the ply count backwards, and the
+  // guard is what stops that becoming a second event. The row itself is kept
+  // after that, since `game_end` and the `games` row are still to be tagged.
+  // Nothing persists — a reload resumes the puzzle as an ordinary shared game
+  // and it stops counting as a puzzle.
+  const puzzleRef = useRef<PuzzleState | null>(null);
   // Whether a game of the recipient's own is sitting in the parked slot, which
   // is what "back to my game" offers once the shared game has gone live.
   const [parked, setParked] = useState(false);
@@ -262,6 +271,9 @@ function App() {
     if (!saved) return;
     clearParkedGame();
     setParked(false);
+    // The game coming back is the player's own, not the puzzle, so the tag must
+    // not follow it onto the `games` row.
+    puzzleRef.current = null;
     gameRef.current = saved.game;
     gameMetaRef.current = resumeMeta(saved);
     resumedRef.current = true;
@@ -300,6 +312,97 @@ function App() {
     );
   }
 
+  /**
+   * Puts today's puzzle on the board, down the same path a `?p=` link takes
+   * (share-links-spec.md §6). Reusing it verbatim is what makes `fromShared`
+   * keep the result off the local score — so failing a puzzle is not a loss —
+   * and what parks the player's own game on their first move, so "back to my
+   * game" still works.
+   *
+   * Runs from a promise, well after mount, so `saved` is passed in rather than
+   * re-read: it is the same autosave the startup effect decided about.
+   *
+   * A row that fails to decode, or decodes but fails the legality check, is
+   * treated as no puzzle at all. An unverified position locks the engine out
+   * (share-links-spec.md §5.2), which would leave an unplayable board.
+   */
+  function loadDailyPuzzle(puzzle: DailyPuzzle, saved: LoadedGame | null) {
+    const shared = decodeShareLink(puzzle.param);
+    if (!shared.ok) {
+      console.warn(`evochess: daily puzzle ${puzzle.date} failed to decode [${shared.code}]`);
+      return;
+    }
+    if (!shared.legal) {
+      console.warn(`evochess: daily puzzle ${puzzle.date} failed the legality check [${shared.reasons.join(", ")}]`);
+      return;
+    }
+    savedGameRef.current = saved;
+    gameRef.current = shared.game;
+    gameMetaRef.current = newGameMeta(shared.game.chess.fen(), puzzle.param);
+    historyRef.current = [];
+    clockHistoryRef.current = [];
+    resumedRef.current = false;
+    setSharedPending(true);
+    setFromShared(true);
+    // As for a link: the solver always moves first, which is also what keeps
+    // loading the puzzle from triggering an engine search.
+    setAiColor(shared.game.turn === "w" ? "b" : "w");
+    // A link leaves mode and level as the recipient's own, since the sharer
+    // said nothing about them. A puzzle is not like that: it is a mate to find
+    // against the engine. Zen and Fun are the same search, and Zen is the one
+    // whose name promises nothing about the reply. Nothing is stashed to undo
+    // this — `savedGameRef` holds the player's own game, and "back to my game"
+    // already restores its mode and level from there.
+    setMode("human-ai");
+    setLevel("zen");
+    // The lockout belongs to the position, not to the session, and this one has
+    // just passed the same legality check a link gets. Left set, it would both
+    // silence the engine and write `unverified` into the save for a position
+    // that is fine.
+    engineLockedRef.current = false;
+    setUnverified(false);
+    resetClock(saved?.timerMinutes ?? 10);
+    resetPonder(); // a position from outside this session (ponder-spec.md §5.3)
+    puzzleRef.current = {
+      date: puzzle.date,
+      mateIn: puzzle.mateIn,
+      startPly: shared.game.moveLog.length,
+      resolved: false,
+    };
+    setModal(null);
+    setSelected(null);
+    setTimeUp(null);
+    track("puzzle_open", { date: puzzle.date, mate_in: puzzle.mateIn });
+    rerender();
+  }
+
+  /**
+   * Fires `puzzle_solved` or `puzzle_failed`, once. Called straight after a
+   * move and before the reply: a ply later would call a mate-in-2 failed on the
+   * move that delivers mate.
+   *
+   * Nothing is shown either way. These events exist to answer whether a puzzle
+   * was too hard.
+   */
+  function checkPuzzle(overrides?: { aiColor?: Color }) {
+    const puzzle = puzzleRef.current;
+    if (!puzzle) return;
+    const game = gameRef.current;
+    const effAiColor = overrides?.aiColor ?? aiColor;
+    const outcome = resolvePuzzle(puzzle, {
+      gameOver: game.isGameOver(),
+      isCheckmate: game.chess.isCheckmate(),
+      turn: game.turn,
+      humanColor: effAiColor === "w" ? "b" : "w",
+      plies: game.moveLog.length,
+    });
+    if (!outcome) return;
+    track(outcome === "solved" ? "puzzle_solved" : "puzzle_failed", {
+      date: puzzle.date,
+      mate_in: puzzle.mateIn,
+    });
+  }
+
   useEffect(() => {
     initTelemetry();
     const saved = loadGame();
@@ -310,6 +413,9 @@ function App() {
     // else can claim the board (share-links-spec.md §6).
     const param = readShareParam(window.location.search);
     const shared = param ? decodeShareLink(param) : null;
+    // `?p=` wins if both are present, being the more specific of the two. This
+    // reads the flag before it is stripped below.
+    const daily = !param && new URLSearchParams(window.location.search).has("daily");
     if (shared && !shared.ok) {
       console.warn(`evochess: shared link refused [${shared.code}]`);
       setLinkNotice(shared.message);
@@ -389,11 +495,36 @@ function App() {
       // every subsequent reload of the same finished game.
       if (saved.game.isGameOver()) scoredGameRef.current = saved.game;
       resetPonder(); // loading a save (ponder-spec.md §5.3, §6.2)
-    } else if (!loadProgress().seen) {
-      // Deliberately not offered on top of a shared board (spec §11): someone
-      // arriving on a link came to look at a position, and the invite would
-      // cover it. A later visit without a link still gets the offer.
+    } else if (!daily && !loadProgress().seen) {
+      // Deliberately not offered on top of a shared board (spec §11), nor over
+      // a puzzle that is about to arrive on one: someone arriving on a link
+      // came to look at a position, and the invite would cover it. A later
+      // visit without a link still gets the offer.
       setShowInvite(true);
+    }
+    if (daily) {
+      // Stripped now, exactly as `?p=` is stripped once it goes live: a reload
+      // must not re-enter the puzzle over a game in progress.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("daily");
+      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+      // gameRef is whichever game took the board above, so this is the ply count
+      // the request is racing.
+      const plyAtLoad = gameRef.current.moveLog.length;
+      // Not awaited, and it does not gate `setLoaded`: the board renders and
+      // resumes as normal, and the puzzle takes it when it arrives.
+      void fetchDailyPuzzle().then((puzzle) => {
+        // A game in progress wins. The player can be playing while this is in
+        // flight, and taking the board then would lose the moves they just
+        // made: `savedGameRef` would hold the snapshot from page load, so "back
+        // to my game" would rewind past them. A dropped puzzle is a load
+        // without one, and the next `?daily` gets it.
+        //
+        // The ply count, not `gameMetaRef.current.started`, which `resumeMeta`
+        // carries over from the save and which is therefore already true for
+        // any resumed game in progress.
+        if (puzzle && gameRef.current.moveLog.length === plyAtLoad) loadDailyPuzzle(puzzle, saved);
+      });
     }
     setLoaded(true);
     rerender();
@@ -454,6 +585,7 @@ function App() {
       level,
       aiColor,
       fromShared,
+      puzzleDate: puzzleRef.current?.date ?? null,
       outcome,
       moves: game.moveLog,
       moveTokens: game.moveTokens,
@@ -468,6 +600,9 @@ function App() {
         level: mode === "human-ai" ? level : null,
         ai_color: aiColor,
         from_shared: fromShared,
+        // Tagged, not suppressed: a puzzle attempt is a real game down the
+        // shared-position path, and only this tells the two apart.
+        puzzle_date: puzzleRef.current?.date ?? null,
         takebacks: meta.takebacks,
       },
       meta.uid
@@ -533,6 +668,9 @@ function App() {
       game.applyMove(candidate.from, candidate.to, candidate.options);
     }
     setAiThinking(false);
+    // The engine's own move can end the game too: mating the solver, or
+    // stalemating them. Both are failures.
+    checkPuzzle({ aiColor: effAiColor });
     rerender();
     // The AI just moved and it's now the human's turn: start pondering the
     // position the human is looking at (ponder-spec.md §3, §5.3).
@@ -581,6 +719,7 @@ function App() {
           level: mode === "human-ai" ? level : null,
           ai_color: aiColor,
           from_shared: fromShared,
+          puzzle_date: puzzleRef.current?.date ?? null,
           unverified,
         },
         gameMetaRef.current.uid
@@ -590,6 +729,9 @@ function App() {
     // live game and normal autosaving resumes (spec §6.4). Their own game is
     // parked rather than lost, so they can still go back to it.
     if (sharedPending) parkOwnGameAndGoLive();
+    // Straight after the solver's move and before the reply, which is the only
+    // moment at which a mate-in-N delivered on move N still counts.
+    checkPuzzle();
     historyRef.current.push(snapshot);
     clockHistoryRef.current.push({ ...clockRef.current });
     rerender();
@@ -799,6 +941,8 @@ function App() {
     // Starting a new game is an explicit choice to leave the shared position
     // and the game it displaced, so "back to my game" retires here too.
     if (sharedPending) goLive();
+    // …and out of the puzzle with it, so the new game is not tagged as one.
+    puzzleRef.current = null;
     clearParkedGame();
     setParked(false);
     setMode(newMode);

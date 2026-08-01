@@ -11,6 +11,8 @@ create table if not exists public.games (
   level        text,                   -- null when mode is human-human
   ai_color     text not null,
   from_shared  boolean not null,
+  puzzle_date  date,                   -- the daily puzzle this game is an attempt at; null
+                                       -- for every other game (see sql/puzzles.sql)
   start_fen    text not null,          -- not always the opening: a shared link starts anywhere
   start_param  text,                   -- the ?p= payload when there was one; a FEN cannot carry
                                        -- rights, counters or charges, so this is what a shared
@@ -50,7 +52,8 @@ create policy games_anon_insert on public.games
 -- insert starts failing. Neither column is on this list, so the defaults stand.
 revoke all on public.games from anon;
 grant insert (game_uid, anon_id, app_version, mode, level, ai_color, from_shared,
-              start_fen, start_param, moves, moves_tokens, outcome, plies, duration_ms)
+              puzzle_date, start_fen, start_param, moves, moves_tokens, outcome,
+              plies, duration_ms)
   on public.games to anon;
 -- `usage` alone: the client never reads the sequence back.
 grant usage on sequence public.games_id_seq to anon;
