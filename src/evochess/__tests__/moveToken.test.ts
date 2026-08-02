@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { EvoChessGame, moveToken, type ApplyMoveOptions } from "../game";
+import { EvoChessGame, moveToken, parseMoveToken, replayLine, START_FEN, type ApplyMoveOptions } from "../game";
 import { deserializeGame, serializeGame, type SerializedGame } from "../serialize";
 import { legalTurns } from "../ai";
 
@@ -109,5 +109,115 @@ describe("moveToken", () => {
     const restored = deserializeGame(saved);
     expect(restored.moveTokens).toEqual([]);
     expect(restored.moveLog).toEqual(["e4"]);
+  });
+
+  it("parseMoveToken(moveToken(...)) round-trips for all five option shapes", () => {
+    const cases: ApplyMoveOptions[] = [
+      {},
+      { minorPromo: "n" },
+      { minorPromo: "b" },
+      { rookPromo: true },
+      { downgradeTo: "n" },
+      { downgradeTo: "b" },
+      { forcedPromo: "q" },
+      { forcedPromo: "r" },
+      { forcedPromo: "b" },
+      { forcedPromo: "n" },
+    ];
+    for (const options of cases) {
+      const token = moveToken("e2", "e4", options);
+      expect(parseMoveToken(token)).toEqual({ from: "e2", to: "e4", options });
+    }
+  });
+
+  it("parseMoveToken returns null for a malformed token", () => {
+    expect(parseMoveToken("")).toBeNull();
+    expect(parseMoveToken("e2e")).toBeNull();
+    expect(parseMoveToken("e2e4x")).toBeNull();
+  });
+
+  describe("replayLine", () => {
+    it("reproduces the game field for field at every ply, from the standard start", () => {
+      for (let seed = 0; seed < 10; seed++) {
+        const game = playRandomGame(seed, 60);
+        const base: SerializedGame = {
+          fen: START_FEN,
+          minorRights: { w: 0, b: 0 },
+          rookRights: { w: 0, b: 0 },
+          pawnMoveProgress: { w: 0, b: 0 },
+          minorMoveProgress: { w: 0, b: 0 },
+          moveLog: [],
+          moveTokens: [],
+          rookCharges: {},
+          rookLocked: [],
+          epEvolved: null,
+        };
+        const line = replayLine(base, game.moveTokens);
+        expect(line).toHaveLength(game.moveTokens.length + 1);
+        const last = line[line.length - 1];
+        expect(last.chess.fen()).toBe(game.chess.fen());
+        expect(last.minorRights).toEqual(game.minorRights);
+        expect(last.rookRights).toEqual(game.rookRights);
+        expect([...last.rookCharges.entries()].sort()).toEqual([...game.rookCharges.entries()].sort());
+        expect([...last.rookLocked].sort()).toEqual([...game.rookLocked].sort());
+      }
+    });
+
+    it("reproduces state at every ply from a non-standard base, not just the standard start", () => {
+      const full = playRandomGame(3, 40);
+      const splitAt = Math.floor(full.moveTokens.length / 2);
+
+      // Replay the first half to get a mid-game base, then replay the rest
+      // on top of it. This is what a resume-play link's decoder does.
+      const firstHalf = new EvoChessGame();
+      for (const token of full.moveTokens.slice(0, splitAt)) {
+        const from = token.slice(0, 2) as import("chess.js").Square;
+        const to = token.slice(2, 4) as import("chess.js").Square;
+        firstHalf.applyMove(from, to, parseMoveToken(token)!.options);
+      }
+      const base = serializeGame(firstHalf);
+      const rest = full.moveTokens.slice(splitAt);
+
+      const line = replayLine(base, rest);
+      expect(line).toHaveLength(rest.length + 1);
+      expect(line[0].chess.fen()).toBe(firstHalf.chess.fen());
+      const last = line[line.length - 1];
+      expect(last.chess.fen()).toBe(full.chess.fen());
+      expect(last.minorRights).toEqual(full.minorRights);
+      expect(last.rookRights).toEqual(full.rookRights);
+      expect(last.epEvolved).toEqual(full.epEvolved);
+    });
+
+    it("throws EvoChessError on a token that will not apply", () => {
+      const base: SerializedGame = serializeGame(new EvoChessGame());
+      expect(() => replayLine(base, ["e2e5"])).toThrow();
+    });
+  });
+
+  describe("EvoChessGame.base", () => {
+    it("defaults to the standard start, and copy() carries it over", () => {
+      const game = new EvoChessGame();
+      expect(game.base?.fen).toBe(START_FEN);
+      game.applyMove("e2", "e4");
+      const copy = game.copy();
+      expect(copy.base).toBe(game.base);
+    });
+
+    it("round-trips through serializeGame/deserializeGame", () => {
+      const game = new EvoChessGame();
+      game.applyMove("e2", "e4");
+      const restored = deserializeGame(serializeGame(game));
+      expect(restored.base).toEqual(game.base);
+    });
+
+    it("deserializes to undefined, not the standard start, when the save predates the field", () => {
+      const game = new EvoChessGame();
+      game.applyMove("e2", "e4");
+      const saved = serializeGame(game) as SerializedGame & { base?: SerializedGame };
+      delete saved.base;
+
+      const restored = deserializeGame(saved);
+      expect(restored.base).toBeUndefined();
+    });
   });
 });

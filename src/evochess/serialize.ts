@@ -16,6 +16,9 @@ export interface SerializedGame {
   rookCharges: Record<string, number>;
   rookLocked: string[];
   epEvolved?: EvolvedEnPassant | null;
+  /** Where the game started. Absent for a save written before this field
+   *  existed. See `EvoChessGame.base`. */
+  base?: SerializedGame;
 }
 
 export function serializeGame(game: EvoChessGame): SerializedGame {
@@ -30,6 +33,7 @@ export function serializeGame(game: EvoChessGame): SerializedGame {
     rookCharges: Object.fromEntries(game.rookCharges),
     rookLocked: [...game.rookLocked],
     epEvolved: game.epEvolved,
+    base: game.base,
   };
 }
 
@@ -45,5 +49,6 @@ export function deserializeGame(saved: SerializedGame): EvoChessGame {
   game.rookCharges = new Map(Object.entries(saved.rookCharges ?? {})) as Map<Square, number>;
   game.rookLocked = new Set((saved.rookLocked ?? []) as Square[]);
   game.epEvolved = saved.epEvolved ?? null;
+  game.base = saved.base;
   return game;
 }

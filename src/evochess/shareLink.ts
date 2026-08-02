@@ -22,7 +22,17 @@
  * what to do with a failure and what to log (see `App.tsx`).
  */
 import type { Color, PieceSymbol, Square } from "chess.js";
-import { EvoChessGame, ROOK_CHARGES, type EvolvedEnPassant } from "./game";
+import {
+  EvoChessGame,
+  ROOK_CHARGES,
+  moveToken,
+  parseMoveToken,
+  replayLine,
+  type ApplyMoveOptions,
+  type EvolvedEnPassant,
+  type ForcedPromo,
+} from "./game";
+import { serializeGame } from "./serialize";
 
 /** Version byte. Bump on any encoding change *and* on any rules change that
  *  alters what the encoded fields mean (spec §4.1). */
@@ -49,7 +59,6 @@ export type ShareStructuralCode =
   | "TOO_SHORT"
   | "BAD_CRC"
   | "BAD_VERSION"
-  | "HISTORY_UNSUPPORTED"
   | "RESERVED_FLAG"
   | "BITSTREAM_TRUNCATED"
   | "PADDING_NOT_ZERO"
@@ -60,7 +69,10 @@ export type ShareStructuralCode =
   | "BAD_RIGHTS"
   | "BAD_EP_TAG"
   | "BAD_HALFMOVE"
-  | "BAD_FULLMOVE";
+  | "BAD_FULLMOVE"
+  | "BAD_CURSOR"
+  | "HISTORY_ILLEGAL_BASE"
+  | "HISTORY_REPLAY_FAILED";
 
 /** Why a decoded position could not have occurred (spec §5.2). */
 export type ShareLegalityCode =
@@ -81,10 +93,17 @@ export type ShareLegalityCode =
 
 export interface ShareDecodeSuccess {
   ok: true;
-  /** The shared position, ready to play from. */
+  /** The shared position, ready to play from. For a history link this is the
+   *  live position: the end of the line, not the cursor (§6.1). */
   game: EvoChessGame;
+  /** Present only for a history link. `snapshots[i]` is the position after
+   *  `i` plies, so `snapshots[snapshots.length - 1] === game`. */
+  snapshots?: EvoChessGame[];
+  /** Present only for a history link. Which ply to put on screen. */
+  cursor?: number;
   /** False when the position could not have occurred (spec §5.2). The board is
-   *  still rendered, but engine search must be disabled for it. */
+   *  still rendered, but engine search must be disabled for it. A history link
+   *  is never `false`: an illegal base fails structurally instead (§6.2). */
   legal: boolean;
   /** Empty when `legal`. Worth logging verbatim: a report of "the link is
    *  weird" is then diagnosable from a screenshot of the console. */
@@ -106,14 +125,15 @@ export type ShareDecodeResult = ShareDecodeSuccess | ShareDecodeFailure;
 const MESSAGE_INCOMPLETE =
   "This link looks incomplete or was created with a different version of EvoChess.";
 const MESSAGE_OTHER_VERSION = "This link was created with a different version of EvoChess.";
-const MESSAGE_NEWER_VERSION = "This link needs a newer version of EvoChess.";
+const MESSAGE_ILLEGAL_BASE =
+  "This link's starting position could not have occurred, so its moves cannot be replayed.";
 
 function fail(code: ShareStructuralCode): ShareDecodeFailure {
   const message =
-    code === "BAD_VERSION"
+    code === "BAD_VERSION" || code === "HISTORY_REPLAY_FAILED"
       ? MESSAGE_OTHER_VERSION
-      : code === "HISTORY_UNSUPPORTED"
-      ? MESSAGE_NEWER_VERSION
+      : code === "HISTORY_ILLEGAL_BASE"
+      ? MESSAGE_ILLEGAL_BASE
       : MESSAGE_INCOMPLETE;
   return { ok: false, code, message };
 }
@@ -308,14 +328,10 @@ function readRights(r: BitReader): number | { code: ShareStructuralCode } | null
 
 // ------------------------------------------------------------------ encode
 
-/**
- * Encode a position as a `?p=` value: base64url, no padding. The move log is
- * not carried (there is no history block), so the recipient gets the position
- * and nothing about how it was reached.
- *
- * Throws `ShareEncodeError` for a position the format cannot represent.
- */
-export function encodeShareLink(game: EvoChessGame): string {
+/** Writes the position block (spec §4.3): everything `encodeShareLink` and
+ *  `encodeShareLinkWithHistory` share. Throws `ShareEncodeError` for a
+ *  position the format cannot represent. */
+function writePositionBits(w: BitWriter, game: EvoChessGame): void {
   const chess = game.chess;
   const fields = chess.fen().split(" ");
   const turn: Color = chess.turn();
@@ -331,8 +347,6 @@ export function encodeShareLink(game: EvoChessGame): string {
     }
   }
   pieces.sort((a, b) => a.index - b.index);
-
-  const w = new BitWriter();
 
   // 1. occupancy, 64 bits
   const occupied = new Set(pieces.map((p) => p.index));
@@ -408,16 +422,110 @@ export function encodeShareLink(game: EvoChessGame): string {
     w.write(255, 8);
     w.write(fullmove, 16);
   }
+}
 
+/** Finishes a bitstream into a payload with the given flags byte, CRC and
+ *  base64url encoding. Shared tail of both encoders. */
+function finishPayload(w: BitWriter, flags: number): string {
   const bitstream = w.finish();
   const payload = new Uint8Array(2 + bitstream.length + 2);
   payload[0] = SHARE_VERSION;
-  payload[1] = 0x00; // no history, no extras
+  payload[1] = flags;
   payload.set(bitstream, 2);
   const crc = crc16Ccitt(payload.subarray(0, 2 + bitstream.length));
   payload[payload.length - 2] = crc >> 8;
   payload[payload.length - 1] = crc & 0xff;
   return toBase64Url(payload);
+}
+
+/**
+ * Encode a position as a `?p=` value: base64url, no padding. The move log is
+ * not carried (there is no history block), so the recipient gets the position
+ * and nothing about how it was reached.
+ *
+ * Throws `ShareEncodeError` for a position the format cannot represent.
+ */
+export function encodeShareLink(game: EvoChessGame): string {
+  const w = new BitWriter();
+  writePositionBits(w, game);
+  return finishPayload(w, 0x00); // no history, no extras
+}
+
+/** Move-history tag table, spec §4.4. Mutual exclusion is `moveToken`'s job
+ *  (game.ts §1.2); this only re-throws it as a `ShareEncodeError` so a bug
+ *  upstream fails the encode rather than silently picking one option. */
+function historyTag(options: ApplyMoveOptions): { tag: number; extra?: number } {
+  const { forcedPromo, minorPromo, rookPromo, downgradeTo } = options;
+  const set = [forcedPromo, minorPromo, rookPromo, downgradeTo].filter((v) => v !== undefined && v !== false);
+  if (set.length > 1) throw new ShareEncodeError("move token carries more than one promotion option");
+  if (forcedPromo) return { tag: 6, extra: { q: 0, r: 1, b: 2, n: 3 }[forcedPromo] };
+  if (minorPromo === "n") return { tag: 1 };
+  if (minorPromo === "b") return { tag: 2 };
+  if (rookPromo) return { tag: 3 };
+  if (downgradeTo === "n") return { tag: 4 };
+  if (downgradeTo === "b") return { tag: 5 };
+  return { tag: 0 };
+}
+
+const FORCED_PROMO_BY_EXTRA: ForcedPromo[] = ["q", "r", "b", "n"];
+
+/** Inverse of `historyTag`. Null for tag 7, reserved. */
+function optionsForTag(tag: number, extra: number): ApplyMoveOptions | null {
+  switch (tag) {
+    case 0:
+      return {};
+    case 1:
+      return { minorPromo: "n" };
+    case 2:
+      return { minorPromo: "b" };
+    case 3:
+      return { rookPromo: true };
+    case 4:
+      return { downgradeTo: "n" };
+    case 5:
+      return { downgradeTo: "b" };
+    case 6:
+      return { forcedPromo: FORCED_PROMO_BY_EXTRA[extra] };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Encode `base` plus a full move line as a `?p=` value with a history block
+ * (spec §4.4): flags `0x01`, history present, extras absent. `cursor` is the
+ * ply to display, `0` to `tokens.length`.
+ *
+ * Throws `ShareEncodeError` for a base the format cannot represent, an
+ * out-of-range cursor, more plies than the 12-bit ply count can hold, a
+ * malformed token, or a payload over `MAX_SHARE_PARAM_CHARS`.
+ */
+export function encodeShareLinkWithHistory(base: EvoChessGame, tokens: string[], cursor: number): string {
+  if (!Number.isInteger(cursor) || cursor < 0 || cursor > tokens.length) {
+    throw new ShareEncodeError(`cursor out of range: ${cursor}`);
+  }
+  if (tokens.length > 4095) throw new ShareEncodeError(`too many plies: ${tokens.length}`);
+
+  const w = new BitWriter();
+  writePositionBits(w, base);
+
+  w.write(tokens.length, 12);
+  for (const token of tokens) {
+    const record = parseMoveToken(token);
+    if (!record) throw new ShareEncodeError(`malformed move token: ${token}`);
+    const { tag, extra } = historyTag(record.options);
+    w.write(squareIndex(record.from), 6);
+    w.write(squareIndex(record.to), 6);
+    w.write(tag, 3);
+    if (tag === 6) w.write(extra!, 2);
+  }
+  w.write(cursor, 12);
+
+  const param = finishPayload(w, 0x01); // history present, no extras
+  if (param.length > MAX_SHARE_PARAM_CHARS) {
+    throw new ShareEncodeError(`payload too long: ${param.length} characters`);
+  }
+  return param;
 }
 
 /** Byte length of the payload `encodeShareLink` would produce. Exists for the
@@ -445,15 +553,21 @@ export function decodeShareLink(param: string): ShareDecodeResult {
 
   const flags = body[1];
   if (flags & 0b1111_1100) return fail("RESERVED_FLAG");
-  // Bit 0, history present. Refuse: the base position of a game link is not
-  // the position the sharer was pointing at, so rendering it would
-  // misrepresent the link rather than fail it.
-  if (flags & 0b01) return fail("HISTORY_UNSUPPORTED");
+  const hasHistory = (flags & 0b01) !== 0;
   const hasExtras = (flags & 0b10) !== 0;
 
   const r = new BitReader(body.subarray(2));
   const decoded = readPosition(r);
   if ("code" in decoded) return fail(decoded.code);
+
+  // Bit 0, history present (§4.4). Read right after the position block, which
+  // is the order the encoder writes them in.
+  let history: { tokens: string[]; cursor: number } | null = null;
+  if (hasHistory) {
+    const historyResult = readHistory(r);
+    if ("code" in historyResult) return fail(historyResult.code);
+    history = historyResult;
+  }
 
   // Bit 1, extras present. Skipped, not refused: extras is a fixed 6 bits at a
   // known offset, so a link from a later encoder that carries extras but no
@@ -469,7 +583,69 @@ export function decodeShareLink(param: string): ShareDecodeResult {
   const epReasons = epCoherenceReasons(decoded);
   const game = buildGame(decoded, epReasons.length === 0);
   const reasons = [...checkLegality(game, decoded), ...epReasons];
+
+  if (history) {
+    if (history.cursor > history.tokens.length) return fail("BAD_CURSOR");
+    // §6.2: an illegal base cannot carry history. Skipping replay would show
+    // the base while the link claims the game reached somewhere else.
+    // Replaying onto an impossible board risks the same corruption the
+    // legality check exists to avoid. So this fails structurally instead of
+    // rendering anything.
+    if (reasons.length > 0) return fail("HISTORY_ILLEGAL_BASE");
+    let snapshots: EvoChessGame[];
+    try {
+      snapshots = replayLine(serializeGame(game), history.tokens);
+    } catch {
+      return fail("HISTORY_REPLAY_FAILED");
+    }
+    return {
+      ok: true,
+      game: snapshots[snapshots.length - 1],
+      snapshots,
+      cursor: history.cursor,
+      legal: true,
+      reasons: [],
+      extrasSkipped: hasExtras,
+    };
+  }
+
   return { ok: true, game, legal: reasons.length === 0, reasons, extrasSkipped: hasExtras };
+}
+
+/** Reads the history block (spec §4.4): ply count, that many moves, then the
+ *  cursor. Self-delimiting: tag 6 is the only variable-width move, and it is
+ *  read before its own extra bits, so no move length is assumed in advance. */
+function readHistory(
+  r: BitReader
+): { tokens: string[]; cursor: number } | { code: ShareStructuralCode } {
+  const truncated = { code: "BITSTREAM_TRUNCATED" as ShareStructuralCode };
+
+  const plyCount = r.read(12);
+  if (plyCount === null) return truncated;
+
+  const tokens: string[] = [];
+  for (let i = 0; i < plyCount; i++) {
+    const from = r.read(6);
+    if (from === null) return truncated;
+    const to = r.read(6);
+    if (to === null) return truncated;
+    const tag = r.read(3);
+    if (tag === null) return truncated;
+    let extra = 0;
+    if (tag === 6) {
+      const e = r.read(2);
+      if (e === null) return truncated;
+      extra = e;
+    }
+    const options = optionsForTag(tag, extra);
+    if (!options) return { code: "RESERVED_FLAG" };
+    tokens.push(moveToken(squareName(from), squareName(to), options));
+  }
+
+  const cursor = r.read(12);
+  if (cursor === null) return truncated;
+
+  return { tokens, cursor };
 }
 
 interface DecodedPosition {
@@ -685,6 +861,10 @@ function buildGame(d: DecodedPosition, epCoherent: boolean): EvoChessGame {
   game.minorMoveProgress = { ...d.minorMoveProgress };
   // No history block, so there is no move log to regenerate.
   game.moveLog = [];
+  // This position isn't necessarily the standard start the constructor
+  // assumed. It's whatever the link decoded to. Absent means unknown, same
+  // as a legacy save (game.ts's `base` doc comment), not a false claim.
+  game.base = undefined;
   game.rookCharges = new Map([...d.charges].map(([i, c]) => [squareName(i), c]));
   game.rookLocked = new Set([...d.locked].map(squareName));
   game.epEvolved = null;

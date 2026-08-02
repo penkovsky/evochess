@@ -25,6 +25,7 @@
  *        and precludes any other promotion that move.
  */
 import { Chess, type Color, type Square, type PieceSymbol } from "chess.js";
+import { deserializeGame, type SerializedGame } from "./serialize";
 
 export const N_MINOR = 3;
 export const M_ROOK = 3;
@@ -67,6 +68,54 @@ export function moveToken(from: Square, to: Square, options: ApplyMoveOptions): 
   else if (rookPromo) tag = "r";
   else if (downgradeTo) tag = `d${downgradeTo}`;
   return `${from}${to}${tag}`;
+}
+
+/** A `moveToken`, parsed back into the call that produced it. */
+export interface PlyRecord {
+  from: Square;
+  to: Square;
+  options: ApplyMoveOptions;
+}
+
+/** Inverse of `moveToken`. Null on a token that doesn't parse. */
+export function parseMoveToken(token: string): PlyRecord | null {
+  if (token.length < 4) return null;
+  const from = token.slice(0, 2) as Square;
+  const to = token.slice(2, 4) as Square;
+  const rest = token.slice(4);
+  const options: ApplyMoveOptions = {};
+  if (rest) {
+    const kind = rest[0];
+    const piece = rest.slice(1);
+    if (kind === "f") options.forcedPromo = piece as ForcedPromo;
+    else if (kind === "m") options.minorPromo = piece as MinorPromo;
+    else if (kind === "r") options.rookPromo = true;
+    else if (kind === "d") options.downgradeTo = piece as MinorPromo;
+    else return null;
+  }
+  return { from, to, options };
+}
+
+/**
+ * Replays `tokens` onto `base`. Returns `tokens.length + 1` games: index `i`
+ * is the position after `i` plies, so index 0 is the base and the last index
+ * is the live position.
+ *
+ * Throws EvoChessError on a token that will not apply. Callers decide what
+ * that means.
+ */
+export function replayLine(base: SerializedGame, tokens: string[]): EvoChessGame[] {
+  const start = deserializeGame(base);
+  start.base = base;
+  const games: EvoChessGame[] = [start];
+  for (const token of tokens) {
+    const record = parseMoveToken(token);
+    if (!record) throw new EvoChessError(`Malformed move token: ${token}`);
+    const next = games[games.length - 1].copy();
+    next.applyMove(record.from, record.to, record.options);
+    games.push(next);
+  }
+  return games;
 }
 
 /**
@@ -128,6 +177,9 @@ export class EvoChessGame {
   // Set for exactly one ply, when a double pawn move's pawn evolved on the
   // same move. Null whenever chess.js's own en-passant handling suffices.
   epEvolved: EvolvedEnPassant | null;
+  /** The position at ply 0. Undefined for a game restored from a save written
+   *  before this field existed. */
+  base?: SerializedGame;
 
   constructor() {
     this.chess = new Chess(START_FEN);
@@ -140,6 +192,18 @@ export class EvoChessGame {
     this.rookCharges = new Map();
     this.rookLocked = new Set();
     this.epEvolved = null;
+    this.base = {
+      fen: START_FEN,
+      minorRights: { w: 0, b: 0 },
+      rookRights: { w: 0, b: 0 },
+      pawnMoveProgress: { w: 0, b: 0 },
+      minorMoveProgress: { w: 0, b: 0 },
+      moveLog: [],
+      moveTokens: [],
+      rookCharges: {},
+      rookLocked: [],
+      epEvolved: null,
+    };
   }
 
   copy(): EvoChessGame {
@@ -154,6 +218,7 @@ export class EvoChessGame {
     g.rookCharges = new Map(this.rookCharges);
     g.rookLocked = new Set(this.rookLocked);
     g.epEvolved = this.epEvolved ? { ...this.epEvolved } : null;
+    g.base = this.base;
     return g;
   }
 

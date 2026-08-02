@@ -519,6 +519,11 @@ function App() {
     if (shared?.ok) {
       savedGameRef.current = saved;
       gameRef.current = shared.game;
+      // A history link's `game` is already the end of the line (spec §6.1);
+      // `historyRef` holds everything strictly before it.
+      if (shared.snapshots) {
+        historyRef.current = shared.snapshots.slice(0, -1);
+      }
       gameMetaRef.current = newGameMeta(shared.game.chess.fen(), param);
       setSharedPending(true);
       setFromShared(true);
@@ -526,7 +531,10 @@ function App() {
       // block to lean on, so the rule is positional: the recipient always moves
       // first. This is also what keeps loading a link from triggering an engine
       // search.
-      setAiColor(shared.game.turn === "w" ? "b" : "w");
+      //
+      // Read at the cursor
+      const atCursor = shared.snapshots?.[shared.cursor ?? 0] ?? shared.game;
+      setAiColor(atCursor.turn === "w" ? "b" : "w");
       // Whatever time was left on the recipient's own clock has nothing to do
       // with this position.
       resetClock(saved?.timerMinutes ?? 10);
@@ -633,6 +641,12 @@ function App() {
       else if (daily && gameRef.current.moveLog.length === plyAtLoad) loadDailyPuzzle(row, saved);
     });
     setLoaded(true);
+    // A history link's cursor (docs/share-links-spec.md §4.4): `enterBrowse`
+    // already clamps to live, so a cursor at the end of the line needs no
+    // special case.
+    if (shared?.ok && shared.cursor !== undefined && shared.cursor < historyRef.current.length) {
+      enterBrowse(shared.cursor);
+    }
     rerender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

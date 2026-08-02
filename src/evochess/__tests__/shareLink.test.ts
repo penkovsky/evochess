@@ -10,13 +10,14 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Square } from "chess.js";
-import { EvoChessGame, ROOK_CHARGES } from "../game";
+import { EvoChessGame, ROOK_CHARGES, parseMoveToken, type PlyRecord } from "../game";
 import { serializeGame, type SerializedGame } from "../serialize";
 import { legalTurns } from "../ai";
 import {
   crc16Ccitt,
   decodeShareLink,
   encodeShareLink,
+  encodeShareLinkWithHistory,
   fromBase64Url,
   MAX_SHARE_PARAM_CHARS,
   readShareParam,
@@ -541,22 +542,6 @@ describe("share links: structural failures, spec §5.1", () => {
 });
 
 describe("share links: flags forward compatibility, spec §4.2", () => {
-  it("refuses a payload claiming history, with the newer-version message", () => {
-    // Flags bit 0 plus a plausible 12-bit ply count, which the decoder must
-    // never get as far as reading.
-    const result = decodeShareLink(
-      buildPayload({ pieces: startPieces() }, { flags: 0b01, extraBits: [[0, 12]] })
-    );
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe("HISTORY_UNSUPPORTED");
-      expect(result.message).toBe("This link needs a newer version of EvoChess.");
-      // Distinct from the unknown-version message: the version byte is still
-      // 0x01 and still correct.
-      expect(result.message).not.toBe("This link was created with a different version of EvoChess.");
-    }
-  });
-
   it("skips an extras block and still decodes the position", () => {
     const withExtras = buildPayload(
       { pieces: startPieces(), turn: 1, progress: [1, 2, 0, 0] },
@@ -805,5 +790,175 @@ describe("share links: base64url and the query parameter", () => {
     expect(readShareParam("?q=abc")).toBeNull();
     expect(readShareParam("")).toBeNull();
     expect(readShareParam("?p=")).toBeNull();
+  });
+});
+
+// -------------------------------------------------------- history block
+
+function squareIdx(sq: string): number {
+  return (Number(sq[1]) - 1) * 8 + (sq.charCodeAt(0) - 97);
+}
+
+/** Independent of `historyTag` in shareLink.ts, same reason as `buildPayload`
+ *  above: a shared bug in both directions is invisible to a round trip. */
+function tagForRecord(record: PlyRecord): { tag: number; extra?: number } {
+  const { forcedPromo, minorPromo, rookPromo, downgradeTo } = record.options;
+  if (forcedPromo) return { tag: 6, extra: { q: 0, r: 1, b: 2, n: 3 }[forcedPromo] };
+  if (minorPromo === "n") return { tag: 1 };
+  if (minorPromo === "b") return { tag: 2 };
+  if (rookPromo) return { tag: 3 };
+  if (downgradeTo === "n") return { tag: 4 };
+  if (downgradeTo === "b") return { tag: 5 };
+  return { tag: 0 };
+}
+
+/** Hand-built history block bits, spec §4.4. `flat: true` omits tag 6's extra
+ *  2 bits even when present, to build the desynchronising payload §7's
+ *  promotion-stride test needs. */
+function historyExtraBits(tokens: string[], cursor: number, opts: { flat?: boolean } = {}): Array<[number, number]> {
+  const out: Array<[number, number]> = [[tokens.length, 12]];
+  for (const token of tokens) {
+    const record = parseMoveToken(token)!;
+    const { tag, extra } = tagForRecord(record);
+    out.push([squareIdx(record.from), 6], [squareIdx(record.to), 6], [tag, 3]);
+    if (tag === 6 && !opts.flat) out.push([extra ?? 0, 2]);
+  }
+  out.push([cursor, 12]);
+  return out;
+}
+
+/** A game with an 8th-rank promotion mid-stream, not on the last ply, so a
+ *  flat-15-bit encoder would desynchronise on the plies after it (spec §4.4,
+ *  the trap named alongside the 17-bit stride). */
+function promotionGame(): EvoChessGame {
+  const game = new EvoChessGame();
+  push(game, "e2e4"); push(game, "d7d5");
+  push(game, "e4d5"); push(game, "c7c6");
+  push(game, "d5c6"); push(game, "g7g5");
+  push(game, "c6b7"); push(game, "a7a6");
+  // Bishop, not queen or rook: either of those would check the black king
+  // along the 8th rank from b8, which a7a5 (the next ply) doesn't answer.
+  push(game, "b7b8", { forcedPromo: "b" }); push(game, "a6a5");
+  push(game, "e1e2"); push(game, "a5a4");
+  return game;
+}
+
+describe("share links: history block", () => {
+  it("Link 3 (cursor 11) matches vector A's position exactly", () => {
+    const full = game1(13);
+    const link = encodeShareLinkWithHistory(new EvoChessGame(), full.moveTokens, 11);
+    const decoded = decodeOk(link);
+    expect(decoded.snapshots).toBeDefined();
+    expect(decoded.cursor).toBe(11);
+    expect(normalize(serializeGame(decoded.snapshots![11]))).toEqual(normalize(serializeGame(game1(11))));
+    const positionOnly = decodeOk(encodeShareLink(game1(11)));
+    expect(normalize(serializeGame(decoded.snapshots![11]))).toEqual(normalize(serializeGame(positionOnly.game)));
+  });
+
+  it("Link 4 (cursor 12) matches vector B's position exactly", () => {
+    const full = game1(13);
+    const link = encodeShareLinkWithHistory(new EvoChessGame(), full.moveTokens, 12);
+    const decoded = decodeOk(link);
+    expect(decoded.cursor).toBe(12);
+    expect(normalize(serializeGame(decoded.snapshots![12]))).toEqual(normalize(serializeGame(game1(12))));
+  });
+
+  it("the live game is the end of the line, not the cursor", () => {
+    const full = game1(13);
+    const decoded = decodeOk(encodeShareLinkWithHistory(new EvoChessGame(), full.moveTokens, 0));
+    expect(decoded.cursor).toBe(0);
+    expect(decoded.game.chess.fen()).toBe(full.chess.fen());
+    expect(decoded.game).toBe(decoded.snapshots![decoded.snapshots!.length - 1]);
+  });
+
+  it("every cursor from 0 to plyCount decodes to the matching replay ply, 14 snapshots throughout", () => {
+    const full = game1(13);
+    for (let cursor = 0; cursor <= 13; cursor++) {
+      const decoded = decodeOk(encodeShareLinkWithHistory(new EvoChessGame(), full.moveTokens, cursor));
+      expect(decoded.snapshots).toHaveLength(14);
+      expect(decoded.cursor).toBe(cursor);
+      expect(normalize(serializeGame(decoded.snapshots![cursor]))).toEqual(normalize(serializeGame(game1(cursor))));
+    }
+  });
+
+  it("promotion stride: the real encoder round-trips a mid-game 8th-rank promotion", () => {
+    const game = promotionGame();
+    const link = encodeShareLinkWithHistory(new EvoChessGame(), game.moveTokens, game.moveTokens.length);
+    const decoded = decodeOk(link);
+    expect(decoded.game.chess.fen()).toBe(game.chess.fen());
+    expect(decoded.game.minorRights).toEqual(game.minorRights);
+  });
+
+  it("promotion stride: a flat-15-bit encoding of the same game desynchronises", () => {
+    const game = promotionGame();
+    const flatPayload = buildPayload(
+      { pieces: startPieces() },
+      { flags: 0b01, extraBits: historyExtraBits(game.moveTokens, game.moveTokens.length, { flat: true }) }
+    );
+    const flatResult = decodeShareLink(flatPayload);
+    // Either the misaligned tail fails a structural check, or it "succeeds"
+    // into a different game than the one encoded. Either way it must not
+    // match. That is what proves the 17-bit stride is load-bearing.
+    if (flatResult.ok) {
+      expect(flatResult.game.chess.fen()).not.toBe(game.chess.fen());
+    } else {
+      expect(flatResult.ok).toBe(false);
+    }
+  });
+
+  it("cursor > plyCount fails with BAD_CURSOR", () => {
+    const tokens = game1(2).moveTokens;
+    const payload = buildPayload(
+      { pieces: startPieces() },
+      { flags: 0b01, extraBits: historyExtraBits(tokens, 5) }
+    );
+    const result = decodeShareLink(payload);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("BAD_CURSOR");
+  });
+
+  it("an illegal base cannot carry history: HISTORY_ILLEGAL_BASE, nothing rendered", () => {
+    // Two white kings, exactly as the illegal-positions suite above.
+    const pieces: Array<[number, number]> = [
+      ...startPieces().filter(([i]) => i !== 8),
+      [24, WK],
+    ];
+    const payload = buildPayload({ pieces }, { flags: 0b01, extraBits: historyExtraBits([], 0) });
+    const result = decodeShareLink(payload);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("HISTORY_ILLEGAL_BASE");
+      expect(result.message).toContain("starting position could not have occurred");
+    }
+
+    // The same shape over a legal base decodes fine, so the check above is
+    // discriminating on the base and not just always failing.
+    const legalPayload = buildPayload({ pieces: startPieces() }, { flags: 0b01, extraBits: historyExtraBits([], 0) });
+    expect(decodeShareLink(legalPayload).ok).toBe(true);
+  });
+
+  it("a token that will not apply fails with HISTORY_REPLAY_FAILED", () => {
+    // e2e5: a bare from/to/tag triple the format accepts structurally, but no
+    // pawn can play. chess.js refuses it inside replayLine.
+    const payload = buildPayload(
+      { pieces: startPieces() },
+      { flags: 0b01, extraBits: historyExtraBits(["e2e5"], 1) }
+    );
+    const result = decodeShareLink(payload);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("HISTORY_REPLAY_FAILED");
+      expect(result.message).toBe("This link was created with a different version of EvoChess.");
+    }
+  });
+
+  it("position-only links are untouched: vectors A and B still decode and encode byte-identically", () => {
+    expect(encodeShareLink(game1(11))).toBe(VECTOR_A);
+    expect(encodeShareLink(game1(12))).toBe(VECTOR_B);
+    const a = decodeOk(VECTOR_A);
+    const b = decodeOk(VECTOR_B);
+    expect(a.snapshots).toBeUndefined();
+    expect(a.cursor).toBeUndefined();
+    expect(b.snapshots).toBeUndefined();
   });
 });
