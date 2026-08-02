@@ -68,6 +68,27 @@ export function saveGame({ game, ...settings }: SaveOptions) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
 }
 
+/**
+ * Records in the current save that the game has already been reported
+ * abandoned at this ply, without rewriting the rest of it. For the `pagehide`
+ * path, where no render follows to run the save effect: without this the next
+ * load resumes with the mark gone, and closing the tab again reports the same
+ * untouched game a second time. A no-op when there is no save (a shared
+ * position not yet committed), whose meta is not in localStorage either.
+ */
+export function markSavedGameAbandoned(ply: number) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const saved: SavedState = JSON.parse(raw);
+    if (!saved.telemetry) return;
+    saved.telemetry.abandonedAtPly = ply;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+  } catch {
+    /* a save we cannot patch is one a reload would drop anyway */
+  }
+}
+
 export interface LoadedGame {
   game: EvoChessGame;
   mode: "human-ai" | "human-human";

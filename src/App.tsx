@@ -11,6 +11,7 @@ import {
   loadParkedGame,
   hasParkedGame,
   clearParkedGame,
+  markSavedGameAbandoned,
   type LoadedGame,
 } from "./evochess/persistence";
 import { loadProgress, markSeen } from "./evochess/tutorialProgress";
@@ -716,6 +717,27 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, mode, aiColor, level, fromShared, sharedPending, timeUp, gameRef.current, gameRef.current.moveLog.length]);
 
+  // Best-effort game_abandon on tab close: `pagehide` fires on navigation,
+  // close and backgrounding alike, and is the one unload event bfcache
+  // doesn't skip. A game already caught by the `game_end` effect above is a
+  // no-op here (`abandonGame` checks `meta.logged`).
+  useEffect(() => {
+    if (!loaded) return;
+    function onPageHide(e: PageTransitionEvent) {
+      // Frozen into bfcache rather than closed. The page can come back, and on
+      // a phone this is what switching apps mid-game looks like.
+      if (e.persisted) return;
+      // Nothing has happened this session. `resumeMeta` nulls the anchor on
+      // load and only a ply sets it, so this is "the player moved". Without it,
+      // every visit that opens a saved game and leaves reports an abandon.
+      if (gameMetaRef.current.lastPlyAt === null) return;
+      abandonGame();
+    }
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, mode, aiColor, level, fromShared, gameRef.current]);
+
   // Resumes an AI-to-move position on load (e.g. reloading mid-game with the
   // AI to move). Deliberately NOT re-run when mode/aiColor change: toggling
   // "AI plays: White" before the first move would otherwise let the AI jump
@@ -1041,7 +1063,58 @@ function App() {
     applyAndAdvance(from, to, options);
   }
 
+  // Logs a started-but-unfinished game as abandoned, before its state is
+  // discarded or the tab goes away. Mirrors the `game_end` block above but with
+  // no outcome that fits `win`/`loss`/`draw`/`timeout` (`abandoned` is its own
+  // outcome) and no scoring, since an abandoned game was never decided.
+  //
+  // Deliberately does not set `logged`: from the close path this is a guess,
+  // and a game reported abandoned must stay loggable so that finishing it later
+  // still sends the real outcome. The collector takes one row per report and
+  // analysis reads the last one, so the guess costs a row, not the truth.
+  function abandonGame() {
+    const meta = gameMetaRef.current;
+    if (!meta.started || meta.logged) return;
+    const game = gameRef.current;
+    const plies = game.moveLog.length;
+    // Already reported at this exact position: `pagehide` fires again after a
+    // bfcache restore, and a game reopened and left alone would otherwise be
+    // reported once per visit.
+    if (meta.abandonedAtPly === plies) return;
+    meta.abandonedAtPly = plies;
+    logFinishedGame({
+      meta,
+      mode,
+      level,
+      aiColor,
+      fromShared,
+      puzzleDate: puzzleRef.current?.date ?? null,
+      outcome: "abandoned",
+      moves: game.moveLog,
+      moveTokens: game.moveTokens,
+    });
+    track(
+      "game_abandon",
+      {
+        plies,
+        duration_ms: reportedDurationMs(meta),
+        mode,
+        level: mode === "human-ai" ? level : null,
+        ai_color: aiColor,
+        from_shared: fromShared,
+        puzzle_date: puzzleRef.current?.date ?? null,
+        takebacks: meta.takebacks,
+      },
+      meta.uid
+    );
+    // `abandonedAtPly` reaches the save through the save effect, and on
+    // `pagehide` there is no render left to run it. Patched straight into the
+    // save instead.
+    markSavedGameAbandoned(plies);
+  }
+
   function startNewGame(newMode: Mode, newAiColor: Color, newLevel: AiLevel) {
+    abandonGame();
     gameRef.current = new EvoChessGame();
     gameMetaRef.current = newGameMeta(START_FEN);
     resumedRef.current = false;

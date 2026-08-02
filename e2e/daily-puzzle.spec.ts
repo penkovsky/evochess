@@ -67,6 +67,7 @@ function ownGameSave(): string {
       takebacks: 0,
       started: true,
       logged: false,
+      abandonedAtPly: null,
     },
   });
 }

@@ -4,7 +4,9 @@
 create table if not exists public.games (
   id           bigserial primary key,
   created_at   timestamptz not null default now(),
-  game_uid     uuid not null unique,   -- client-minted, so a retry cannot double-insert
+  row_uid      uuid not null unique,   -- client-minted, so a retry cannot double-insert
+  game_uid     uuid not null,          -- the game, which may have written more than one row:
+                                       -- see the note on `outcome`. Not unique.
   anon_id      uuid not null,          -- per-browser, from localStorage
   app_version  text not null,          -- git sha
   mode         text not null,
@@ -20,16 +22,32 @@ create table if not exists public.games (
                                        -- from the opening.
   moves        text not null,          -- moveLog joined with ' '
   moves_tokens text,                    -- moveTokens joined with ' '; null for rows written before this
-  outcome      text not null,          -- from the human's side; from White's side in human-human
+  outcome      text not null,          -- from the human's side; from White's side in human-human.
+                                       -- 'abandoned' is a guess made as the tab goes away, and the
+                                       -- browser cannot tell a close from a phone switching apps.
+                                       -- So a game can hold several rows, and only the last one is
+                                       -- true: query with the dedupe below, never the raw table.
   plies        int not null,
   duration_ms  int not null            -- first move to last
 );
+
+-- The canonical read: one row per game, a decided outcome beating an abandon
+-- and, failing that, the newest row winning. Rows for one game arrive in the
+-- order they were made, since the send queue is FIFO and stops at the first
+-- failure, so created_at orders them correctly.
+--
+--   select distinct on (game_uid) *
+--   from public.games
+--   order by game_uid, (outcome = 'abandoned'), created_at desc;
+
+-- Every join from `events` lands here, and it is no longer a unique lookup.
+create index if not exists games_game_uid_idx on public.games (game_uid);
 
 alter table public.games
   add constraint games_mode_known check (mode in ('human-ai', 'human-human')),
   add constraint games_level_known check (level is null or level in ('easy', 'zen', 'fun')),
   add constraint games_ai_color_known check (ai_color in ('w', 'b')),
-  add constraint games_outcome_known check (outcome in ('win', 'loss', 'draw', 'timeout')),
+  add constraint games_outcome_known check (outcome in ('win', 'loss', 'draw', 'timeout', 'abandoned')),
   -- Plausibility bounds, so one bored person cannot fill the table with junk.
   add constraint games_plies_sane check (plies between 0 and 2000),
   add constraint games_duration_sane check (duration_ms between 0 and 86400000),
@@ -51,7 +69,7 @@ create policy games_anon_insert on public.games
 -- sequence, so the counter eventually reaches a taken number and every real
 -- insert starts failing. Neither column is on this list, so the defaults stand.
 revoke all on public.games from anon;
-grant insert (game_uid, anon_id, app_version, mode, level, ai_color, from_shared,
+grant insert (row_uid, game_uid, anon_id, app_version, mode, level, ai_color, from_shared,
               puzzle_date, start_fen, start_param, moves, moves_tokens, outcome,
               plies, duration_ms)
   on public.games to anon;

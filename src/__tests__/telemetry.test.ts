@@ -34,6 +34,7 @@ function finished(uid: string) {
       takebacks: 0,
       started: true,
       logged: false,
+      abandonedAtPly: null,
     },
     mode: "human-ai" as const,
     level: "zen",

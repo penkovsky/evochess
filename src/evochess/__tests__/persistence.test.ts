@@ -23,7 +23,7 @@ const baseOptions: Omit<SaveOptions, "game"> = {
   ponderEnabled: true,
   fromShared: false,
   unverified: false,
-  telemetry: { uid: "test-uid", startFen: START_FEN, startParam: null, activeMs: 0, lastPlyAt: null, lastPlies: 0, takebacks: 0, started: true, logged: false },
+  telemetry: { uid: "test-uid", startFen: START_FEN, startParam: null, activeMs: 0, lastPlyAt: null, lastPlies: 0, takebacks: 0, started: true, logged: false, abandonedAtPly: null },
 };
 
 /** Saves with the defaults above, so each test states only what it varies. */

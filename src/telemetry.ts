@@ -41,7 +41,17 @@ export interface GameMeta {
    * takeback to the opening makes ply 1 come round twice.
    */
   started: boolean;
+  /** Whether a final row (`win`/`loss`/`draw`/`timeout`) has gone out. */
   logged: boolean;
+  /**
+   * The ply count at which this game was last reported abandoned, or null.
+   * An abandon is a guess, not a verdict: `pagehide` fires on backgrounding as
+   * well as on close, so a game reported abandoned can still be resumed and
+   * finished, and `games` accepts one row per report (see `row_uid`). This
+   * stops the same guess being sent twice for the same position, which is what
+   * a bfcache restore and a reopened-but-untouched game would otherwise do.
+   */
+  abandonedAtPly: number | null;
 }
 
 export interface FinishedGame {
@@ -58,7 +68,7 @@ export interface FinishedGame {
    */
   puzzleDate: string | null;
   /** From the human's side; from White's side in human-human. */
-  outcome: "win" | "loss" | "draw" | "timeout";
+  outcome: "win" | "loss" | "draw" | "timeout" | "abandoned";
   moves: string[];
   moveTokens: string[];
 }
@@ -93,6 +103,14 @@ interface EventRow {
 }
 
 interface GameRow {
+  /**
+   * Identifies this row, and the only thing the table holds unique. A game can
+   * write more than one row: an abandon is a guess that a later finish
+   * supersedes, and analysis takes the last row per `game_uid`. `qid` is minted
+   * once per queue entry and reused by a retry, so a resent row still cannot
+   * double-insert.
+   */
+  row_uid: string;
   game_uid: string;
   anon_id: string;
   app_version: string;
@@ -135,6 +153,7 @@ export function newGameMeta(startFen: string, startParam: string | null = null):
     takebacks: 0,
     started: false,
     logged: false,
+    abandonedAtPly: null,
   };
 }
 
@@ -341,12 +360,17 @@ export function trackSessionOnce(key: string, name: EventName, props: Props = {}
   track(name, props, gameUid);
 }
 
-/** Queues one finished game and tries to send it. Call once per game. */
+/**
+ * Queues one game row and tries to send it. Called once for a game that ends,
+ * and once more for each time it is reported abandoned before that, so a game
+ * can have several rows and the last one is the one that counts.
+ */
 export function logFinishedGame(game: FinishedGame) {
   try {
     if (!enabled()) return;
     const qid = crypto.randomUUID();
     const row: GameRow = {
+      row_uid: qid,
       game_uid: game.meta.uid,
       anon_id: anonId(),
       app_version: __APP_VERSION__,
