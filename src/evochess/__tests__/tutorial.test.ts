@@ -167,8 +167,8 @@ describe("RULES_SUMMARY", () => {
   // now the only place in the app that explains it.
   it("covers the rules the lessons deliberately leave out", () => {
     const text = RULES_SUMMARY.join(" ").toLowerCase();
-    expect(text).toContain("accumulate");
-    expect(text).toContain("one promotion");
+    expect(text).toContain("carry over until used");
+    expect(text).toContain("only one per turn");
     expect(text).toContain("castling");
   });
 });

@@ -183,7 +183,7 @@ test("the rook-charge lesson downgrades the rook on its last charge", async ({ p
   // Spending the last charge forces the downgrade, in the same move.
   await move(page, "c2", "c7");
   await expect(page.locator(".modal")).toBeVisible();
-  await page.getByRole("button", { name: "Downgrade to Bishop" }).click();
+  await page.getByRole("button", { name: "To Bishop" }).click();
 
   // The Rook never really arrived: a Bishop stands on c7, with no charge badge.
   await expect(page.locator('[data-square="c7"] .rook-charge-badge')).toHaveCount(0);

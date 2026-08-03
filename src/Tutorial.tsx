@@ -60,12 +60,12 @@ interface ModalState {
 
 /** What the step suggests picking, derived from its own options. */
 function choicePrompt(step: StepMove): string {
-  if (step.anyDowngrade) return "Choose a Knight or a Bishop.";
+  if (step.anyDowngrade) return "Pick Knight or Bishop.";
   const { minorPromo, rookPromo } = step.options ?? {};
   if (minorPromo === "n") return "The lesson suggests the Knight.";
   if (minorPromo === "b") return "The lesson suggests the Bishop.";
   if (rookPromo) return "The lesson suggests the Rook.";
-  return "The lesson suggests None — banking the right for later.";
+  return "The lesson suggests None. Bank the right for later.";
 }
 
 export function Tutorial({ onExit, onSearch }: { onExit: () => void; onSearch?: SearchFn }) {
@@ -123,9 +123,8 @@ function LessonMenu({
     <div className="tutorial tutorial-menu">
       <h2 className="tutorial-title">Learn EvoChess</h2>
       <p className="tutorial-lede">
-        It's chess, except you start with only Pawns and a King — every other piece has to be
-        earned during the game. Three short lessons, about a minute each. Nothing is forced: play
-        along, or wander off and poke at the rules whenever you like.
+        Chess, but you start with only Pawns and a King. Every other piece is earned. Three short
+        lessons, about a minute each. Play along, or wander off and poke at the rules whenever you like.
       </p>
       <ol className="lesson-list">
         {LESSONS.map((lesson, i) => {
@@ -159,7 +158,7 @@ function LessonMenu({
       {/* The lessons teach three rules by playing them; this is the rest, for
           anyone who would rather just read the whole thing. */}
       <section className="tutorial-rules">
-        <h3>The rules, in brief</h3>
+        <h3>Rules in brief</h3>
         <ul>
           {RULES_SUMMARY.map((rule) => (
             <li key={rule}>{rule}</li>
@@ -204,8 +203,8 @@ function LessonPlayer({
   const [modal, setModal] = useState<ModalState | null>(null);
   const [selected, setSelected] = useState<Square | null>(null);
   // Where the reply currently in flight will land. The panel shows no "Easy is
-  // thinking…" card — Easy answers fast enough that one would be a flicker
-  // rather than information — so it has to keep showing whatever it was
+  // thinking…" card. Easy answers fast enough that one would be a flicker
+  // rather than information, so it has to keep showing whatever it was
   // showing, and that means knowing which card the move came from.
   const [replySettle, setReplySettle] = useState<Settle>("advance");
   // Set while an opponent search is in flight so a reply arriving after a
@@ -242,8 +241,8 @@ function LessonPlayer({
 
   /**
    * Where the panel lands once a move (and the reply to it) has resolved. The
-   * step's own move moves the lesson on; anything else hands the board over —
-   * but after the lesson is finished there is no script left to leave, so the
+   * step's own move moves the lesson on; anything else hands the board over.
+   * But after the lesson is finished there is no script left to leave, so the
    * outro simply stays put while the game continues under it.
    */
   function settleTo(onScript: boolean): Settle {
@@ -251,7 +250,7 @@ function LessonPlayer({
     return onScript ? "advance" : "free";
   }
 
-  /** Back to the position this step was played from — earlier steps survive. */
+  /** Back to the position this step was played from. Earlier steps survive. */
   function rewindToStep() {
     restore(stepIndex, stepStartsRef.current[stepIndex].copy());
   }
@@ -331,8 +330,8 @@ function LessonPlayer({
   }
 
   /**
-   * Any legal move is accepted, whether or not it's the one being taught —
-   * the step's move continues the lesson, anything else hands the board over.
+   * Any legal move is accepted, whether or not it's the one being taught.
+   * The step's move continues the lesson, anything else hands the board over.
    * Illegal moves are simply declined by the rules engine, with no telling-off.
    */
   function attemptMove(from: Square, to: Square): boolean {
@@ -389,7 +388,7 @@ function LessonPlayer({
     return true;
   }
 
-  /** A choice from the prompt. Taking a different one is allowed — it goes free. */
+  /** A choice from the prompt. Taking a different one is allowed. It goes free. */
   function choose(options: ApplyMoveOptions) {
     if (!modal) return;
     commit(modal.from, modal.to, options, settleTo(modal.onScript && optionsMatch(step.play, options)));
@@ -421,7 +420,7 @@ function LessonPlayer({
   if (suggestionLive && !modal) {
     squareStyles[step.play.from] = { boxShadow: "inset 0 0 0 4px rgba(34, 170, 119, 0.85)" };
     // A filled dot would sit behind the piece on an occupied square, so a
-    // capture is marked with a ring around it instead — the same convention
+    // capture is marked with a ring around it instead. Same convention
     // the game itself uses for legal-move hints.
     squareStyles[step.play.to] = game.chess.get(step.play.to)
       ? { background: "radial-gradient(circle, transparent 55%, rgba(34, 170, 119, 0.55) 55%)" }
@@ -506,7 +505,7 @@ function LessonPlayer({
           ))}
         </div>
 
-        {/* Checked ahead of `phase` so the outro — and its buttons — survive the
+        {/* Checked ahead of `phase` so the outro, and its buttons, survive the
             "reply" swings of a game played on past the end of the lesson. */}
         {finished ? (
           <div className="tutorial-card outro">
@@ -519,7 +518,7 @@ function LessonPlayer({
             <p className="tutorial-free-status">
               {game.isGameOver()
                 ? game.resultString()
-                : `The board is still live — ${turnLabel} to move. Play the position out if you like.`}
+                : `The board is still live. ${turnLabel} to move. Play the position out if you like.`}
             </p>
             <div className="tutorial-actions">
               {isLast ? (
@@ -537,14 +536,14 @@ function LessonPlayer({
             </div>
             {isLast && (
               <p className="tutorial-footnote">
-                Two leftovers, both borrowed straight from chess: a Pawn reaching the last rank still
-                promotes normally (Queen included), and there is no castling.
+                Two normal chess rules still apply: pawns promote on the last rank, and there is no
+                castling.
               </p>
             )}
           </div>
         ) : offScript ? (
           <div className="tutorial-card free">
-            <h3>Off script — that's fine</h3>
+            <h3>Off script, that's fine</h3>
             <p>
               Carry on: you're playing White against the Easy opponent, and every rule, counter and
               prompt works exactly as it does in a real game.
@@ -566,11 +565,11 @@ function LessonPlayer({
           <div className="tutorial-card free">
             <h3>The game has moved on</h3>
             <p>
-              The lesson wanted to play {step.play.from}–{step.play.to}, but the position has run
-              ahead of it and that move isn't available any more. That's chess — nothing has gone
-              wrong.
+              The lesson wanted to play {step.play.from} to {step.play.to}, but the position has
+              run ahead of it and that move isn't available any more. That's chess. Nothing has
+              gone wrong.
             </p>
-            <p>Keep playing, or rewind and take the step again.</p>
+            <p>Keep playing, or replay this step.</p>
             <div className="tutorial-actions">
               <button className="tutorial-btn primary" onClick={rewindToStep}>
                 Replay this step
@@ -585,7 +584,7 @@ function LessonPlayer({
             {recap && <p className="tutorial-recap">{recap}</p>}
             <p>{step.text}</p>
             <p className="tutorial-suggestion">{step.hint}</p>
-            <p className="tutorial-aside">Or play anything else — I'll step aside and wait.</p>
+            <p className="tutorial-aside">Or play anything else. I'll step aside and wait.</p>
           </div>
         )}
 
@@ -607,13 +606,13 @@ function LessonPlayer({
           <div className="modal tutorial-modal">
             {modal.kind === "downgrade" ? (
               <>
-                <p>Rook charges exhausted — it must downgrade:</p>
-                <button onClick={() => choose({ downgradeTo: "n" as MinorPromo })}>Downgrade to Knight</button>
-                <button onClick={() => choose({ downgradeTo: "b" as MinorPromo })}>Downgrade to Bishop</button>
+                <p>Rook charges exhausted. It must downgrade:</p>
+                <button onClick={() => choose({ downgradeTo: "n" as MinorPromo })}>To Knight</button>
+                <button onClick={() => choose({ downgradeTo: "b" as MinorPromo })}>To Bishop</button>
               </>
             ) : modal.kind === "forced" ? (
               <>
-                <p>Pawn reaches the last rank — choose promotion:</p>
+                <p>Pawn hits the last rank. Choose:</p>
                 <div className="promo-icons">
                   {(["q", "r", "b", "n"] as ForcedPromo[]).map((p) => (
                     <button
@@ -661,14 +660,14 @@ function LessonPlayer({
                     </button>
                   )}
                   <button className="promo-icon promo-none" title="No promotion" onClick={() => choose({})}>
-                    None
+                    Skip
                   </button>
                 </div>
               </>
             )}
             {/* The instruction card is behind the backdrop, so the step's own
                 suggestion has to be repeated here to be readable. Any other
-                choice is still accepted — it just ends the scripted line. */}
+                choice is still accepted. It just ends the scripted line. */}
             {modal.onScript && <p className="tutorial-choice-prompt">{choicePrompt(step.play)}</p>}
           </div>
         </div>

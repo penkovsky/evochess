@@ -1,15 +1,15 @@
 /**
  * Interactive tutorial: a short scripted course teaching the three rules that
- * make EvoChess not-chess — earning minor pieces from pawn moves, banking
+ * make EvoChess not-chess. Earning minor pieces from pawn moves, banking
  * those rights, earning a Rook from minor-piece moves, and Rook charges.
  *
  * Everything here is data plus pure helpers; the UI lives in Tutorial.tsx.
  * A lesson reaches its teaching position one of two ways:
  *
  *  - `setup`: replaying moves from the standard start. The position is then
- *    internally consistent by construction — counters, banked rights, rook
- *    charges and lock-outs are whatever real play produced — at the cost of
- *    the line having to be legal, which tutorial.test.ts checks move by move.
+ *    internally consistent by construction. Counters, banked rights, rook
+ *    charges and lock-outs are whatever real play produced. The cost is that
+ *    the line has to be legal, which tutorial.test.ts checks move by move.
  *  - `position`: a hand-built board (`LessonPosition`) for the positions no
  *    plausible line reaches, e.g. a late-game puzzle with most of the material
  *    already gone. Here the counters are stated rather than earned, so the
@@ -49,7 +49,7 @@ export interface TutorialStep {
   reply?: ScriptedMove;
   /**
    * The payoff: what this step's move did and why it matters. It is *not* a
-   * screen of its own — the lesson never stops to be acknowledged, which on a
+   * screen of its own. The lesson never stops to be acknowledged, which on a
    * phone is a "Continue" tap between every move. Instead it becomes the
    * opening paragraph of the next step's card (or of the outro, for the last
    * step), so the learner reads what just happened and what to do next in one
@@ -68,8 +68,8 @@ export interface TutorialStep {
  * gets played. Three rules, learned the hard way from lessons that stranded
  * themselves, and every square in `LESSONS` is picked to satisfy them:
  *
- *  1. A piece a later step depends on must stand where Black cannot reach it —
- *     otherwise the step asks for a move with no piece left to make it.
+ *  1. A piece a later step depends on must stand where Black cannot reach it.
+ *     Otherwise the step asks for a move with no piece left to make it.
  *  2. The piece a lesson *produces* must not appear en prise, or the lesson's
  *     punchline is a blunder.
  *  3. White's King must stay out of check at the start of every step, or the
@@ -114,7 +114,7 @@ export const LESSONS: Lesson[] = [
     setup: [],
     steps: [
       {
-        text: "Look at the board: eight Pawns and a King each. No Queen, no Rooks, no Knights, no Bishops. In EvoChess you don't start with an army — you grow one. Start by playing the Pawn to e4.",
+        text: "Look at the board: eight Pawns and a King each. No Queen, no Rooks, no Knights, no Bishops. In EvoChess you don't start with an army. You grow one. Start by playing the Pawn to e4.",
         hint: "Move the e2 Pawn two squares forward, to e4.",
         play: { from: "e2", to: "e4" },
         reply: { from: "e7", to: "e5" },
@@ -125,26 +125,26 @@ export const LESSONS: Lesson[] = [
         hint: "Move the b2 Pawn to b3.",
         play: { from: "b2", to: "b3" },
         reply: { from: "b7", to: "b6" },
-        recap: "Two dots. The strip above the board is Black's — they're earning pieces on the same terms you are, so watch it as closely as your own.",
+        recap: "Two dots. The strip above the board is Black's. They're earning pieces on the same terms you are, so watch it as closely as your own.",
       },
       {
-        text: "This is the one. Play c3 — your third Pawn move — and a Knight or Bishop will be offered to you.",
+        text: "This is the one. Play c3, your third Pawn move. A Knight or Bishop will be offered to you.",
         hint: "Move the c2 Pawn to c3 to complete three Pawn moves.",
         play: { from: "c2", to: "c3", options: { minorPromo: "n" } },
         recap: "The Pawn on c3 is now a Knight, and the green dots have reset to zero. Three more Pawn moves buys the next piece.",
       },
     ],
     outro: [
-      "Three Pawn moves earned one minor piece — and it appeared on c3, the square of the Pawn that just moved. That's the rule that shapes the whole game: the piece you get is the Pawn you just pushed, so which Pawn you move decides where your army grows.",
+      "Three Pawn moves earned one minor piece. It appeared on c3, the square of the Pawn that just moved. That's the rule that shapes the whole game: the piece you get is the Pawn you just pushed, so which Pawn you move decides where your army grows.",
     ],
   },
   {
     id: "rooks",
     title: "Minors earn Rooks",
-    blurb: "The same rule, one level up — three minor moves buy a Rook.",
+    blurb: "The same rule, one level up. Three minor moves buy a Rook.",
     // Late middlegame, and White is down to a King and a Bishop against a
     // Queen and a Rook. No plausible opening line reaches it, so it's built
-    // rather than played into — see `LessonPosition`. The point of being this
+    // rather than played into. See `LessonPosition`. The point of being this
     // far behind is that the Rook the lesson earns is the whole counterplay:
     // the Bishop slides the long diagonal into a8, arrives as a Rook, and
     // gives check on the back rank the same turn.
@@ -156,7 +156,7 @@ export const LESSONS: Lesson[] = [
     },
     steps: [
       {
-        text: "You're a Bishop against a Queen and a Rook — but look at the second row of dots under your side of the board: two of the three blue ones are filled. Blue counts moves by your Knights and Bishops, exactly as green counts Pawn moves. Every three earns a Rook, so make the third one count: Bishop all the way to a8, and take the Rook.",
+        text: "You're a Bishop against a Queen and a Rook. But look at the second row of dots under your side of the board: two of the three blue ones are filled. Blue counts moves by your Knights and Bishops, exactly as green counts Pawn moves. Every three earns a Rook, so make the third one count: Bishop all the way to a8, and take the Rook.",
         hint: "Slide the Bishop from g2 down the long diagonal to a8, then choose the Rook.",
         play: { from: "g2", to: "a8", options: { rookPromo: true } },
         reply: { from: "d2", to: "d8" },
@@ -165,7 +165,7 @@ export const LESSONS: Lesson[] = [
       },
     ],
     outro: [
-      "The Bishop travelled as a Bishop and landed as a Rook — and a Rook on a8 is check along the empty back rank, which a Bishop there would never have been. The blue dots are back to zero, and the new Rook carries a small 5. That's a countdown.",
+      "The Bishop travelled as a Bishop and landed as a Rook. A Rook on a8 is check along the empty back rank, which a Bishop there would never have been. The blue dots are back to zero, and the new Rook carries a small 5. That's a countdown.",
     ],
   },
   {
@@ -174,7 +174,7 @@ export const LESSONS: Lesson[] = [
     blurb: "A Rook is five moves of power, not a permanent piece.",
     // An endgame, built rather than played into: a Rook down to its last
     // charge, and one Pawn behind it. Black's King on d5 is what makes the
-    // choice at the end a real one — a Knight landing on c7 checks it, a
+    // choice at the end a real one. A Knight landing on c7 checks it, a
     // Bishop doesn't, and neither can be taken by the Queen on a6.
     position: {
       fen: "8/2p5/q6P/3k4/8/8/2R5/4K3 w - - 0 1",
@@ -182,7 +182,7 @@ export const LESSONS: Lesson[] = [
     },
     steps: [
       {
-        text: "Every Rook is born with five charges, and the badge on c2 reads 1 — this one has been busy. Charges are spent only when the Rook itself moves, so the rest of your army costs it nothing. But any Rook move now is one too many, so make it count: take the Pawn on c7.",
+        text: "Every Rook is born with five charges, and the badge on c2 reads 1. This one has been busy. Charges are spent only when the Rook itself moves, so the rest of your army costs it nothing. But any Rook move now is one too many, so make it count: take the Pawn on c7.",
         hint: "Capture the c7 Pawn with the Rook on c2.",
         play: { from: "c2", to: "c7", anyDowngrade: true },
         // No recap, as in the Rook lesson: one step, so the payoff is the outro.
@@ -196,18 +196,18 @@ export const LESSONS: Lesson[] = [
 ];
 
 /**
- * The whole rule set in seven lines — the reference the lessons don't replace.
+ * The whole rule set in seven lines. The reference the lessons don't replace.
  * Rendered both in the game panel and on the tutorial menu, so it lives here
  * rather than in either component: two copies of the rules is exactly the kind
  * of thing that drifts.
  */
 export const RULES_SUMMARY: string[] = [
-  "Starts with only Pawns and Kings; other pieces are earned through play.",
-  "Every 3 Pawn moves earns a right to promote the last Pawn that moved to a Knight or Bishop.",
-  "Every 3 minor-piece (Knight/Bishop) moves earns a right to promote the last minor piece that moved to a Rook.",
-  "Rights accumulate and carry over until used; only one promotion may be spent per turn.",
-  "A Rook has 5 charges, spent only when it moves; at 0 it downgrades to a Knight or Bishop (owner's choice) and can never become a Rook again. Capturing a Rook is a normal capture.",
-  "Reaching the 8th rank forces a standard Pawn promotion, as in chess.",
+  "You start with only Pawns and a King. Other pieces are earned.",
+  "Every 3 Pawn moves earns a Knight or Bishop promotion for that pawn.",
+  "Every 3 minor-piece moves earns a Rook promotion for that piece.",
+  "Rights carry over until used. Only one per turn.",
+  "A Rook has 5 charges, spent on each move. At 0, it downgrades to a Knight or Bishop and can never become a Rook again.",
+  "A Pawn on the last rank promotes normally, as in chess.",
   "Castling is not defined.",
 ];
 
@@ -221,7 +221,7 @@ export function buildLessonGame(lesson: Lesson): EvoChessGame {
   return game;
 }
 
-/** Zero for both colours — the default every `LessonPosition` field falls back to. */
+/** Zero for both colours. The default every `LessonPosition` field falls back to. */
 function pair(partial: Partial<Record<Color, number>> | undefined): Record<Color, number> {
   return { w: partial?.w ?? 0, b: partial?.b ?? 0 };
 }

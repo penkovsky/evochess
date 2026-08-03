@@ -19,8 +19,8 @@ export function TopBanners({
   hasSavedGame: boolean;
   /**
    * Whether a puzzle owns the board. It outlives `sharedPending`, which the
-   * solver's first move clears, and the banner is where the day it is for is
-   * said — so the banner has to outlive it too.
+   * solver's first move clears. The banner is where the day it is for gets
+   * said. So the banner has to outlive it too.
    */
   puzzleActive: boolean;
   setLinkNotice: (notice: string | null) => void;
@@ -72,8 +72,8 @@ export function TopBanners({
           <div className="tutorial-invite-text">
             <h2>New to EvoChess?</h2>
             <p>
-              It's chess, but you start with only Pawns and a King — everything else has to be
-              earned mid-game. Three one-minute lessons, or just start playing and pick it up.
+              It's chess, but you start with only Pawns and a King. Everything else has to be
+              earned. Three one-minute lessons, or just start playing and pick it up.
             </p>
           </div>
           <div className="tutorial-invite-actions">

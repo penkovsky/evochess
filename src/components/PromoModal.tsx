@@ -79,7 +79,7 @@ export function PromoModal({
                 </button>
               )}
               <button className="promo-icon promo-none" title="No promotion" onClick={() => finishModalMove({})}>
-                None
+                Skip
               </button>
             </div>
           </>
