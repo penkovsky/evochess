@@ -3,8 +3,8 @@
  *
  * The client never sends a date. The row-level policy on `puzzles` caps the
  * result at today, so a wrong or tampered clock can neither reach tomorrow's
- * puzzle nor break today's. That policy is the whole security model: the key
- * below ships in the bundle.
+ * puzzle nor break today's. The key below ships in the bundle, so that policy
+ * and the column grant beside it are the whole security model.
  *
  * Every failure is silent, as in `telemetry.ts`: null means no puzzle and the
  * app carries on as if `?daily` were not there.
@@ -21,7 +21,10 @@ export interface DailyPuzzle {
   mateIn: number;
 }
 
-/** The newest row visible to `anon`, which the policy caps at today. */
+/**
+ * The newest row visible to `anon`, which the policy caps at today. These three
+ * columns are the only ones granted; asking for `solution` fails with 42501.
+ */
 const QUERY = "/rest/v1/puzzles?select=publish_date,param,mate_in&order=publish_date.desc&limit=1";
 
 function parseRow(row: unknown): DailyPuzzle | null {

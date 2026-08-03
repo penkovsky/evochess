@@ -18,12 +18,14 @@ create table if not exists public.puzzles (
 
 alter table public.puzzles enable row level security;
 
-grant select on public.puzzles to anon;
+-- Column-scoped: the policy below decides which rows, this decides which
+-- columns. `solution` and `mate_san` are the answer, so `select=*` fails.
+grant select (publish_date, param, mate_in) on public.puzzles to anon;
 
--- The whole security model. `VITE_TELEMETRY_KEY` ships in the bundle, so "the
--- data is remote" protects nothing on its own: this policy is what stops
--- anyone reading tomorrow's puzzle. It grants select on this one table —
--- `events` and `games` stay insert-only and that must not change.
+-- The other half of the security model. `VITE_TELEMETRY_KEY` ships in the
+-- bundle, so "the data is remote" protects nothing on its own: this policy is
+-- what stops anyone reading tomorrow's puzzle. It grants select on this one
+-- table — `events` and `games` stay insert-only and that must not change.
 create policy "published only" on public.puzzles
   for select to anon
   using (publish_date <= (now() at time zone 'utc')::date);

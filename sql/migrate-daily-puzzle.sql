@@ -33,7 +33,9 @@ create table if not exists public.puzzles (
 
 alter table public.puzzles enable row level security;
 
-grant select on public.puzzles to anon;
+-- Column-scoped, in step with `migrate-puzzle-column-grants.sql`, so re-running
+-- this file cannot widen the grant back out.
+grant select (publish_date, param, mate_in) on public.puzzles to anon;
 
 -- This is what stops anyone reading tomorrow's
 -- puzzle, since the key ships in the bundle.
