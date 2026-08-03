@@ -225,9 +225,10 @@ let ttWarm = false;
 let ttEvalWasNnue: boolean | null = null;
 
 // The evaluator `searchLevel` will pick for this level, mirroring its own
-// derivation exactly: Zen and Fun default `useNnue` to `hasNnueWeights()`,
-// Easy passes `false` outright.
-const evalIsNnue = (level: AiLevel): boolean => level !== "easy" && hasNnueWeights();
+// derivation exactly: every level defaults `useNnue` to `hasNnueWeights()`.
+// Easy's random moves do not enter into it. They skip the search, so they
+// neither read nor write the table.
+const evalIsNnue = (_level: AiLevel): boolean => hasNnueWeights();
 
 // Whether a search at `level` may continue from the current table.
 // Two conditions, both necessary:

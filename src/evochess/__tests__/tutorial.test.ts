@@ -207,10 +207,14 @@ describe("isSuggestionAvailable", () => {
  * opening lessons survive real opposition, and divergence is always something
  * the tutorial can see coming rather than a crash.
  */
-describe("lessons against the Easy opponent", () => {
-  /** One Easy reply, exactly as the worker would produce it. */
+describe("lessons against a real opponent", () => {
+  /**
+   * One reply from `easy-pst`, the fixed-depth PST search, standing in for the
+   * tutorial's Easy opponent. Easy itself is timed and randomised, so it would
+   * make these runs neither reproducible nor cheap.
+   */
   function easyReply(game: EvoChessGame, seed: number) {
-    return searchLevel(game, "easy", seed).move;
+    return searchLevel(game, "easy-pst", seed).move;
   }
 
   const SEEDS = [1, 7, 12345];

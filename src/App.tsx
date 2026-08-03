@@ -91,7 +91,7 @@ function App() {
   const resumedRef = useRef(false);
   const [mode, setMode] = useState<Mode>("human-ai");
   const [aiColor, setAiColor] = useState<Color>("b");
-  const [level, setLevel] = useState<AiLevel>("zen");
+  const [level, setLevel] = useState<AiLevel>("easy");
   const [modal, setModal] = useState<PromoModalState | null>(null);
   const {
     shareModal,
@@ -1325,7 +1325,6 @@ function App() {
         gameOver={gameOver}
         status={status}
         aiThinking={aiThinking}
-        level={level}
         nnueReady={nnueReady}
         topColor={topColor}
         bottomColor={bottomColor}

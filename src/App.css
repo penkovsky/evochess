@@ -369,10 +369,6 @@
   }
 }
 
-.board-status-underline.easy {
-  background: #e6c229;
-}
-
 .board-status-underline.thinking {
   background: #c4c4c4;
 }

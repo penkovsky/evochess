@@ -551,8 +551,8 @@ function evoTurnToCandidate(t: EvoTurn): CandidateTurn {
 /**
  * `useNnue` defaults to "use the net if one is loaded", matching what the
  * chessjs backend's `evaluate()` does implicitly. Pass `false` to force PST
- * even with weights loaded — `searchLevel` does this to keep Easy on the
- * weaker evaluation. Note it currently gates the **bitboard** backend only
+ * even with weights loaded, which is what `searchLevel` passes for the
+ * test-only `easy-pst`. Note it currently gates the **bitboard** backend only
  * (`searchEvoTT`'s own opt-in); the chessjs path always follows the loaded
  * weights, so force-PST callers must also be on the bitboard backend.
  */
@@ -676,21 +676,38 @@ export function searchRootTimed(
 }
 
 /**
- * UI difficulty level. Easy is fixed-depth PST; Zen and Fun are both
- * time-budgeted NNUE with the identical search policy — the only difference
- * between them is that Fun ponders on the human's time and Zen doesn't
- * (that gating lives in App.tsx's `maybeStartPonder`, keyed on `level === "fun"`).
+ * UI difficulty level. All three run the same time-budgeted search. Easy also
+ * plays a shallow fixed-depth search some of the time (see `EASY_SHALLOW_P`
+ * below). Fun
+ * ponders on the human's time and Zen does not (that gating lives in App.tsx's
+ * `maybeStartPonder`, keyed on `level === "fun"`).
  */
 export type AiLevel = "easy" | "zen" | "fun";
 
-// Difficulty → search policy, the single source of truth for what each level
-// does. Every level runs on the bitboard backend, which supports both
-// evaluations. Easy is fixed-depth and passes `useNnue: false` so it stays on
-// PST even though the worker has weights loaded — that weaker evaluation is
-// the difficulty. Zen and Fun are time-budgeted and take the net when one is
-// loaded, falling back to PST when none is (e.g. weights are still fetching
-// in the worker).
-const LEVEL_DEPTH: Record<"easy", number> = { easy: 4 };
+/**
+ * What `searchLevel` accepts: the three UI levels plus `easy-pst`, the
+ * fixed-depth-4 PST search Easy used to be. Not offered in the UI. It exists
+ * so tests have a search that is deterministic and cheap, which the timed
+ * levels are not. Kept out of `AiLevel` so the types that enumerate the UI
+ * levels (scores, persistence, the level picker) stay three wide.
+ */
+export type SearchLevel = AiLevel | "easy-pst";
+
+const LEVEL_DEPTH: Record<"easy-pst", number> = { "easy-pst": 4 };
+
+// Easy's difficulty is not a weaker search, it is an inconsistent one. From
+// ply `EASY_EASING_FROM_PLY` on, each move is drawn from a mix:
+//
+//   `EASY_SHALLOW_P`  a depth-`EASY_SHALLOW_DEPTH` PST search
+//   the rest          the full Zen search
+//
+// That gives a beginner something to punish. A depth-2 search sees only the
+// immediate reply, so it walks into anything one move further out, and the
+// occasional real move keeps it from feeling broken. The first plies are
+// always played straight so the opening is not nonsense.
+export const EASY_EASING_FROM_PLY = 5;
+export const EASY_SHALLOW_P = 0.6;
+const EASY_SHALLOW_DEPTH = 2;
 
 // Zen/Fun time management. Two numbers, because one is not enough:
 //
@@ -723,12 +740,18 @@ const TIMED_TIME_MS = 400;
 const TIMED_HARD_MS = 1_200;
 const ABORT_SLACK_MS = 80;
 
+// Easy's own ceiling, in place of `TIMED_HARD_MS`. It gets the same 400ms
+// budget, so this only bounds the iteration already in flight when the budget
+// runs out. A weaker opponent that also answers quickly.
+const EASY_HARD_MS = 500;
+
 // Exposed so the latency regression test asserts against the real constants
 // rather than a copy that can drift out of step with them.
-export const __timingForTest = { TIMED_TIME_MS, TIMED_HARD_MS, ABORT_SLACK_MS };
+export const __timingForTest = { TIMED_TIME_MS, TIMED_HARD_MS, EASY_HARD_MS, ABORT_SLACK_MS };
 
-// Includes `depth`: the fixed depth for Easy, or the deepest completed
-// iteration for Zen/Fun's timed search — reported in the search-speed console log.
+// Includes `depth`: the fixed depth for Easy's shallow searches, otherwise the
+// deepest completed iteration of the timed search. Reported in the
+// search-speed console log.
 //
 // `opts.keepTT` (ponder-spec.md §4.1/§5.4) threads down to the bitboard TT to
 // suppress its generation bump, so a search can continue from a warm cache
@@ -749,30 +772,51 @@ export const __timingForTest = { TIMED_TIME_MS, TIMED_HARD_MS, ABORT_SLACK_MS };
 // diverge from the real search's evaluation.
 export function searchLevel(
   game: EvoChessGame,
-  level: AiLevel,
+  level: SearchLevel,
   seed: number,
   opts: { timeMs?: number; keepTT?: boolean; startDepth?: number } = {}
 ): RootSearch & { depth: number } {
   engineConfig.backend = "bitboard";
   const keepTT = opts.keepTT ?? false;
-  if (level === "zen" || level === "fun") {
-    // `useNnue` defaults to hasNnueWeights(), so these levels get the net when
-    // the worker has finished fetching it and PST until then.
-    // A ponder slice's budget *is* its ceiling — it has no move to return, so
-    // an unfinished iteration costs it nothing to discard. A real search
-    // budgets `TIMED_TIME_MS` and is capped at `TIMED_HARD_MS`, the gap being
-    // what lets an iteration already in flight finish and count.
-    const timeMs = opts.timeMs ?? TIMED_TIME_MS;
-    const ceiling = opts.timeMs !== undefined ? timeMs : TIMED_HARD_MS - ABORT_SLACK_MS;
-    armSearchDeadline(Date.now() + ceiling);
-    try {
-      return searchRootTimed(game, timeMs, seed, undefined, undefined, keepTT, opts.startDepth);
-    } finally {
-      disarmSearchDeadline();
+  if (level === "easy" && plyNumber(game) >= EASY_EASING_FROM_PLY) {
+    // Rolled from the same per-search `seed` the root tie-break uses. App.tsx
+    // draws a fresh one per move, so the rolls are independent.
+    const rng = mulberry32(seed);
+    const roll = rng();
+    if (roll < EASY_SHALLOW_P) {
+      const depth = EASY_SHALLOW_DEPTH;
+      const result = searchRoot(game, depth, seed, false, keepTT);
+      if (result.move) {
+        console.log(`[EvoChess AI] Easy depth-${depth} ${result.move.from}${result.move.to}`);
+      }
+      return { ...result, depth };
     }
   }
-  const depth = LEVEL_DEPTH[level];
-  return { ...searchRoot(game, depth, seed, false, keepTT), depth };
+  if (level === "easy-pst") {
+    const depth = LEVEL_DEPTH[level];
+    return { ...searchRoot(game, depth, seed, false, keepTT), depth };
+  }
+  // Every UI level searches the same way from here. `useNnue` defaults to
+  // hasNnueWeights(), so they get the net when the worker has finished
+  // fetching it and PST until then.
+  // A ponder slice's budget *is* its ceiling — it has no move to return, so
+  // an unfinished iteration costs it nothing to discard. A real search
+  // budgets `TIMED_TIME_MS` and is capped at `TIMED_HARD_MS`, the gap being
+  // what lets an iteration already in flight finish and count.
+  const timeMs = opts.timeMs ?? TIMED_TIME_MS;
+  const hardMs = level === "easy" ? EASY_HARD_MS : TIMED_HARD_MS;
+  const ceiling = opts.timeMs !== undefined ? timeMs : hardMs - ABORT_SLACK_MS;
+  armSearchDeadline(Date.now() + ceiling);
+  try {
+    return searchRootTimed(game, timeMs, seed, undefined, undefined, keepTT, opts.startDepth);
+  } finally {
+    disarmSearchDeadline();
+  }
+}
+
+/** Which ply the side to move is about to play. An untouched board is ply 1. */
+function plyNumber(game: EvoChessGame): number {
+  return game.moveLog.length + 1;
 }
 
 /**

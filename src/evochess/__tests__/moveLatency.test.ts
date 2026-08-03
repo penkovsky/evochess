@@ -24,16 +24,17 @@ function midgame(): EvoChessGame {
 }
 
 describe("timed-level move latency", () => {
-  it("returns inside the hard ceiling, with a move, at both timed levels", () => {
-    const { TIMED_HARD_MS } = __timingForTest;
-    for (const level of ["zen", "fun"] as const) {
+  it("returns inside the hard ceiling, with a move, at every timed level", () => {
+    const { TIMED_HARD_MS, EASY_HARD_MS } = __timingForTest;
+    for (const level of ["easy", "zen", "fun"] as const) {
+      const ceiling = level === "easy" ? EASY_HARD_MS : TIMED_HARD_MS;
       for (const game of [new EvoChessGame(), midgame()]) {
         const t0 = Date.now();
         const r = searchLevel(game, level, 1);
         const elapsed = Date.now() - t0;
         // Generous over the ceiling to absorb CI jitter while still catching
         // the regression this exists for — the pre-fix path took 3-4.5s.
-        expect(elapsed).toBeLessThan(TIMED_HARD_MS + 500);
+        expect(elapsed).toBeLessThan(ceiling + 500);
         expect(r.move).not.toBeNull();
       }
     }

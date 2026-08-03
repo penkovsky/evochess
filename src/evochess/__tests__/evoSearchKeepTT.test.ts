@@ -50,21 +50,21 @@ describe("keepTT (ponder-spec.md §4.1, milestone 2)", () => {
   it("ai.searchLevel: opts.keepTT threads all the way down, defaulting to false", () => {
     const seed = 11;
 
-    searchLevel(new EvoChessGame(), "easy", seed);
-    const withoutKeep = searchLevel(new EvoChessGame(), "easy", seed, { keepTT: false });
+    searchLevel(new EvoChessGame(), "easy-pst", seed);
+    const withoutKeep = searchLevel(new EvoChessGame(), "easy-pst", seed, { keepTT: false });
 
-    searchLevel(new EvoChessGame(), "easy", seed);
-    const withKeep = searchLevel(new EvoChessGame(), "easy", seed, { keepTT: true });
+    searchLevel(new EvoChessGame(), "easy-pst", seed);
+    const withKeep = searchLevel(new EvoChessGame(), "easy-pst", seed, { keepTT: true });
 
     expect(withKeep.nodes).toBeLessThan(withoutKeep.nodes);
     expect(withKeep.move).toEqual(withoutKeep.move);
 
     // Omitting opts entirely must match the explicit keepTT:false default —
     // no existing caller may change behaviour from this signature change.
-    searchLevel(new EvoChessGame(), "easy", seed);
-    const omitted = searchLevel(new EvoChessGame(), "easy", seed);
-    searchLevel(new EvoChessGame(), "easy", seed);
-    const explicitFalse = searchLevel(new EvoChessGame(), "easy", seed, { keepTT: false });
+    searchLevel(new EvoChessGame(), "easy-pst", seed);
+    const omitted = searchLevel(new EvoChessGame(), "easy-pst", seed);
+    searchLevel(new EvoChessGame(), "easy-pst", seed);
+    const explicitFalse = searchLevel(new EvoChessGame(), "easy-pst", seed, { keepTT: false });
     expect(omitted.nodes).toBe(explicitFalse.nodes);
   });
 });

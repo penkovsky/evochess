@@ -25,7 +25,6 @@ export function BoardArea({
   gameOver,
   status,
   aiThinking,
-  level,
   nnueReady,
   topColor,
   bottomColor,
@@ -70,7 +69,6 @@ export function BoardArea({
   gameOver: boolean;
   status: string;
   aiThinking: boolean;
-  level: AiLevel;
   nnueReady: boolean;
   topColor: Color;
   bottomColor: Color;
@@ -113,9 +111,7 @@ export function BoardArea({
       {mode === "human-human" && timerEnabled && <ClockDisplay clock={clock} turn={turn} gameOver={gameOver} />}
       <div className="board-status">{status}</div>
       <div
-        className={`board-status-underline${
-          aiThinking ? " thinking" : level === "easy" ? " easy" : nnueReady ? " nnue-ready" : ""
-        }`}
+        className={`board-status-underline${aiThinking ? " thinking" : nnueReady ? " nnue-ready" : ""}`}
       />
       <EvoStrip color={topColor} game={displayGame} rights={rightsFor[topColor]} active={displayGame.turn === topColor} />
       <div className="board-container" onTouchStart={onBoardTouchStart} onTouchEnd={onBoardTouchEnd}>
