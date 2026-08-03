@@ -130,8 +130,9 @@ function App() {
   // play: making a move dismisses it (see dismissInvite).
   const [showInvite, setShowInvite] = useState(false);
   // In human-vs-human, flip the board after every move so the side to move
-  // sees their pieces at the bottom. Can be disabled by the user.
-  const [autoFlip, setAutoFlip] = useState(true);
+  // sees their pieces at the bottom. Off by default: more intuitive
+  // behavior.
+  const [autoFlip, setAutoFlip] = useState(false);
   // Let the AI keep searching the current position in the background while
   // it's the human's turn, warming the TT for its next real search
   // (docs/ponder-spec.md). Only takes effect at Fun level; persisted like the

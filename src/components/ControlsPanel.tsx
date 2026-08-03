@@ -122,7 +122,7 @@ export function ControlsPanel({
             aria-pressed={autoFlip}
             onClick={() => setAutoFlip((v) => !v)}
           >
-            Flip board
+            Auto flip
           </button>
           <button
             type="button"
