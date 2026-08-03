@@ -1,17 +1,16 @@
 # Share links: URL-encoded positions and games
 
-Status: partly built. Position-only links work end to end: the codec is
-`src/evochess/shareLink.ts`, the inbound `?p=` load is in `App.tsx`, and the
-outbound share UI (§9 M3) is built. The history block (§4.4) and the extras
-block (§4.5) are still design only.
+Status: partly built. Position links and history links both work end to end:
+the codec is `src/evochess/shareLink.ts`, the inbound `?p=` load and the
+outbound Share button are in `App.tsx` and `useShareModal`. The extras block
+(§4.5) is still design only.
 
 This document is normative for the wire format. What ships today is a strict
-subset of it: the encoder writes flags `0x00`, so every payload carries a
-position and nothing else. The decoder refuses a payload claiming history,
-because the base position of a game link is not the position the sharer was
-pointing at, and skips an extras block it does not need, so a link written by a
-later encoder still opens. Both behaviours are §4.2's, and neither needs a
-version bump to grow into the full format.
+subset of it: the encoder writes flags `0x00` for a position and `0x01` for a
+position plus a move line, so no payload carries extras. The decoder skips an
+extras block it does not need, so a link written by a later encoder still
+opens. That behaviour is §4.2's, and it needs no version bump to grow into the
+full format.
 
 ## 1. Goal
 
@@ -295,12 +294,17 @@ Two kinds of link fall out of this, and both are legal in v1:
   points at an earlier ply. The recipient can scroll forward to see what
   actually happened.
 
-Until the move-browsing UI exists (§9, M4) the encoder only produces the first
-kind, and always writes `cursor = plyCount`. The decoder must nevertheless
-honour any cursor value in range from the start. That way adding scroll-through
-in M4 is an encoder and UI change only: no format change, no version bump, and
-links written by a later version still point where they were meant to. §8.1
-gives a canonical pair of each kind over the same game to keep that path honest.
+The app writes both kinds. The rule is the browsing cursor: `browsePly` when
+the sharer is browsing, `plyCount` when they are not. Sharing while browsing
+therefore sends the whole line with the cursor pointing back into it, not a
+line cut at the cursor, so the recipient can scroll forward. The decoder
+honours any cursor value in range, whoever wrote it. §8.1 gives a canonical
+pair of each kind over the same game to keep that path honest.
+
+A game whose start is unknown, or that has no moves yet, has no history to
+carry and is shared as a position alone. So is a line too long to fit in
+`MAX_SHARE_PARAM_CHARS`: the fallback is silent, since a long game still shares
+something useful, and the `too-long` message then means what it says.
 
 #### Playing from a cursor behind the end
 
@@ -395,11 +399,13 @@ chess.js rejects an invalid FEN outright. So the illegal-position path must
 construct the game with `chess.load(fen, { skipValidation: true })`, which
 chess.js ^1.4.0 supports.
 
-For history links, an illegal base position disables the engine as above and
-skips replay entirely, because the moves cannot be trusted to apply. A base
-that is legal but where some move fails to apply is a structural failure under
-§5.1. It means the link disagrees with this build's rules, which is exactly
-what the version byte exists to catch, so it is reported as a version mismatch.
+A history link is never merely unverified. Its base has to be legal before the
+line can be replayed at all, so an illegal base is a structural failure under
+§5.1 (`HISTORY_ILLEGAL_BASE`), and so is a base that is legal but where some
+move fails to apply (`HISTORY_REPLAY_FAILED`). The latter means the link
+disagrees with this build's rules, which is exactly what the version byte
+exists to catch, so it is reported as a version mismatch. Nothing about the
+lockout applies to history links.
 
 ## 6. Loading a shared link
 
@@ -424,8 +430,8 @@ what the version byte exists to catch, so it is reported as a version mismatch.
 |---|---|---|
 | Opening-ish position, 18 pieces, no history | 27 B | 36 chars |
 | Middlegame position, 14 pieces, no history | 25 B | 34 chars |
-| Canonical Link 1, 11 plies (§8.1) | 51 B | 68 chars |
-| Canonical Link 2, 12 plies (§8.1) | 53 B | 71 chars |
+| Canonical Link 1, 11 plies (§8.1) | 50 B | 67 chars |
+| Canonical Link 2, 12 plies (§8.1) | 52 B | 70 chars |
 | 80-ply game | 180 B | 240 chars |
 
 Add the length of the deployed origin and path to get the full URL. The
@@ -537,8 +543,8 @@ trigger an engine search.
 **Link 1. The recipient plays Black's 6th move.**
 
 - history: plies 1 to 11, `plyCount = 11`, `cursor = 11`
-- extras: `mode = human-ai`, `aiColor = white (0)`, so the human is Black;
-  `autoFlip = 1`, view side = black (1), `level = fun (2)`
+- extras: none. The block is still unbuilt (§9, M5), so the recipient's own
+  mode, level and orientation stand, and `aiColor` is derived from the cursor.
 - decoded position: `4k3/2Bppp1p/1pp5/b5p1/3PP3/2P5/PP3P1P/4K3 b - - 0 6`
 - `minorRights` 0/0, `rookRights` 0/0, `pawnMoveProgress` 1/2,
   `minorMoveProgress` 2/0, `rookCharges` empty, `rookLocked` empty,
@@ -553,8 +559,7 @@ loading it straight from a link is a cheap regression guard for it.
 **Link 2. The recipient plays White's 7th move, `Bb8=R#`.**
 
 - history: plies 1 to 12, `plyCount = 12`, `cursor = 12`
-- extras: `mode = human-ai`, `aiColor = black (1)`, so the human is White;
-  `autoFlip = 1`, view side = white (0), `level = fun (2)`
+- extras: none, as for Link 1
 - decoded position: `4k3/2Bppp1p/1pp5/b7/3PP1p1/2P5/PP3P1P/4K3 w - - 0 7`
 - `minorRights` 0/1, `rookRights` 0/0, `pawnMoveProgress` 1/0,
   `minorMoveProgress` 2/0, `rookCharges` empty, `rookLocked` empty,
@@ -572,17 +577,16 @@ requires and `game.ts:399-405` implements.
 Neither link contains ply 13. The mate is something the recipient plays, not
 something the payload spoils.
 
-#### The two links wanted later
+#### The two scroll-through links
 
-Deferred with M4, listed here so the format is not re-litigated then. Same
-game, full 13-ply history, cursor pointing mid-game: Link 3 with
+Same game, full 13-ply history, cursor pointing mid-game: Link 3 with
 `plyCount = 13, cursor = 11`, Link 4 with `plyCount = 13, cursor = 12`. Their
 decoded-at-cursor positions are identical to Link 1's and Link 2's above, which
 is the property worth asserting: a truncated link and a full link that share a
 cursor must produce the same board, the same rights, and the same counters.
 Only the ability to scroll forward differs.
 
-These need no format change and no version bump. The M4 work is the encoder
+They needed no format change and no version bump. The work was the encoder
 choosing a different `plyCount`/`cursor` pair, plus the browsing UI.
 
 #### Exact sizes
@@ -607,13 +611,13 @@ so no rights escapes.
 
 | Link | History bits | Extras | Bitstream | Bytes | Payload | `?p=` chars |
 |---|---|---|---|---|---|---|
-| 1 | 12 + 11 x 15 + 12 = 189 | 6 | 373 | 47, 3 pad bits | 51 B | 68 |
-| 2 | 12 + 12 x 15 + 12 = 204 | 6 | 388 | 49, 4 pad bits | 53 B | 71 |
+| 1 | 12 + 11 x 15 + 12 = 189 | 0 | 367 | 46, 1 pad bit | 50 B | 67 |
+| 2 | 12 + 12 x 15 + 12 = 204 | 0 | 382 | 48, 2 pad bits | 52 B | 70 |
 
 Payload bytes are the bitstream bytes plus the version byte, the flags byte,
 and the two CRC bytes. Every ply here is 15 bits, since no ply uses tag 6.
-Flags byte is `0x03` for both links: history present and extras present.
-base64url character counts are `ceil(bytes * 4 / 3)` with padding stripped.
+Flags byte is `0x01` for both links: history present, extras absent. base64url
+character counts are `ceil(bytes * 4 / 3)` with padding stripped.
 
 The encoded payloads themselves are deliberately not written into this document.
 They are generated by the M1 encoder and checked into the test file as fixtures,
@@ -630,16 +634,20 @@ copy-paste step.
   load of §6, the unverified-position banner, and the engine lockout. Done when
   opening §8.1's Link 2 lets a human play `Bb8=R#` and see mate, and opening
   Link 1 offers `g4`, `g4=N`, and `g4=B`.
-- **M3, outbound UI.** Shipped: a share button (mobile bar and desktop panel)
-  that encodes the position on screen, using the Web Share API on mobile with
-  a clipboard-copy modal as the fallback and the desktop default (see
-  `docs/share-button-note.md`). Still deferred: sharing the game (base plus
-  history) rather than the position alone, and the extras block (§4.5). The
-  link this button makes is position-only, same as M1/M2.
-- **M4, move browsing and ply cursor.** Deferred. Scrolling back through the
-  move log, and a "share the position I'm looking at" action that writes that
-  ply into the cursor field. The format reserves the cursor now, so M1 and M2
-  links stay valid.
+- **M3, outbound UI.** Shipped: a share button (mobile bar and desktop panel),
+  using the Web Share API on mobile with a clipboard-copy modal as the fallback
+  and the desktop default (see `docs/share-button-note.md`).
+- **M4, move browsing and ply cursor.** Shipped. The board steps back and forth
+  through the game, the Share button writes the ply on screen into the cursor
+  field, and the whole line goes with it. A resumed game replays its own move
+  tokens on load, so browsing and sharing-with-history survive a reload.
+  Position-only remains the silent fallback when the start is unknown, when no
+  move has been played, or when the line will not fit.
+- **M5, extras block (§4.5).** Deferred. Orientation, mode and level are still
+  not carried, so the recipient's own preferences win and `aiColor` is derived
+  positionally from the cursor. Flags stays `0x01`, and the decoder already
+  skips an extras block it does not need, so an encoder that later writes one
+  will not break today's links.
 
 ## 10. Deferred, and not doing
 

@@ -103,19 +103,57 @@ export function parseMoveToken(token: string): PlyRecord | null {
  *
  * Throws EvoChessError on a token that will not apply. Callers decide what
  * that means.
+ *
+ * The line is played on one game, and each earlier ply is a copy taken before
+ * its move, which is how the app plays a game live: `gameRef` is mutated in
+ * place and `historyRef` holds copies. It matters because `copy()` rebuilds
+ * chess.js from a FEN and a FEN has no move history. Copying forward instead,
+ * a ply at a time, would leave the live position with one chess.js move behind
+ * it, and threefold repetition counts that history.
  */
 export function replayLine(base: SerializedGame, tokens: string[]): EvoChessGame[] {
-  const start = deserializeGame(base);
-  start.base = base;
-  const games: EvoChessGame[] = [start];
+  // Copied, not used as deserialized: `deserializeGame` hands the game the
+  // save's own `moveLog` and `moveTokens` arrays, and the line is played on
+  // this game rather than on a copy of it. Without this, replaying writes the
+  // moves into `base` itself, and a base that claims moves is a link claiming
+  // a history the game never had. `copy()` loses nothing here: there is no
+  // chess.js move history at ply 0 to lose.
+  const game = deserializeGame(base).copy();
+  game.base = base;
+  const games: EvoChessGame[] = [];
   for (const token of tokens) {
     const record = parseMoveToken(token);
     if (!record) throw new EvoChessError(`Malformed move token: ${token}`);
-    const next = games[games.length - 1].copy();
-    next.applyMove(record.from, record.to, record.options);
-    games.push(next);
+    games.push(game.copy());
+    game.applyMove(record.from, record.to, record.options);
   }
+  games.push(game);
   return games;
+}
+
+/**
+ * Ply ceiling on the startup replay. Measured at ~42ms for 321 plies under
+ * jsdom on a desktop, so a few hundred milliseconds on a slow phone. Above the
+ * cap a resumed game simply comes back without its history.
+ */
+export const MAX_REPLAY_PLIES = 400;
+
+/**
+ * Rebuilds the per-ply snapshots of a game restored from a save, so browsing
+ * and sharing-with-history survive a reload. Returns `tokens.length + 1` games
+ * as `replayLine` does, or null when the game cannot or should not be replayed:
+ * no known base, no moves, over `MAX_REPLAY_PLIES`, or a token that no longer
+ * applies. Never throws — it runs on the startup path.
+ */
+export function rebuildHistory(game: EvoChessGame): EvoChessGame[] | null {
+  const base = game.base;
+  const tokens = game.moveTokens;
+  if (!base || tokens.length === 0 || tokens.length > MAX_REPLAY_PLIES) return null;
+  try {
+    return replayLine(base, tokens);
+  } catch {
+    return null;
+  }
 }
 
 /**

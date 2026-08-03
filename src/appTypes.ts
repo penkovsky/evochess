@@ -40,6 +40,10 @@ export interface ShareModalState {
   moveLog: string[];
   /** Whether that log's first ply is Black's, as on a shared Black-to-move position. */
   blackFirst: boolean;
+  /** Whether a history link is available at all, i.e. whether to offer the choice. */
+  hasHistory: boolean;
+  /** Whether the link currently carries the line as well as the position. */
+  withHistory: boolean;
 }
 
 /** Why a restart is being proposed. Only the dialog's wording depends on it. */

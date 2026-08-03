@@ -1012,6 +1012,20 @@
   font-size: 13px;
 }
 
+/* Thumb-sized row, not a bare checkbox. */
+.share-history {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-size: 14px;
+}
+
+.share-history input {
+  width: 20px;
+  height: 20px;
+}
+
 .modal .share-section button {
   min-height: 44px;
   border: 1px solid var(--border);

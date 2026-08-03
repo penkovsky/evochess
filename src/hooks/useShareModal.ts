@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import type { EvoChessGame } from "../evochess/game";
-import { encodeShareLink, MAX_SHARE_PARAM_CHARS } from "../evochess/shareLink";
+import { encodeShareLink, encodeShareLinkWithHistory, MAX_SHARE_PARAM_CHARS } from "../evochess/shareLink";
+import { deserializeGame } from "../evochess/serialize";
 import { formatMoveLog } from "../evochess/moveLogText";
 import type { ShareModalState, ShareProblem } from "../appTypes";
+
+/** The checkbox's last position, kept for the session only. */
+let lastWithHistory = true;
 
 export interface UseShareModal {
   shareModal: ShareModalState | null;
@@ -10,6 +14,7 @@ export interface UseShareModal {
   handleShare: (e: ReactMouseEvent<HTMLButtonElement>, useShareSheet: boolean) => Promise<void>;
   copyShareUrl: (url: string) => Promise<void>;
   copyMoveLog: (moveLog: string[], blackFirst: boolean) => Promise<void>;
+  setShareWithHistory: (on: boolean) => void;
   shareViaSheet: (url: string) => Promise<void>;
   closeShareModal: () => void;
   shareCopyBtnRef: RefObject<HTMLButtonElement | null>;
@@ -20,20 +25,46 @@ export interface UseShareModal {
  * The share-a-position dialog: building the link, the clipboard, and the
  * dialog's own focus and Escape handling. Reads the live game through
  * `gameRef` at click time, so it never holds a stale position.
+ *
+ * `browsePlyRef` is the history-browsing cursor, or null when the player is
+ * live. A ref rather than the value, for the same reason `gameRef` is one: the
+ * AI can move while the dialog is open, and because `useHistoryBrowse` is
+ * blocked by this hook's own `shareModal` and so cannot be called before it.
  */
-export function useShareModal(gameRef: RefObject<EvoChessGame>): UseShareModal {
+export function useShareModal(
+  gameRef: RefObject<EvoChessGame>,
+  browsePlyRef: RefObject<number | null>
+): UseShareModal {
   const [shareModal, setShareModal] = useState<ShareModalState | null>(null);
   const shareLastFocusRef = useRef<HTMLElement | null>(null);
   const shareCopyBtnRef = useRef<HTMLButtonElement>(null);
   const shareCloseBtnRef = useRef<HTMLButtonElement>(null);
 
+  // A link carrying the whole line, or null when this game cannot produce one:
+  // no known base (a legacy save, or a game continued from a position-only
+  // link), no moves yet, or a line too long to fit. Every one of those falls
+  // back to the position-only link silently, which is what the app did before
+  // history links existed.
+  function buildHistoryParam(): string | null {
+    const game = gameRef.current;
+    if (!game.base || game.moveTokens.length === 0) return null;
+    // Sharing while browsing sends the whole line with the cursor pointing back
+    // into it, not a line cut at the cursor: the recipient can scroll forward.
+    const cursor = Math.min(Math.max(browsePlyRef.current ?? game.moveTokens.length, 0), game.moveTokens.length);
+    try {
+      return encodeShareLinkWithHistory(deserializeGame(game.base), game.moveTokens, cursor);
+    } catch {
+      return null;
+    }
+  }
+
   // Never throws. `encodeShareLink` does, for a position the format cannot
   // represent, and the caller is an async click handler: an escaping throw
   // becomes an unhandled rejection, so the button would silently do nothing.
-  function buildShareUrl(): { url: string; problem: ShareProblem } {
-    let param: string;
+  function buildShareUrl(withHistory: boolean): { url: string; problem: ShareProblem } {
+    let param: string | null = withHistory ? buildHistoryParam() : null;
     try {
-      param = encodeShareLink(gameRef.current);
+      param ??= encodeShareLink(gameRef.current);
     } catch {
       return { url: "", problem: "unencodable" };
     }
@@ -86,15 +117,26 @@ export function useShareModal(gameRef: RefObject<EvoChessGame>): UseShareModal {
     shareLastFocusRef.current = e.currentTarget;
     const moveLog = [...gameRef.current.moveLog];
     const blackFirst = gameRef.current.logStartsWithBlack;
-    const { url, problem } = buildShareUrl();
+    const hasHistory = buildHistoryParam() !== null;
+    const withHistory = hasHistory && lastWithHistory;
+    const { url, problem } = buildShareUrl(withHistory);
     const canShareSheet = useShareSheet && !!navigator.share;
-    const base = { canShareSheet, moveLog, blackFirst, copiedAt: null, copiedKind: null };
+    const base = { canShareSheet, moveLog, blackFirst, hasHistory, withHistory, copiedAt: null, copiedKind: null };
     if (problem) {
       setShareModal({ ...base, url, problem, clipboardOk: false });
       return;
     }
     setShareModal({ ...base, url, problem: null, clipboardOk: true });
     copyShareUrl(url);
+  }
+
+  // Toggling rebuilds the link and re-copies it, so the clipboard never holds
+  // the version the checkbox no longer shows.
+  function setShareWithHistory(on: boolean) {
+    lastWithHistory = on;
+    const { url, problem } = buildShareUrl(on);
+    setShareModal((m) => (m ? { ...m, url, problem, withHistory: on, clipboardOk: !problem } : m));
+    if (!problem) copyShareUrl(url);
   }
 
   function closeShareModal() {
@@ -133,6 +175,7 @@ export function useShareModal(gameRef: RefObject<EvoChessGame>): UseShareModal {
     handleShare,
     copyShareUrl,
     copyMoveLog,
+    setShareWithHistory,
     shareViaSheet,
     closeShareModal,
     shareCopyBtnRef,

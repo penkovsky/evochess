@@ -11,6 +11,7 @@ export function ShareModal({
   closeShareModal,
   copyShareUrl,
   copyMoveLog,
+  setShareWithHistory,
   shareViaSheet,
   shareCopyBtnRef,
   shareCloseBtnRef,
@@ -19,6 +20,7 @@ export function ShareModal({
   closeShareModal: () => void;
   copyShareUrl: (url: string) => void;
   copyMoveLog: (moveLog: string[], blackFirst: boolean) => void;
+  setShareWithHistory: (on: boolean) => void;
   shareViaSheet: (url: string) => void;
   shareCopyBtnRef: RefObject<HTMLButtonElement | null>;
   shareCloseBtnRef: RefObject<HTMLButtonElement | null>;
@@ -42,6 +44,16 @@ export function ShareModal({
 
         <section className="share-section">
           <h3>Position</h3>
+          {shareModal.hasHistory && (
+            <label className="share-history">
+              <input
+                type="checkbox"
+                checked={shareModal.withHistory}
+                onChange={(e) => setShareWithHistory(e.target.checked)}
+              />
+              Full history
+            </label>
+          )}
           {shareModal.problem ? (
             <p className="share-note">
               {shareModal.problem === "too-long"

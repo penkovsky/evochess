@@ -54,12 +54,21 @@ export function useGameOutcome({
   // takeback reassign gameRef.current, giving a fresh instance to compare).
   const scoredGameRef = useRef<EvoChessGame | null>(null);
 
+  // The game instance the fireworks effect below has already seen. A game that
+  // is already over the first time it appears ended somewhere else: a shared
+  // line that ends in mate, or a save of a game won before the reload. The
+  // fireworks belong to the move that delivers mate, not to arriving at it.
+  const seenGameRef = useRef<EvoChessGame | null>(null);
+
   // Fires the fireworks once when the human checkmates the AI. Keyed on the
   // EvoChessGame instance so a new game / takeback (which reassigns
   // gameRef.current) resets the trigger even if the win condition repeats.
   useEffect(() => {
-    if (!loaded) return;
     const game = gameRef.current;
+    const firstSight = seenGameRef.current !== game;
+    seenGameRef.current = game;
+    if (!loaded) return;
+    if (firstSight && game.isGameOver()) return;
     if (mode === "human-ai" && game.isGameOver() && game.chess.isCheckmate() && game.turn === aiColor) {
       setShowFireworks(true);
     }

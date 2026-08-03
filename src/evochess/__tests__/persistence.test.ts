@@ -110,4 +110,26 @@ describe("persistence of the evolved en passant", () => {
     expect(meta.takebacks).toBe(3);
     expect(meta.uid).toBe("test-uid");
   });
+
+  // `base` is what makes a resumed game shareable with its history, and what
+  // the startup replay rebuilds the browsing snapshots from.
+  it("round-trips the base position", () => {
+    const game = new EvoChessGame();
+    game.applyMove("e2" as Square, "e4" as Square);
+    save(game);
+    const restored = loadGame()!.game;
+    expect(restored.base).toEqual(game.base);
+    expect(restored.base!.fen).toBe(START_FEN);
+  });
+
+  it("leaves the base undefined for a save written without one", () => {
+    const game = new EvoChessGame();
+    save(game);
+    const raw = JSON.parse(store.get("evochess-save-v3")!);
+    delete raw.base;
+    store.set("evochess-save-v3", JSON.stringify(raw));
+    // Not the standard start: an unknown start must stay unknown, or a share
+    // link would claim a history the game never had.
+    expect(loadGame()!.game.base).toBeUndefined();
+  });
 });

@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Color, Square } from "chess.js";
-import { EvoChessGame, EvoChessError, ROOK_CHARGES, START_FEN, type ApplyMoveOptions } from "./evochess/game";
+import {
+  EvoChessGame,
+  EvoChessError,
+  ROOK_CHARGES,
+  START_FEN,
+  rebuildHistory,
+  type ApplyMoveOptions,
+} from "./evochess/game";
 import type { AiLevel } from "./evochess/ai";
 import { decodeShareLink, readShareParam } from "./evochess/shareLink";
 import {
@@ -93,6 +100,10 @@ function App() {
   const [aiColor, setAiColor] = useState<Color>("b");
   const [level, setLevel] = useState<AiLevel>("easy");
   const [modal, setModal] = useState<PromoModalState | null>(null);
+  // `browsePly` in a ref, so the share dialog can read the cursor at click
+  // time. `useHistoryBrowse` cannot be called above `useShareModal`, since it
+  // takes `shareModal` as part of `blocked`. Kept in sync just below it.
+  const browsePlyRef = useRef<number | null>(null);
   const {
     shareModal,
     handleShare,
@@ -100,9 +111,10 @@ function App() {
     copyMoveLog,
     shareViaSheet,
     closeShareModal,
+    setShareWithHistory,
     shareCopyBtnRef,
     shareCloseBtnRef,
-  } = useShareModal(gameRef);
+  } = useShareModal(gameRef, browsePlyRef);
   // The action waiting on confirmation, or null. Both of these throw away
   // moves, and neither can be undone. `play-here` carries its ply rather than
   // reading `browsePly` at the end, so the dialog commits to the position the
@@ -166,6 +178,7 @@ function App() {
     setSelected,
     blocked: !!modal || !!shareModal || !!widget || !!confirmAction,
   });
+  browsePlyRef.current = browsePly;
   // -- shared positions (?p=…), docs/share-links-spec.md ---------------
   // A shared position is held in memory only until the recipient makes a move:
   // their own autosave stays intact and restorable until then, so
@@ -291,6 +304,25 @@ function App() {
   }
 
   /**
+   * Puts the browsing history of a resumed game back, by replaying its move
+   * tokens onto its base, and returns the game to put on the board. That is the
+   * last snapshot rather than the deserialized save, so chess.js's own move
+   * history comes back with it and threefold repetition works again on a
+   * resumed game. A save that will not replay comes back with no history, which
+   * is what every resumed game did before this.
+   */
+  function resumeHistory(saved: LoadedGame): EvoChessGame {
+    const snapshots = rebuildHistory(saved.game);
+    historyRef.current = snapshots ? snapshots.slice(0, -1) : [];
+    // One clock reading per rebuilt ply, all of them the save's own. Per-ply
+    // readings were never persisted, so that is the only reading there is, but
+    // the array has to be as long as `historyRef`: `playFromHere` indexes it by
+    // ply, and a short one would hand an early ply a reading from a later move.
+    clockHistoryRef.current = historyRef.current.map(() => ({ ...saved.clock }));
+    return snapshots ? snapshots[snapshots.length - 1] : saved.game;
+  }
+
+  /**
    * Puts the recipient's own game back, discarding the shared one. Reads the
    * parked slot once the shared game has gone live, and the in-memory copy
    * before that, when nothing has been parked because nothing was at risk.
@@ -305,12 +337,10 @@ function App() {
     // described has just left.
     puzzleRef.current = null;
     setPuzzleResult(null);
-    gameRef.current = saved.game;
+    gameRef.current = resumeHistory(saved);
     gameMetaRef.current = resumeMeta(saved);
     resumedRef.current = true;
-    if (saved.game.isGameOver()) scoredGameRef.current = saved.game;
-    historyRef.current = [];
-    clockHistoryRef.current = [];
+    if (gameRef.current.isGameOver()) scoredGameRef.current = gameRef.current;
     // Usually false, since the game being restored is the recipient's own. Not
     // always: open a second link after playing on a first, and the game parked
     // for this button is itself from an unverified position. The lockout follows
@@ -548,7 +578,7 @@ function App() {
       }
       resetPonder(); // a position from outside this session (ponder-spec.md §5.3)
     } else if (saved) {
-      gameRef.current = saved.game;
+      gameRef.current = resumeHistory(saved);
       gameMetaRef.current = resumeMeta(saved);
       setFromShared(saved.fromShared);
       // The lockout has to come back with the position. `engineLockedRef` is
@@ -567,7 +597,7 @@ function App() {
       // reloaded (the scores effect runs the moment isGameOver() first goes
       // true). Mark it pre-scored so that effect doesn't record it again on
       // every subsequent reload of the same finished game.
-      if (saved.game.isGameOver()) scoredGameRef.current = saved.game;
+      if (gameRef.current.isGameOver()) scoredGameRef.current = gameRef.current;
       resetPonder(); // loading a save (ponder-spec.md §5.3, §6.2)
     } else if (!daily && !loadProgress().seen) {
       // Deliberately not offered on top of a shared board (spec §11), nor over
@@ -1493,6 +1523,7 @@ function App() {
           closeShareModal={closeShareModal}
           copyShareUrl={copyShareUrl}
           copyMoveLog={copyMoveLog}
+          setShareWithHistory={setShareWithHistory}
           shareViaSheet={shareViaSheet}
           shareCopyBtnRef={shareCopyBtnRef}
           shareCloseBtnRef={shareCloseBtnRef}
