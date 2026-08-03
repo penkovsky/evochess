@@ -754,6 +754,21 @@
   color: white;
 }
 
+/* A puzzle fixes the setup, so the pickers read as locked. */
+.mode-picker button:disabled,
+.color-picker button:disabled,
+.level-picker button:disabled {
+  cursor: default;
+  color: #999;
+}
+
+.mode-picker button.active:disabled,
+.color-picker button.active:disabled,
+.level-picker button.active:disabled {
+  color: white;
+  opacity: 0.7;
+}
+
 .mode-picker button.active {
   background: #7b3ff2;
   border-color: #7b3ff2;

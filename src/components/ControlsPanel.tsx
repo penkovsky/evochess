@@ -1,12 +1,13 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { Color } from "chess.js";
 import type { AiLevel } from "../evochess/ai";
-import type { Mode, RestartReason } from "../appTypes";
+import { PUZZLE_LEVEL, type Mode, type RestartReason } from "../appTypes";
 
 export function ControlsPanel({
   mode,
   aiColor,
   level,
+  puzzleActive,
   unverified,
   autoFlip,
   timerEnabled,
@@ -25,6 +26,8 @@ export function ControlsPanel({
   mode: Mode;
   aiColor: Color;
   level: AiLevel;
+  /** A puzzle fixes the whole setup, so the pickers show it and are locked. */
+  puzzleActive: boolean;
   unverified: boolean;
   autoFlip: boolean;
   timerEnabled: boolean;
@@ -56,7 +59,7 @@ export function ControlsPanel({
             className={mode === opt.value ? "active" : ""}
             // The engine lockout is what makes rendering an impossible position
             // safe at all, so vs-AI is not reachable from one (spec §5.2).
-            disabled={unverified && opt.value === "human-ai"}
+            disabled={puzzleActive || (unverified && opt.value === "human-ai")}
             onClick={() => {
               const newMode = opt.value;
               if (newMode === mode) return;
@@ -80,6 +83,7 @@ export function ControlsPanel({
                 key={opt.value}
                 type="button"
                 className={aiColor === opt.value ? "active" : ""}
+                disabled={puzzleActive}
                 onClick={() => {
                   const newAiColor = opt.value;
                   if (newAiColor === aiColor) return;
@@ -101,7 +105,8 @@ export function ControlsPanel({
               <button
                 key={opt.value}
                 type="button"
-                className={level === opt.value ? "active" : ""}
+                className={(puzzleActive ? PUZZLE_LEVEL : level) === opt.value ? "active" : ""}
+                disabled={puzzleActive}
                 onClick={() => {
                   const newLevel = opt.value;
                   if (newLevel === level) return;

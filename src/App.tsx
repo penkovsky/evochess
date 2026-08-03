@@ -49,6 +49,7 @@ import { Fireworks } from "./Fireworks";
 import { Tutorial } from "./Tutorial";
 import { PuzzleIcon, ShareIcon } from "./Icons";
 import {
+  PUZZLE_LEVEL,
   type ConfirmState,
   type Mode,
   type PromoModalState,
@@ -96,9 +97,12 @@ function App() {
   // Whether the board holds a game restored from a save rather than one begun
   // in this session. Read by `first_move`.
   const resumedRef = useRef(false);
-  const [mode, setMode] = useState<Mode>("human-ai");
-  const [aiColor, setAiColor] = useState<Color>("b");
-  const [level, setLevel] = useState<AiLevel>("easy");
+  // The player's own setup: what the pickers hold and what the autosave
+  // carries. The position on the board can override it (see `mode`, `aiColor`
+  // and `level` below), and never writes into it.
+  const [setupMode, setSetupMode] = useState<Mode>("human-ai");
+  const [setupAiColor, setSetupAiColor] = useState<Color>("b");
+  const [setupLevel, setSetupLevel] = useState<AiLevel>("easy");
   const [modal, setModal] = useState<PromoModalState | null>(null);
   // `browsePly` in a ref, so the share dialog can read the cursor at click
   // time. `useHistoryBrowse` cannot be called above `useShareModal`, since it
@@ -138,18 +142,6 @@ function App() {
   // (docs/ponder-spec.md). Only takes effect at Fun level; persisted like the
   // other settings, default on.
   const [ponderEnabled, setPonderEnabled] = useState(true);
-  // Human-vs-human clock. Off by default; the promotion prompt pauses it.
-  const {
-    clockRef,
-    clockHistoryRef,
-    timerEnabled,
-    setTimerEnabled,
-    timerMinutes,
-    setTimerMinutes,
-    timeUp,
-    setTimeUp,
-    resetClock,
-  } = useGameClock({ gameRef, loaded, mode, paused: !!modal, rerender });
   const boardWrapRef = useRef<HTMLDivElement>(null);
   // Rules summary and move log share panel space, so only one is expanded
   // at a time — opening one collapses the other.
@@ -214,6 +206,27 @@ function App() {
   // Nothing persists — a reload resumes the puzzle as an ordinary shared game
   // and it stops counting as a puzzle.
   const puzzleRef = useRef<PuzzleState | null>(null);
+  // What the board is actually played at. A puzzle is a mate to find against
+  // the engine, and an unverified position has no engine at all (spec §5.2):
+  // both belong to the position, so they are derived here rather than written
+  // into the setup, and leaving the position leaves nothing behind to undo.
+  const puzzleOnBoard = puzzleRef.current;
+  const play: { mode: Mode; aiColor: Color; level: AiLevel } = puzzleOnBoard
+    ? { mode: "human-ai", aiColor: puzzleOnBoard.aiColor, level: PUZZLE_LEVEL }
+    : { mode: unverified ? "human-human" : setupMode, aiColor: setupAiColor, level: setupLevel };
+  const { mode, aiColor, level } = play;
+  // Human-vs-human clock. Off by default; the promotion prompt pauses it.
+  const {
+    clockRef,
+    clockHistoryRef,
+    timerEnabled,
+    setTimerEnabled,
+    timerMinutes,
+    setTimerMinutes,
+    timeUp,
+    setTimeUp,
+    resetClock,
+  } = useGameClock({ gameRef, loaded, mode, paused: !!modal, rerender });
   // The puzzle the entry point offers, from the cache on the first paint and
   // from the response once it lands. Null hides the entry point entirely: a
   // player who has never loaded a puzzle and is offline sees the app exactly as
@@ -351,9 +364,9 @@ function App() {
     setUnverified(lockedOut);
     setLinkNotice(null);
     setFromShared(saved.fromShared);
-    setMode(lockedOut ? "human-human" : saved.mode);
-    setAiColor(saved.aiColor);
-    setLevel(saved.level);
+    setSetupMode(saved.mode);
+    setSetupAiColor(saved.aiColor);
+    setSetupLevel(saved.level);
     clockRef.current = saved.clock;
     setModal(null);
     setSelected(null);
@@ -406,17 +419,6 @@ function App() {
     resumedRef.current = false;
     setSharedPending(true);
     setFromShared(true);
-    // As for a link: the solver always moves first, which is also what keeps
-    // loading the puzzle from triggering an engine search.
-    setAiColor(shared.game.turn === "w" ? "b" : "w");
-    // A link leaves mode and level as the recipient's own, since the sharer
-    // said nothing about them. A puzzle is not like that: it is a mate to find
-    // against the engine. Zen and Fun are the same search, and Zen is the one
-    // whose name promises nothing about the reply. Nothing is stashed to undo
-    // this — `savedGameRef` holds the player's own game, and "back to my game"
-    // already restores its mode and level from there.
-    setMode("human-ai");
-    setLevel("zen");
     // The lockout belongs to the position, not to the session, and this one has
     // just passed the same legality check a link gets. Left set, it would both
     // silence the engine and write `unverified` into the save for a position
@@ -429,6 +431,10 @@ function App() {
       date: puzzle.date,
       mateIn: puzzle.mateIn,
       startPly: shared.game.moveLog.length,
+      // The solver always moves first, which is also what keeps loading the
+      // puzzle from triggering an engine search. Mode and level come with it,
+      // off `puzzleRef`.
+      aiColor: shared.game.turn === "w" ? "b" : "w",
       resolved: false,
     };
     // A fresh attempt, so the next outcome fires again and the banner from the
@@ -538,9 +544,9 @@ function App() {
       // Applied whichever game wins the board below: a position-only link
       // carries no extras block (share-links-spec.md §4.5), so orientation, mode
       // and level are the recipient's own.
-      setMode(saved.mode);
-      setAiColor(saved.aiColor);
-      setLevel(saved.level);
+      setSetupMode(saved.mode);
+      setSetupAiColor(saved.aiColor);
+      setSetupLevel(saved.level);
       setAutoFlip(saved.autoFlip);
       setTimerEnabled(saved.timerEnabled);
       setTimerMinutes(saved.timerMinutes);
@@ -565,7 +571,7 @@ function App() {
       //
       // Read at the cursor
       const atCursor = shared.snapshots?.[shared.cursor ?? 0] ?? shared.game;
-      setAiColor(atCursor.turn === "w" ? "b" : "w");
+      setSetupAiColor(atCursor.turn === "w" ? "b" : "w");
       // Whatever time was left on the recipient's own clock has nothing to do
       // with this position.
       resetClock(saved?.timerMinutes ?? 10);
@@ -575,7 +581,6 @@ function App() {
         console.warn(`evochess: shared link failed legality check [${shared.reasons.join(", ")}]`);
         engineLockedRef.current = true;
         setUnverified(true);
-        setMode("human-human");
       }
       resetPonder(); // a position from outside this session (ponder-spec.md §5.3)
     } else if (saved) {
@@ -586,13 +591,12 @@ function App() {
       // memory-only, and three of the legality failures (over nine pieces per
       // side, side-not-to-move-in-check, en passant incoherence) produce FENs
       // chess.js loads happily, so a reload would otherwise hand the search a
-      // board it must never see. `setMode` overrides the one set above: a saved
-      // `human-ai` here can only come from a save edited by hand.
+      // board it must never see. The save carries the player's own setup, so
+      // `unverified` is what puts the board back in human-vs-human.
       if (saved.unverified) {
         console.warn("evochess: resuming a game played from an unverified shared position");
         engineLockedRef.current = true;
         setUnverified(true);
-        setMode("human-human");
       }
       // A finished game was already scored live before the page was saved/
       // reloaded (the scores effect runs the moment isGameOver() first goes
@@ -691,9 +695,9 @@ function App() {
     accruePlyTime(meta, gameRef.current.moveLog.length);
     saveGame({
       game: gameRef.current,
-      mode,
-      aiColor,
-      level,
+      mode: setupMode,
+      aiColor: setupAiColor,
+      level: setupLevel,
       autoFlip,
       timerEnabled,
       timerMinutes,
@@ -1181,9 +1185,9 @@ function App() {
     setPuzzleResult(null);
     clearParkedGame();
     setParked(false);
-    setMode(newMode);
-    setAiColor(newAiColor);
-    setLevel(newLevel);
+    setSetupMode(newMode);
+    setSetupAiColor(newAiColor);
+    setSetupLevel(newLevel);
     setModal(null);
     setSelected(null);
     setTimeUp(null);
@@ -1375,11 +1379,11 @@ function App() {
         scoreOverlayReady={scoreOverlayReady}
         levelLabel={levelLabel}
         currentRecord={currentRecord}
-        onPlayAgain={() => startNewGame(mode, aiColor, level)}
+        onPlayAgain={() => startNewGame(setupMode, setupAiColor, setupLevel)}
         browsing={browsing}
         browsePly={browsePly}
         totalPlies={totalPlies}
-        onRestart={() => restart("new-game", { mode, aiColor, level })}
+        onRestart={() => restart("new-game", { mode: setupMode, aiColor: setupAiColor, level: setupLevel })}
         onTakeback={takeback}
         onBrowseLive={browseLive}
         browsePrevHoldable={holdable(browseHome, browsePrev)}
@@ -1430,15 +1434,16 @@ function App() {
           mode={mode}
           aiColor={aiColor}
           level={level}
+          puzzleActive={puzzleRef.current !== null}
           unverified={unverified}
           autoFlip={autoFlip}
           timerEnabled={timerEnabled}
           timerMinutes={timerMinutes}
           hasHistory={historyRef.current.length > 0}
           onRestart={restart}
-          setMode={setMode}
-          setAiColor={setAiColor}
-          setLevel={setLevel}
+          setMode={setSetupMode}
+          setAiColor={setSetupAiColor}
+          setLevel={setSetupLevel}
           setAutoFlip={setAutoFlip}
           setTimerEnabled={setTimerEnabled}
           setTimerMinutes={setTimerMinutes}
@@ -1489,15 +1494,16 @@ function App() {
                 mode={mode}
                 aiColor={aiColor}
                 level={level}
+                puzzleActive={puzzleRef.current !== null}
                 unverified={unverified}
                 autoFlip={autoFlip}
                 timerEnabled={timerEnabled}
                 timerMinutes={timerMinutes}
                 hasHistory={historyRef.current.length > 0}
                 onRestart={restart}
-                setMode={setMode}
-                setAiColor={setAiColor}
-                setLevel={setLevel}
+                setMode={setSetupMode}
+                setAiColor={setSetupAiColor}
+                setLevel={setSetupLevel}
                 setAutoFlip={setAutoFlip}
                 setTimerEnabled={setTimerEnabled}
                 setTimerMinutes={setTimerMinutes}

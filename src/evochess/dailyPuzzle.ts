@@ -141,6 +141,8 @@ export interface PuzzleState {
   mateIn: number;
   /** `moveLog.length` when the puzzle was loaded. */
   startPly: number;
+  /** The side the engine defends with. The solver always moves first. */
+  aiColor: Color;
   resolved: boolean;
 }
 
@@ -166,7 +168,11 @@ export type PuzzleProgress = PuzzlePosition & Pick<PuzzleState, "startPly" | "ma
  * walk the ply count backwards; this guard is what stops that becoming a second
  * event.
  */
-export function resolvePuzzle(puzzle: PuzzleState, position: PuzzlePosition): "solved" | "failed" | null {
+export function resolvePuzzle(
+  /** The three fields it touches, so a caller need not build a whole attempt. */
+  puzzle: Pick<PuzzleState, "startPly" | "mateIn" | "resolved">,
+  position: PuzzlePosition
+): "solved" | "failed" | null {
   if (puzzle.resolved) return null;
   const outcome = puzzleOutcome({ ...position, startPly: puzzle.startPly, mateIn: puzzle.mateIn });
   if (outcome) puzzle.resolved = true;

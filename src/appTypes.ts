@@ -4,6 +4,11 @@ import type { AiLevel } from "./evochess/ai";
 
 export type Mode = "human-ai" | "human-human";
 
+/** A puzzle is a mate to find, not a difficulty to pick, so it fixes its own
+ *  level and locks the picker. Never written into `level`: that is the
+ *  player's own setting, and a puzzle that set it would leave Zen behind. */
+export const PUZZLE_LEVEL: AiLevel = "zen";
+
 /**
  * Which widget the mobile bar is showing in the sheet, if any. The rules
  * summary is not one of them: the puzzle button took its place in the bar, so
