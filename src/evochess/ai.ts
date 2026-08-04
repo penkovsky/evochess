@@ -677,7 +677,7 @@ export function searchRootTimed(
 
 /**
  * UI difficulty level. All three run the same time-budgeted search. Easy also
- * plays a shallow fixed-depth search some of the time (see `EASY_SHALLOW_P`
+ * plays a shallow fixed-depth search some of the time (see `EASY_MIX`
  * below). Fun
  * ponders on the human's time and Zen does not (that gating lives in App.tsx's
  * `maybeStartPonder`, keyed on `level === "fun"`).
@@ -696,18 +696,20 @@ export type SearchLevel = AiLevel | "easy-pst";
 const LEVEL_DEPTH: Record<"easy-pst", number> = { "easy-pst": 4 };
 
 // Easy's difficulty is not a weaker search, it is an inconsistent one. From
-// ply `EASY_EASING_FROM_PLY` on, each move is drawn from a mix:
+// ply `EASY_EASING_FROM_PLY` on, each move is drawn from `EASY_MIX`; the
+// leftover probability (1 - sum p) plays the full Zen search.
 //
-//   `EASY_SHALLOW_P`  a depth-`EASY_SHALLOW_DEPTH` PST search
-//   the rest          the full Zen search
-//
-// That gives a beginner something to punish. A depth-2 search sees only the
-// immediate reply, so it walks into anything one move further out, and the
-// occasional real move keeps it from feeling broken. The first plies are
-// always played straight so the opening is not nonsense.
+// That gives a beginner something to punish. A shallow search walks into
+// anything past its horizon without playing nonsense, and the real moves keep
+// it from feeling broken. The first plies are always played straight so the
+// opening is not nonsense.
 export const EASY_EASING_FROM_PLY = 5;
-export const EASY_SHALLOW_P = 0.6;
-const EASY_SHALLOW_DEPTH = 2;
+
+/** Weighted shallow-PST arms. Sum of `p` must be <= 1. */
+export const EASY_MIX = [
+  { p: 0.1, depth: 2 },
+  { p: 0.5, depth: 3 },
+] as const;
 
 // Zen/Fun time management. Two numbers, because one is not enough:
 //
@@ -782,9 +784,12 @@ export function searchLevel(
     // Rolled from the same per-search `seed` the root tie-break uses. App.tsx
     // draws a fresh one per move, so the rolls are independent.
     const rng = mulberry32(seed);
-    const roll = rng();
-    if (roll < EASY_SHALLOW_P) {
-      const depth = EASY_SHALLOW_DEPTH;
+    let roll = rng();
+    for (const { p, depth } of EASY_MIX) {
+      if (roll >= p) {
+        roll -= p; // fall through to the next arm
+        continue;
+      }
       const result = searchRoot(game, depth, seed, false, keepTT);
       if (result.move) {
         console.log(`[EvoChess AI] Easy depth-${depth} ${result.move.from}${result.move.to}`);

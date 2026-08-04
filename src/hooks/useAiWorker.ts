@@ -114,7 +114,7 @@ export function useAiWorker({
           `[EvoChess AI] level=${level} method=${r.method} depth=${r.depth} nodes=${r.nodes} ` +
             `time=${r.timeMs.toFixed(0)}ms speed=${nps.toLocaleString()} nodes/sec score=${r.score.toFixed(2)}`
         );
-        // A depth-2 reply lands almost at once; pace it like a real one.
+        // A shallow reply lands almost at once; pace it like a real one.
         if (r.shallow) await new Promise((res) => setTimeout(res, paceDelayMs(r.timeMs)));
         resolve(r.candidate);
       };
