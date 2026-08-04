@@ -36,7 +36,7 @@ test("tapping a widget icon slides up a sheet; the backdrop closes it", async ({
   await expect(sheet).toBeVisible();
   // The rules ride along below the settings switches, which is the phone route
   // to them now the puzzle button has the slot they used to have.
-  await expect(sheet).toContainText("Castling is not defined.");
+  await expect(sheet).toContainText("Castle shall you not.");
   // The board stays visible above the sheet — that's the point of a drawer.
   await expect(page.locator("[data-column]").first()).toBeVisible();
 

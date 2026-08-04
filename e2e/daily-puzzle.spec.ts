@@ -441,7 +441,7 @@ test("the rules summary is reachable from the settings sheet on a phone", async 
   const sheet = page.locator(".sheet");
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole("heading", { name: "Rules summary" })).toBeVisible();
-  await expect(sheet).toContainText("Castling is not defined.");
+  await expect(sheet).toContainText("Castle shall you not.");
 });
 
 test("New Game leaves the puzzle, and the banner with it", async ({ page }) => {

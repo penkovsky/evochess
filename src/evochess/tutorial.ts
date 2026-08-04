@@ -202,13 +202,14 @@ export const LESSONS: Lesson[] = [
  * of thing that drifts.
  */
 export const RULES_SUMMARY: string[] = [
-  "You start with only Pawns and a King. Other pieces are earned.",
-  "Every 3 Pawn moves earns a Knight or Bishop promotion for that pawn.",
-  "Every 3 minor-piece moves earns a Rook promotion for that piece.",
-  "Rights carry over until used. Only one per turn.",
-  "A Rook has 5 charges, spent on each move. At 0, it downgrades to a Knight or Bishop and can never become a Rook again.",
-  "A Pawn on the last rank promotes normally, as in chess.",
-  "Castling is not defined.",
+  "You shall start with only Pawns and a King. The pieces shall be earned.",
+  "Every 3 Pawn moves shall earn a Knight or a Bishop, for any Pawn.",
+  "Every 3 minor moves shall earn a Rook, for any minor.",
+  "Rights shall keep until spent. One per turn.",
+  "Promote at once, or wait you can.",
+  "5 moves a Rook shall last, then fall to a minor. Never to rise again.",
+  "A Pawn on the last rank shall promote as in chess.",
+  "Castle shall you not.",
 ];
 
 /** A game at the lesson's teaching position: hand-built, or replayed into. */
