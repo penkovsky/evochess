@@ -55,6 +55,8 @@ export interface AiSearchResponse {
   timeMs: number;
   method: "nnue" | "pst";
   depth: number;
+  /** Easy's fixed-depth move, which returns near-instantly. */
+  shallow: boolean;
 }
 
 // Fired once (from the `nnueReady` settle below) so the main thread can
@@ -471,6 +473,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
         timeMs: r.timeMs,
         method: r.method,
         depth: r.depth,
+        shallow: !!r.shallow,
       };
       post(response);
       return;

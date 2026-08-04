@@ -897,7 +897,7 @@ function App() {
           from_shared: fromShared,
           puzzle_date: puzzleRef.current?.date ?? null,
           unverified,
-        },
+            },
         gameMetaRef.current.uid
       );
     }

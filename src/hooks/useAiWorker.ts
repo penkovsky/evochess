@@ -12,6 +12,7 @@ import type {
   WorkerRequest,
 } from "../evochess/ai.worker";
 import type { AiLevel } from "../evochess/ai";
+import { paceDelayMs } from "../movePacing";
 import type { Mode } from "../appTypes";
 
 /** Values a caller may hold before React state has caught up to them. */
@@ -104,7 +105,7 @@ export function useAiWorker({
         return;
       }
       const id = ++searchIdRef.current;
-      const handleMessage = (e: MessageEvent<AiSearchResponse>) => {
+      const handleMessage = async (e: MessageEvent<AiSearchResponse>) => {
         if (e.data.id !== id) return;
         worker.removeEventListener("message", handleMessage);
         const r = e.data;
@@ -113,6 +114,8 @@ export function useAiWorker({
           `[EvoChess AI] level=${level} method=${r.method} depth=${r.depth} nodes=${r.nodes} ` +
             `time=${r.timeMs.toFixed(0)}ms speed=${nps.toLocaleString()} nodes/sec score=${r.score.toFixed(2)}`
         );
+        // A depth-2 reply lands almost at once; pace it like a real one.
+        if (r.shallow) await new Promise((res) => setTimeout(res, paceDelayMs(r.timeMs)));
         resolve(r.candidate);
       };
       worker.addEventListener("message", handleMessage);

@@ -775,7 +775,7 @@ export function searchLevel(
   level: SearchLevel,
   seed: number,
   opts: { timeMs?: number; keepTT?: boolean; startDepth?: number } = {}
-): RootSearch & { depth: number } {
+): RootSearch & { depth: number; shallow?: boolean } {
   engineConfig.backend = "bitboard";
   const keepTT = opts.keepTT ?? false;
   if (level === "easy" && plyNumber(game) >= EASY_EASING_FROM_PLY) {
@@ -789,7 +789,7 @@ export function searchLevel(
       if (result.move) {
         console.log(`[EvoChess AI] Easy depth-${depth} ${result.move.from}${result.move.to}`);
       }
-      return { ...result, depth };
+      return { ...result, depth, shallow: true };
     }
   }
   if (level === "easy-pst") {
