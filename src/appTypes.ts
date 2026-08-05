@@ -61,6 +61,9 @@ export type RestartReason = "new-game" | "mode" | "color" | "level";
  */
 export type ConfirmState =
   | { kind: "play-here"; ply: number }
+  // The one confirmation that is not about discarded moves. The seat is what
+  // is lost, and it cannot be reclaimed.
+  | { kind: "leave-live" }
   | { kind: "restart"; what: RestartReason; mode: Mode; aiColor: Color; level: AiLevel };
 
 export const RESTART_TITLE: Record<RestartReason, string> = {

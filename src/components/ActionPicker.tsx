@@ -15,6 +15,7 @@ export function ActionPicker({
   browseNextHoldable,
   setConfirmAction,
   puzzleActive,
+  liveActive,
 }: {
   extraClass: string;
   browsing: boolean;
@@ -35,6 +36,8 @@ export function ActionPicker({
    * here" is a takeback wearing a different label.
    */
   puzzleActive: boolean;
+  /** A live match: the line cannot be rewound, so the slot holds no button. */
+  liveActive: boolean;
 }) {
   return (
     <div className={`action-picker ${extraClass}`}>
@@ -51,10 +54,11 @@ export function ActionPicker({
           New Game
         </button>
       )}
-      {/* The slot stays occupied while a puzzle is on the board: the row is
-          four fixed widths so that nothing moves under the thumb, so the
-          button is replaced rather than removed. */}
-      {puzzleActive ? (
+      {/* The slot stays occupied while a puzzle or a live match is on the
+          board, since neither can rewind its line. The row is four fixed
+          widths so that nothing moves under the thumb, so the button is
+          replaced rather than removed. */}
+      {puzzleActive || liveActive ? (
         <span className="action-slot-empty" aria-hidden="true" />
       ) : browsing ? (
         <button

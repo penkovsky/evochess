@@ -57,6 +57,10 @@ export function BoardArea({
   onPuzzle,
   onPuzzleRetry,
   puzzleActive,
+  liveActive,
+  joinSeat,
+  joining,
+  onJoin,
   puzzleMateIn,
   puzzleResult,
   onShare,
@@ -102,6 +106,11 @@ export function BoardArea({
   onPuzzle: (() => void) | null;
   onPuzzleRetry: () => void;
   puzzleActive: boolean;
+  liveActive: boolean;
+  /** The free seat on a live match this browser holds none of. Null offers nothing. */
+  joinSeat: Color | null;
+  joining: boolean;
+  onJoin: () => void;
   puzzleMateIn: number;
   puzzleResult: null | "solved" | "failed";
   onShare: (e: ReactMouseEvent<HTMLButtonElement>, useShareSheet: boolean) => void;
@@ -146,6 +155,17 @@ export function BoardArea({
             </button>
           </div>
         )}
+        {/* The seat offer sits over the board, where "Play again?" does. It
+            does not dim: the position is what the offer is being judged on.
+            Never fired on load, since taking a seat is a deliberate act
+            (docs/live-match.md). */}
+        {joinSeat && (
+          <div className="live-join-overlay">
+            <button className="play-again-btn" onClick={onJoin} disabled={joining}>
+              {joining ? "Joining…" : `Play as ${joinSeat === "w" ? "White" : "Black"}`}
+            </button>
+          </div>
+        )}
         {/* Over the board, like the score overlay, so the outcome costs no
             layout above or below it and cannot push the board under the fold.
             The two can never collide: a puzzle is always `fromShared`, and the
@@ -184,6 +204,7 @@ export function BoardArea({
         browseNextHoldable={browseNextHoldable}
         setConfirmAction={setConfirmAction}
         puzzleActive={puzzleActive}
+        liveActive={liveActive}
       />
       <MobileBar
         openTutorial={openTutorial}

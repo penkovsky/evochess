@@ -27,6 +27,10 @@ export interface UseGameOutcomeArgs {
   fromShared: boolean;
   /** A clock flag ends the game without EvoChessGame knowing about it. */
   timeUp: Color | null;
+  /** Our colour in a live match, null when we are not seated in one. A live
+   *  game is human-vs-human, so it is not scored, but the winner still gets
+   *  the fireworks. */
+  liveSeat: Color | null;
 }
 
 /**
@@ -42,6 +46,7 @@ export function useGameOutcome({
   level,
   fromShared,
   timeUp,
+  liveSeat,
 }: UseGameOutcomeArgs): UseGameOutcome {
   const [scores, setScores] = useState<Scores>(loadScores);
   const [showFireworks, setShowFireworks] = useState(false);
@@ -60,20 +65,23 @@ export function useGameOutcome({
   // fireworks belong to the move that delivers mate, not to arriving at it.
   const seenGameRef = useRef<EvoChessGame | null>(null);
 
-  // Fires the fireworks once when the human checkmates the AI. Keyed on the
-  // EvoChessGame instance so a new game / takeback (which reassigns
-  // gameRef.current) resets the trigger even if the win condition repeats.
+  // Fires the fireworks once when the human checkmates the AI, or when we
+  // deliver mate in a live match. Keyed on the EvoChessGame instance so a new
+  // game / takeback (which reassigns gameRef.current) resets the trigger even
+  // if the win condition repeats.
   useEffect(() => {
     const game = gameRef.current;
     const firstSight = seenGameRef.current !== game;
     seenGameRef.current = game;
     if (!loaded) return;
     if (firstSight && game.isGameOver()) return;
-    if (mode === "human-ai" && game.isGameOver() && game.chess.isCheckmate() && game.turn === aiColor) {
-      setShowFireworks(true);
-    }
+    if (!game.isGameOver() || !game.chess.isCheckmate()) return;
+    // The mated side is the one to move. Ours only if it is our own seat.
+    const loser = game.turn;
+    const won = liveSeat ? loser !== liveSeat : mode === "human-ai" && loser === aiColor;
+    if (won) setShowFireworks(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, mode, aiColor, gameRef.current, gameRef.current.moveLog.length]);
+  }, [loaded, mode, aiColor, liveSeat, gameRef.current, gameRef.current.moveLog.length]);
 
   // Records the outcome of a finished vs-AI game against the current level's
   // score, once per game instance.

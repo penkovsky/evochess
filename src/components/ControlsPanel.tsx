@@ -3,26 +3,8 @@ import type { Color } from "chess.js";
 import type { AiLevel } from "../evochess/ai";
 import { PUZZLE_LEVEL, type Mode, type RestartReason } from "../appTypes";
 
-export function ControlsPanel({
-  mode,
-  aiColor,
-  level,
-  puzzleActive,
-  unverified,
-  autoFlip,
-  timerEnabled,
-  timerMinutes,
-  hasHistory,
-  onRestart,
-  setMode,
-  setAiColor,
-  setLevel,
-  setAutoFlip,
-  setTimerEnabled,
-  setTimerMinutes,
-  setTimeUp,
-  resetClock,
-}: {
+/** Exported so the desktop panel and the mobile sheet mount it from one object. */
+export interface ControlsPanelProps {
   mode: Mode;
   aiColor: Color;
   level: AiLevel;
@@ -43,7 +25,28 @@ export function ControlsPanel({
   setTimerMinutes: (minutes: number) => void;
   setTimeUp: (color: Color | null) => void;
   resetClock: (minutes: number) => void;
-}) {
+}
+
+export function ControlsPanel({
+  mode,
+  aiColor,
+  level,
+  puzzleActive,
+  unverified,
+  autoFlip,
+  timerEnabled,
+  timerMinutes,
+  hasHistory,
+  onRestart,
+  setMode,
+  setAiColor,
+  setLevel,
+  setAutoFlip,
+  setTimerEnabled,
+  setTimerMinutes,
+  setTimeUp,
+  resetClock,
+}: ControlsPanelProps) {
   return (
     <div className="controls">
       <div className="mode-picker" role="group" aria-label="Mode">

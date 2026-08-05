@@ -1,5 +1,5 @@
 import type { Color } from "chess.js";
-import { EvoChessGame } from "./game";
+import { EvoChessGame, rebuildHistory } from "./game";
 import type { AiLevel } from "./ai";
 import { serializeGame, deserializeGame, type SerializedGame } from "./serialize";
 import type { GameMeta } from "../telemetry";
@@ -164,4 +164,33 @@ export function hasParkedGame(): boolean {
 
 export function clearParkedGame() {
   localStorage.removeItem(PARKED_KEY);
+}
+
+/**
+ * The meta of a game being resumed. The ply anchor is dropped, so the time the
+ * game sat closed is not counted as play.
+ */
+export function resumeMeta(saved: LoadedGame): GameMeta {
+  return { ...saved.telemetry, lastPlyAt: null };
+}
+
+export interface ResumedGame {
+  /** The game to put on the board. */
+  game: EvoChessGame;
+  /** Positions strictly before it, one per ply, for browsing and takeback. */
+  history: EvoChessGame[];
+}
+
+/**
+ * Puts the browsing history of a resumed game back, by replaying its move
+ * tokens onto its base. The game returned is the last snapshot rather than the
+ * deserialized save, so chess.js's own move history comes back with it and
+ * threefold repetition works again on a resumed game. A save that will not
+ * replay comes back with no history, which is what every resumed game did
+ * before this existed.
+ */
+export function resumeHistory(saved: LoadedGame): ResumedGame {
+  const snapshots = rebuildHistory(saved.game);
+  if (!snapshots) return { game: saved.game, history: [] };
+  return { game: snapshots[snapshots.length - 1], history: snapshots.slice(0, -1) };
 }

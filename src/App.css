@@ -1136,3 +1136,26 @@
     opacity: 0;
   }
 }
+
+/* The join button on a live-match link (docs/live-match.md). Same slot and
+   same button as "Play again?", so it costs no layout above or below the board
+   and cannot push it under the fold on a phone.
+
+   No dim, unlike the score and puzzle overlays. Those cover a game that is
+   over; this one covers the position the offer is being judged on. */
+.live-join-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.live-join-overlay .play-again-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+  animation: none;
+}

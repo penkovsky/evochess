@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { EvoChessGame, START_FEN } from "../game";
-import { saveGame, loadGame, clearSavedGame, type SaveOptions } from "../persistence";
+import { saveGame, loadGame, clearSavedGame, resumeHistory, resumeMeta, type SaveOptions } from "../persistence";
 import type { Square } from "chess.js";
 
 // This project's jsdom environment provides `window` but not `localStorage`,
@@ -131,5 +131,51 @@ describe("persistence of the evolved en passant", () => {
     // Not the standard start: an unknown start must stay unknown, or a share
     // link would claim a history the game never had.
     expect(loadGame()!.game.base).toBeUndefined();
+  });
+});
+
+/** What a reload rebuilds before the resumed game reaches the board. */
+describe("resuming a save", () => {
+  beforeEach(() => {
+    store.clear();
+    clearSavedGame();
+  });
+
+  it("rebuilds one snapshot per ply, ending on the position that was saved", () => {
+    const game = new EvoChessGame();
+    game.applyMove("e2" as Square, "e4" as Square);
+    game.applyMove("e7" as Square, "e5" as Square);
+    save(game);
+
+    const { game: resumed, history } = resumeHistory(loadGame()!);
+    expect(history).toHaveLength(2);
+    expect(history[0].chess.fen()).toBe(START_FEN);
+    expect(resumed.chess.fen()).toBe(game.chess.fen());
+    // The last snapshot, not the deserialized save, so chess.js's own move
+    // history comes back with it and threefold repetition still works.
+    expect(resumed.chess.history()).toHaveLength(2);
+  });
+
+  it("comes back with no history when the line will not replay", () => {
+    const game = new EvoChessGame();
+    game.applyMove("e2" as Square, "e4" as Square);
+    save(game);
+    const raw = JSON.parse(store.get("evochess-save-v3")!);
+    delete raw.base;
+    store.set("evochess-save-v3", JSON.stringify(raw));
+
+    const saved = loadGame()!;
+    const { game: resumed, history } = resumeHistory(saved);
+    expect(history).toEqual([]);
+    expect(resumed).toBe(saved.game);
+  });
+
+  it("drops the ply anchor, so time the game sat closed is not counted as play", () => {
+    const game = new EvoChessGame();
+    save(game, { telemetry: { ...baseOptions.telemetry, lastPlyAt: 1234, activeMs: 5000 } });
+    const meta = resumeMeta(loadGame()!);
+    expect(meta.lastPlyAt).toBeNull();
+    expect(meta.activeMs).toBe(5000);
+    expect(meta.uid).toBe("test-uid");
   });
 });

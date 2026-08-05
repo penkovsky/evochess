@@ -1,124 +1,67 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Color, Square } from "chess.js";
-import {
-  EvoChessGame,
-  EvoChessError,
-  ROOK_CHARGES,
-  START_FEN,
-  rebuildHistory,
-  type ApplyMoveOptions,
-} from "./evochess/game";
+import { EvoChessError, type ApplyMoveOptions } from "./evochess/game";
 import type { AiLevel } from "./evochess/ai";
+import { planMove } from "./evochess/moveOptions";
 import { decodeShareLink, readShareParam } from "./evochess/shareLink";
 import {
   saveGame,
   loadGame,
   clearSavedGame,
-  parkSavedGame,
-  loadParkedGame,
-  hasParkedGame,
   clearParkedGame,
+  hasParkedGame,
   markSavedGameAbandoned,
-  type LoadedGame,
+  resumeHistory,
+  resumeMeta,
 } from "./evochess/persistence";
-import { loadProgress, markSeen } from "./evochess/tutorialProgress";
-import {
-  cachePuzzle,
-  countAttempt,
-  fetchDailyPuzzle,
-  formatPuzzleDate,
-  loadCachedPuzzle,
-  resolvePuzzle,
-  type DailyPuzzle,
-  type PuzzleAttempts,
-  type PuzzleState,
-} from "./evochess/dailyPuzzle";
+import { loadProgress } from "./evochess/tutorialProgress";
+import { canMoveNow, readMatchParam } from "./liveMatch";
+import { formatPuzzleDate, type DailyPuzzle } from "./evochess/dailyPuzzle";
 import {
   accruePlyTime,
   initTelemetry,
   logFinishedGame,
   msSinceSessionStart,
-  newGameMeta,
   reportedDurationMs,
   track,
   trackOnce,
   trackSessionOnce,
-  type GameMeta,
 } from "./telemetry";
 import { Fireworks } from "./Fireworks";
 import { Tutorial } from "./Tutorial";
-import { PuzzleIcon, ShareIcon } from "./Icons";
-import {
-  PUZZLE_LEVEL,
-  type ConfirmState,
-  type Mode,
-  type PromoModalState,
-  type RestartReason,
-} from "./appTypes";
+import { PUZZLE_LEVEL, type ConfirmState, type Mode, type PromoModalState, type RestartReason } from "./appTypes";
+import { deriveBoardView } from "./boardView";
+import { buildSquareStyles } from "./boardStyles";
+import { useEvoGame } from "./hooks/useEvoGame";
 import { useShareModal } from "./hooks/useShareModal";
 import { useGameClock } from "./hooks/useGameClock";
 import { useMobileWidget } from "./hooks/useMobileWidget";
 import { useHistoryBrowse } from "./hooks/useHistoryBrowse";
 import { useGameOutcome } from "./hooks/useGameOutcome";
 import { useAiWorker } from "./hooks/useAiWorker";
-import { MoveLog } from "./components/MoveLog";
-import { RulesSummary } from "./components/RulesSummary";
-import { ControlsPanel } from "./components/ControlsPanel";
+import { useTutorialInvite } from "./hooks/useTutorialInvite";
+import { useEngineLockout } from "./features/share/useEngineLockout";
+import { useSharedPosition } from "./features/share/useSharedPosition";
+import { useDailyPuzzle } from "./features/puzzle/useDailyPuzzle";
+import { useLiveMatch, type ApplyMove } from "./features/live/useLiveMatch";
 import { TopBanners } from "./components/TopBanners";
 import { BoardArea } from "./components/BoardArea";
+import { AppPanel } from "./components/AppPanel";
 import { MobileWidgetSheet } from "./components/MobileWidgetSheet";
-import { PromoModal } from "./components/PromoModal";
-import { ShareModal } from "./components/ShareModal";
-import { ConfirmModal } from "./components/ConfirmModal";
+import { MobileSheetContent } from "./components/MobileSheetContent";
+import { Dialogs } from "./components/Dialogs";
 import "./App.css";
 
-/**
- * Restores the meta of a game being resumed. The ply anchor is dropped, so the
- * time the game sat closed is not counted as play.
- */
-function resumeMeta(saved: LoadedGame): GameMeta {
-  return { ...saved.telemetry, lastPlyAt: null };
-}
-
 function App() {
-  const [, forceRender] = useState(0);
-  // Game state lives in refs, not React state, so anything that mutates it in
-  // place has to ask for the repaint itself.
-  const rerender = () => forceRender((n) => n + 1);
-  const gameRef = useRef<EvoChessGame>(new EvoChessGame());
-  // Snapshots taken just before each applied move, for takeback. In-memory
-  // only (not persisted): copy() captures the full EvoChess state — position,
-  // evolution rights/counters, and move log — which chess.js's own undo can't.
-  const historyRef = useRef<EvoChessGame[]>([]);
-  // Identity of the game being played, for the finished-game log. A ref, so a
-  // takeback (which swaps gameRef.current for an earlier copy) stays the same
-  // game.
-  const gameMetaRef = useRef<GameMeta>(newGameMeta(START_FEN));
-  // Whether the board holds a game restored from a save rather than one begun
-  // in this session. Read by `first_move`.
-  const resumedRef = useRef(false);
+  // The game itself: the position, the line to it, and the telemetry identity.
+  const { gameRef, historyRef, gameMetaRef, resumedRef, rerender, resetGame } = useEvoGame();
   // The player's own setup: what the pickers hold and what the autosave
-  // carries. The position on the board can override it (see `mode`, `aiColor`
-  // and `level` below), and never writes into it.
+  // carries. The position on the board can override it (see `play` below), and
+  // never writes into it.
   const [setupMode, setSetupMode] = useState<Mode>("human-ai");
   const [setupAiColor, setSetupAiColor] = useState<Color>("b");
   const [setupLevel, setSetupLevel] = useState<AiLevel>("easy");
   const [modal, setModal] = useState<PromoModalState | null>(null);
-  // `browsePly` in a ref, so the share dialog can read the cursor at click
-  // time. `useHistoryBrowse` cannot be called above `useShareModal`, since it
-  // takes `shareModal` as part of `blocked`. Kept in sync just below it.
-  const browsePlyRef = useRef<number | null>(null);
-  const {
-    shareModal,
-    handleShare,
-    copyShareUrl,
-    copyMoveLog,
-    shareViaSheet,
-    closeShareModal,
-    setShareWithHistory,
-    shareCopyBtnRef,
-    shareCloseBtnRef,
-  } = useShareModal(gameRef, browsePlyRef);
   // The action waiting on confirmation, or null. Both of these throw away
   // moves, and neither can be undone. `play-here` carries its ply rather than
   // reading `browsePly` at the end, so the dialog commits to the position the
@@ -127,32 +70,30 @@ function App() {
   const confirmCancelBtnRef = useRef<HTMLButtonElement>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [showTutorial, setShowTutorial] = useState(false);
-  // The rules are the whole point of the variant and take longer to read than
-  // a first-time visitor will give us — so a first visit offers the tutorial
-  // beside a live board rather than in front of it. The offer never blocks
-  // play: making a move dismisses it (see dismissInvite).
-  const [showInvite, setShowInvite] = useState(false);
-  // In human-vs-human, flip the board after every move so the side to move
-  // sees their pieces at the bottom. Off by default: more intuitive
-  // behavior.
+  // In human-vs-human, flip the board after every move so the side to move sees
+  // their pieces at the bottom. Off by default: more intuitive behavior.
   const [autoFlip, setAutoFlip] = useState(false);
-  // Let the AI keep searching the current position in the background while
-  // it's the human's turn, warming the TT for its next real search
+  // Let the AI keep searching the current position in the background while it's
+  // the human's turn, warming the TT for its next real search
   // (docs/ponder-spec.md). Only takes effect at Fun level; persisted like the
   // other settings, default on.
   const [ponderEnabled, setPonderEnabled] = useState(true);
   const boardWrapRef = useRef<HTMLDivElement>(null);
-  // Rules summary and move log share panel space, so only one is expanded
-  // at a time — opening one collapses the other.
+  // Rules summary and move log share panel space, so only one is expanded at a
+  // time — opening one collapses the other.
   const [openPanel, setOpenPanel] = useState<"rules" | "log" | null>("log");
   // On a phone the side panel is hidden entirely (CSS) and its widgets are
-  // reached through the icon bar under the board, which opens one of them in
-  // a bottom sheet over the page. null = no sheet open.
+  // reached through the icon bar under the board, which opens one of them in a
+  // bottom sheet over the page. null = no sheet open.
   const { widget, setWidget } = useMobileWidget(!!modal || !!confirmAction);
-  // Click-to-move: square selected by tapping a piece, awaiting a target
-  // square tap. Cleared on every move attempt (successful or not).
+  // Click-to-move: square selected by tapping a piece, awaiting a target square
+  // tap. Cleared on every move attempt (successful or not).
   const [selected, setSelected] = useState<Square | null>(null);
+  // `browsePly` in a ref, so the share dialog can read the cursor at click
+  // time. `useHistoryBrowse` cannot be called above `useShareModal`, since it
+  // takes `shareModal` as part of `blocked`. Kept in sync just below it.
+  const browsePlyRef = useRef<number | null>(null);
+  const share = useShareModal(gameRef, browsePlyRef);
   // Which ply of the current game is on screen, and the ways to step through
   // them. null means live (the actual gameRef.current position); otherwise an
   // index into historyRef, which holds the position after that many plies.
@@ -169,52 +110,26 @@ function App() {
   } = useHistoryBrowse({
     historyRef,
     setSelected,
-    blocked: !!modal || !!shareModal || !!widget || !!confirmAction,
+    blocked: !!modal || !!share.shareModal || !!widget || !!confirmAction,
   });
   browsePlyRef.current = browsePly;
-  // -- shared positions (?p=…), docs/share-links-spec.md ---------------
-  // A shared position is held in memory only until the recipient makes a move:
-  // their own autosave stays intact and restorable until then, so
-  // opening a link never costs them a game in progress.
-  const [sharedPending, setSharedPending] = useState(false);
-  // The autosave a shared link arrived on top of, kept for "back to my game".
-  const savedGameRef = useRef<ReturnType<typeof loadGame>>(null);
-  // A link that decoded cleanly but describes a position that could not occur
-  // (spec §5.2). The board is still shown; the engine is not allowed near it.
-  const [unverified, setUnverified] = useState(false);
-  // Read by maybeAiMove/maybeStartPonder, which run from setTimeout callbacks
-  // holding a closure over state React may not have flushed yet. The engine
-  // lockout must not depend on that timing: the search and NNUE assume a
-  // well-formed board, and an impossible one risks an out-of-bounds read in
-  // the bitboard layer.
-  const engineLockedRef = useRef(false);
-  // Why a `?p=` was refused outright (spec §5.1). Purely informational: the app
-  // has already fallen back to the normal startup path by the time it shows.
-  const [linkNotice, setLinkNotice] = useState<string | null>(null);
-  // Stays true after `sharedPending` clears, for as long as the game on the
-  // board is the one that arrived on a link. A game played from someone else's
-  // position is not a game against the AI from the opening, so its result is
-  // not recorded against the level's score and no score is shown when it ends.
-  // Persisted with the save, so a reload does not turn it back into a scored
-  // game (persistence.ts `fromShared`).
-  const [fromShared, setFromShared] = useState(false);
-  // The daily puzzle on the board, if the game was opened with `?daily`.
-  // `resolved` is the once-per-load guard on the solved/failed event: a
-  // takeback can walk the ply count backwards, and the
-  // guard is what stops that becoming a second event. The row itself is kept
-  // after that, since `game_end` and the `games` row are still to be tagged.
-  // Nothing persists — a reload resumes the puzzle as an ordinary shared game
-  // and it stops counting as a puzzle.
-  const puzzleRef = useRef<PuzzleState | null>(null);
+
+  // Whether the engine is allowed near the position at all. Declared before
+  // both the worker and the handover, since both need it and neither owns it.
+  const { unverified, engineLockedRef, setLockout } = useEngineLockout();
+  // The puzzle of the day, and the attempt on the board if there is one.
+  const puzzle = useDailyPuzzle({ gameRef });
+  const puzzleOnBoard = puzzle.puzzleRef.current;
+
   // What the board is actually played at. A puzzle is a mate to find against
   // the engine, and an unverified position has no engine at all (spec §5.2):
   // both belong to the position, so they are derived here rather than written
   // into the setup, and leaving the position leaves nothing behind to undo.
-  const puzzleOnBoard = puzzleRef.current;
   const play: { mode: Mode; aiColor: Color; level: AiLevel } = puzzleOnBoard
     ? { mode: "human-ai", aiColor: puzzleOnBoard.aiColor, level: PUZZLE_LEVEL }
     : { mode: unverified ? "human-human" : setupMode, aiColor: setupAiColor, level: setupLevel };
   const { mode, aiColor, level } = play;
+
   // Human-vs-human clock. Off by default; the promotion prompt pauses it.
   const {
     clockRef,
@@ -227,32 +142,6 @@ function App() {
     setTimeUp,
     resetClock,
   } = useGameClock({ gameRef, loaded, mode, paused: !!modal, rerender });
-  // The puzzle the entry point offers, from the cache on the first paint and
-  // from the response once it lands. Null hides the entry point entirely: a
-  // player who has never loaded a puzzle and is offline sees the app exactly as
-  // it was before this existed.
-  const [puzzle, setPuzzle] = useState<DailyPuzzle | null>(null);
-  // The outcome of the attempt on the board, which the banner over it reads.
-  // Set by `checkPuzzle` alongside the event, so there is only ever one
-  // implementation of the ply arithmetic.
-  const [puzzleResult, setPuzzleResult] = useState<null | "solved" | "failed">(null);
-  // Loads of one date within this session, counting from 1. Nothing persists,
-  // consistent with the attempt itself not surviving a reload.
-  const attemptsRef = useRef<PuzzleAttempts | null>(null);
-  // Whether a game of the recipient's own is sitting in the parked slot, which
-  // is what "back to my game" offers once the shared game has gone live.
-  const [parked, setParked] = useState(false);
-  // What happens when a game ends: the score record, the fireworks, and the
-  // delayed reveal of the score overlay.
-  const { scores, scoreOverlayReady, showFireworks, setShowFireworks, scoredGameRef } = useGameOutcome({
-    gameRef,
-    loaded,
-    mode,
-    aiColor,
-    level,
-    fromShared,
-    timeUp,
-  });
   // The search worker and its ponder protocol (docs/ponder-spec.md).
   const { nnueReady, searchInWorker, resetPonder, stopPonder, maybeStartPonder } = useAiWorker({
     gameRef,
@@ -263,118 +152,110 @@ function App() {
     ponderEnabled,
   });
 
+  /** Everything a position handover clears off the screen. */
+  function clearPrompts() {
+    setModal(null);
+    setSelected(null);
+    setTimeUp(null);
+  }
+
+  // Positions that arrive from elsewhere: a `?p=` link, the puzzle, a match.
+  const shared = useSharedPosition({
+    gameRef,
+    historyRef,
+    gameMetaRef,
+    resumedRef,
+    clockRef,
+    clockHistoryRef,
+    resetClock,
+    resetPonder,
+    setLockout,
+    clearPuzzle: puzzle.clearPuzzle,
+    clearPrompts,
+  });
+  const { sharedPending, savedGameRef, fromShared, linkNotice, setLinkNotice } = shared;
+
+  const tutorial = useTutorialInvite({ resetPonder });
+
+  // The poll applies the opponent's moves down the same path a local move
+  // takes. `applyAndAdvance` is declared below, so the poll reaches it here.
+  const applyMoveRef = useRef<ApplyMove>(() => {});
+  const live = useLiveMatch({
+    gameRef,
+    historyRef,
+    clockRef,
+    clockHistoryRef,
+    rerender,
+    adoptPosition: shared.adoptPosition,
+    savedGameRef,
+    setLinkNotice,
+    setSetupMode,
+    clearPrompts,
+    resetPonder,
+    applyMoveRef,
+  });
+  const liveRef = live.liveRef;
+
+  // What happens when a game ends: the score record, the fireworks, and the
+  // delayed reveal of the score overlay. Declared after the live hook because
+  // the fireworks need to know which seat is ours.
+  const { scores, scoreOverlayReady, showFireworks, setShowFireworks, scoredGameRef } = useGameOutcome({
+    gameRef,
+    loaded,
+    mode,
+    aiColor,
+    level,
+    fromShared,
+    timeUp,
+    liveSeat: live.live?.seat?.seat ?? null,
+  });
+
   function togglePanel(key: "rules" | "log", isOpen: boolean) {
     setOpenPanel((prev) => (isOpen ? key : prev === key ? null : prev));
   }
 
-  // Someone who has started playing has answered the question the invitation
-  // was asking, so it gets out of the way and doesn't come back.
-  function dismissInvite() {
-    if (!showInvite) return;
-    setShowInvite(false);
-    markSeen();
-  }
-
-  function openTutorial() {
-    // The tutorial is about to use the worker for its own opponent, so hand it
-    // over: a ponder chain on this game's position is now both stale and in
-    // the way (ponder-spec.md §5.3, §6.2).
-    resetPonder();
-    setShowInvite(false);
-    setShowTutorial(true);
-  }
-
   /**
-   * Drops `?p=` from the address bar: the shared game has just become the live
-   * one, so a reload must not put the base position back over moves the
-   * recipient has played (spec §3, §6.5).
-   *
-   * Until this point the parameter is deliberately left in the URL. Stripping
-   * it on load would mean a reload or a mobile tab restore silently discarded
-   * the shared game, since it is only ever held in memory before now.
-   */
-  function goLive() {
-    setSharedPending(false);
-    savedGameRef.current = null;
-    const url = new URL(window.location.href);
-    url.searchParams.delete("p");
-    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
-  }
-
-  /**
-   * The recipient's first move on a shared board, which is the moment the
-   * autosave changes hands. Their own game moves to the parked slot first, so
-   * "back to my game" survives both the move and any later reload.
-   */
-  function parkOwnGameAndGoLive() {
-    // Only when there is a game of the player's own being held. `parkSavedGame`
-    // copies the autosave, and `savedGameRef` is null in exactly the cases where
-    // the autosave is no longer theirs: a retried puzzle, or a second link
-    // opened on top of a first. Parking then would put the position they have
-    // just left over their real game, and "back to my game" would hand back the
-    // failed attempt.
-    if (savedGameRef.current) setParked(parkSavedGame());
-    goLive();
-  }
-
-  /**
-   * Puts the browsing history of a resumed game back, by replaying its move
-   * tokens onto its base, and returns the game to put on the board. That is the
-   * last snapshot rather than the deserialized save, so chess.js's own move
-   * history comes back with it and threefold repetition works again on a
-   * resumed game. A save that will not replay comes back with no history, which
-   * is what every resumed game did before this.
-   */
-  function resumeHistory(saved: LoadedGame): EvoChessGame {
-    const snapshots = rebuildHistory(saved.game);
-    historyRef.current = snapshots ? snapshots.slice(0, -1) : [];
-    // One clock reading per rebuilt ply, all of them the save's own. Per-ply
-    // readings were never persisted, so that is the only reading there is, but
-    // the array has to be as long as `historyRef`: `playFromHere` indexes it by
-    // ply, and a short one would hand an early ply a reading from a later move.
-    clockHistoryRef.current = historyRef.current.map(() => ({ ...saved.clock }));
-    return snapshots ? snapshots[snapshots.length - 1] : saved.game;
-  }
-
-  /**
-   * Puts the recipient's own game back, discarding the shared one. Reads the
-   * parked slot once the shared game has gone live, and the in-memory copy
-   * before that, when nothing has been parked because nothing was at risk.
+   * Puts the recipient's own game back, discarding the shared one.
    */
   function backToMyGame() {
-    const saved = savedGameRef.current ?? loadParkedGame();
+    const saved = shared.takeOwnGame();
     if (!saved) return;
-    clearParkedGame();
-    setParked(false);
+    setConfirmAction(null);
+    // The board is about to hold a game of this player's own. The poll must not
+    // keep applying the opponent's moves onto it.
+    live.leaveLiveMatch();
     // The game coming back is the player's own, not the puzzle, so the tag must
     // not follow it onto the `games` row — nor the banner the position it
     // described has just left.
-    puzzleRef.current = null;
-    setPuzzleResult(null);
-    gameRef.current = resumeHistory(saved);
+    puzzle.clearPuzzle();
+    const resumed = resumeHistory(saved);
+    gameRef.current = resumed.game;
+    historyRef.current = resumed.history;
+    // One clock reading per rebuilt ply, all of them the save's own. Per-ply
+    // readings were never persisted, so that is the only reading there is, but
+    // the array has to be as long as `historyRef`: `playFromHere` indexes it by
+    // ply, and a short one would hand an early ply a later move's reading.
+    clockHistoryRef.current = resumed.history.map(() => ({ ...saved.clock }));
     gameMetaRef.current = resumeMeta(saved);
     resumedRef.current = true;
     if (gameRef.current.isGameOver()) scoredGameRef.current = gameRef.current;
     // Usually false, since the game being restored is the recipient's own. Not
     // always: open a second link after playing on a first, and the game parked
-    // for this button is itself from an unverified position. The lockout follows
-    // the position, not the sequence of events.
+    // for this button is itself from an unverified position. The lockout
+    // follows the position, not the sequence of events.
     const lockedOut = saved.unverified;
-    engineLockedRef.current = lockedOut;
-    setUnverified(lockedOut);
+    setLockout(lockedOut);
     setLinkNotice(null);
-    setFromShared(saved.fromShared);
+    shared.setFromShared(saved.fromShared);
     setSetupMode(saved.mode);
     setSetupAiColor(saved.aiColor);
     setSetupLevel(saved.level);
     clockRef.current = saved.clock;
-    setModal(null);
-    setSelected(null);
-    setTimeUp(null);
+    clearPrompts();
     resetPonder(); // a different position entirely (ponder-spec.md §5.3, §6.2)
-    // Same two steps as goLive, for the opposite reason: the shared position is
-    // gone, so a reload must not bring it back over the game just restored.
-    goLive();
+    // The shared position is gone, so a reload must not bring it back over the
+    // game just restored.
+    shared.goLive();
     rerender();
     setTimeout(
       () =>
@@ -388,67 +269,33 @@ function App() {
   }
 
   /**
-   * Puts today's puzzle on the board, down the same path a `?p=` link takes
+   * Puts a puzzle on the board, down the same path a `?p=` link takes
    * (share-links-spec.md §6). Reusing it verbatim is what makes `fromShared`
    * keep the result off the local score — so failing a puzzle is not a loss —
    * and what parks the player's own game on their first move, so "back to my
    * game" still works.
    *
    * Runs from a promise, well after mount, so `saved` is passed in rather than
-   * re-read: it is the same autosave the startup effect decided about.
+   * re-read: it is the same autosave the startup path decided about.
    *
    * A row that fails to decode, or decodes but fails the legality check, is
    * treated as no puzzle at all. An unverified position locks the engine out
    * (share-links-spec.md §5.2), which would leave an unplayable board.
    */
-  function loadDailyPuzzle(puzzle: DailyPuzzle, saved: LoadedGame | null) {
-    const shared = decodeShareLink(puzzle.param);
-    if (!shared.ok) {
-      console.warn(`evochess: daily puzzle ${puzzle.date} failed to decode [${shared.code}]`);
+  function loadDailyPuzzle(row: DailyPuzzle, saved: ReturnType<typeof loadGame>) {
+    const decoded = decodeShareLink(row.param);
+    if (!decoded.ok) {
+      console.warn(`evochess: daily puzzle ${row.date} failed to decode [${decoded.code}]`);
       return;
     }
-    if (!shared.legal) {
-      console.warn(`evochess: daily puzzle ${puzzle.date} failed the legality check [${shared.reasons.join(", ")}]`);
+    if (!decoded.legal) {
+      console.warn(`evochess: daily puzzle ${row.date} failed the legality check [${decoded.reasons.join(", ")}]`);
       return;
     }
-    savedGameRef.current = saved;
-    gameRef.current = shared.game;
-    gameMetaRef.current = newGameMeta(shared.game.chess.fen(), puzzle.param);
-    historyRef.current = [];
-    clockHistoryRef.current = [];
-    resumedRef.current = false;
-    setSharedPending(true);
-    setFromShared(true);
-    // The lockout belongs to the position, not to the session, and this one has
-    // just passed the same legality check a link gets. Left set, it would both
-    // silence the engine and write `unverified` into the save for a position
-    // that is fine.
-    engineLockedRef.current = false;
-    setUnverified(false);
-    resetClock(saved?.timerMinutes ?? 10);
-    resetPonder(); // a position from outside this session (ponder-spec.md §5.3)
-    puzzleRef.current = {
-      date: puzzle.date,
-      mateIn: puzzle.mateIn,
-      startPly: shared.game.moveLog.length,
-      // The solver always moves first, which is also what keeps loading the
-      // puzzle from triggering an engine search. Mode and level come with it,
-      // off `puzzleRef`.
-      aiColor: shared.game.turn === "w" ? "b" : "w",
-      resolved: false,
-    };
-    // A fresh attempt, so the next outcome fires again and the banner from the
-    // last one goes.
-    attemptsRef.current = countAttempt(attemptsRef.current, puzzle.date);
-    setPuzzleResult(null);
-    setModal(null);
-    setSelected(null);
-    setTimeUp(null);
-    track("puzzle_open", {
-      date: puzzle.date,
-      mate_in: puzzle.mateIn,
-      attempts: attemptsRef.current.count,
-    });
+    shared.adoptPosition({ game: decoded.game, payload: row.param, saved, legal: true });
+    // The solver always moves first, which is also what keeps loading a puzzle
+    // from triggering an engine search. Mode and level come with it, off `play`.
+    puzzle.beginAttempt(row, decoded.game.moveLog.length, decoded.game.turn === "w" ? "b" : "w");
     rerender();
   }
 
@@ -469,41 +316,8 @@ function App() {
    * game already being held is passed through unchanged.
    */
   function openPuzzle() {
-    if (!puzzle) return;
-    loadDailyPuzzle(puzzle, puzzleRef.current ? savedGameRef.current : loadGame());
-  }
-
-  /**
-   * Fires `puzzle_solved` or `puzzle_failed`, once, and raises the banner over
-   * the board. Called straight after a move and before the reply: a ply later
-   * would call a mate-in-2 failed on the move that delivers mate.
-   *
-   * Returns the outcome so the caller can hold the engine back: a failure can
-   * land with the game still playable, since running out of moves is not the
-   * game ending.
-   */
-  function checkPuzzle(overrides?: { aiColor?: Color }): "solved" | "failed" | null {
-    const puzzle = puzzleRef.current;
-    if (!puzzle) return null;
-    const game = gameRef.current;
-    const effAiColor = overrides?.aiColor ?? aiColor;
-    const outcome = resolvePuzzle(puzzle, {
-      gameOver: game.isGameOver(),
-      isCheckmate: game.chess.isCheckmate(),
-      turn: game.turn,
-      humanColor: effAiColor === "w" ? "b" : "w",
-      plies: game.moveLog.length,
-    });
-    if (!outcome) return null;
-    setPuzzleResult(outcome);
-    track(outcome === "solved" ? "puzzle_solved" : "puzzle_failed", {
-      date: puzzle.date,
-      mate_in: puzzle.mateIn,
-      // The same number the open carried. Redundant, and it means a solve or a
-      // failure can be read on its own without joining back to the open.
-      attempts: attemptsRef.current?.count ?? 1,
-    });
-    return outcome;
+    if (!puzzle.puzzle) return;
+    loadDailyPuzzle(puzzle.puzzle, puzzle.puzzleRef.current ? savedGameRef.current : loadGame());
   }
 
   useEffect(() => {
@@ -511,39 +325,43 @@ function App() {
     const saved = loadGame();
     // A game parked by an earlier visit on a link, if the recipient never went
     // back to it. The offer outlives the reload that made it necessary.
-    setParked(hasParkedGame());
+    shared.setParked(hasParkedGame());
     // `?p=` is read before the autosave is used, and decoded before anything
     // else can claim the board (share-links-spec.md §6).
     const param = readShareParam(window.location.search);
-    const shared = param ? decodeShareLink(param) : null;
+    const link = param ? decodeShareLink(param) : null;
     // `?p=` wins if both are present, being the more specific of the two. This
     // reads the flag before it is stripped below.
     const daily = !param && new URLSearchParams(window.location.search).has("daily");
-    if (shared && !shared.ok) {
-      console.warn(`evochess: shared link refused [${shared.code}]`);
-      setLinkNotice(shared.message);
+    // `?lm=` is fetched, so it cannot claim the board here; it takes it when
+    // the response lands, the way `?daily` does. Until then the autosave below
+    // is what is on screen.
+    const lm = readMatchParam(window.location.search);
+    if (link && !link.ok) {
+      console.warn(`evochess: shared link refused [${link.code}]`);
+      setLinkNotice(link.message);
     }
     // After the decode, since `from_share` and `share_refused` depend on it.
     // The device class is the pointer and the viewport: no user agent string,
     // which is a fingerprint and answers nothing these do not.
-    const tutorial = loadProgress();
+    const progress = loadProgress();
     // A valid link takes the board, and the autosave is left where it is.
-    resumedRef.current = !!saved && !shared?.ok;
+    resumedRef.current = !!saved && !link?.ok;
     trackOnce("page_load", "page_load", {
       from_share: !!param,
-      share_refused: !!shared && !shared.ok,
+      share_refused: !!link && !link.ok,
       resumed_game: resumedRef.current,
       viewport_w: window.innerWidth,
       viewport_h: window.innerHeight,
       dpr: Math.round(window.devicePixelRatio * 100) / 100,
       coarse_pointer: window.matchMedia("(pointer: coarse)").matches,
-      tutorial_seen: tutorial.seen,
-      lessons_done: tutorial.completed.length,
+      tutorial_seen: progress.seen,
+      lessons_done: progress.completed.length,
     });
     if (saved) {
       // Applied whichever game wins the board below: a position-only link
-      // carries no extras block (share-links-spec.md §4.5), so orientation, mode
-      // and level are the recipient's own.
+      // carries no extras block (share-links-spec.md §4.5), so orientation,
+      // mode and level are the recipient's own.
       setSetupMode(saved.mode);
       setSetupAiColor(saved.aiColor);
       setSetupLevel(saved.level);
@@ -553,50 +371,43 @@ function App() {
       clockRef.current = saved.clock;
       setPonderEnabled(saved.ponderEnabled);
     }
-    if (shared?.ok) {
-      savedGameRef.current = saved;
-      gameRef.current = shared.game;
+    if (link?.ok) {
       // A history link's `game` is already the end of the line (spec §6.1);
-      // `historyRef` holds everything strictly before it.
-      if (shared.snapshots) {
-        historyRef.current = shared.snapshots.slice(0, -1);
-      }
-      gameMetaRef.current = newGameMeta(shared.game.chess.fen(), param);
-      setSharedPending(true);
-      setFromShared(true);
+      // the history holds everything strictly before it.
+      shared.adoptPosition({
+        game: link.game,
+        history: link.snapshots?.slice(0, -1),
+        payload: param,
+        saved,
+        legal: link.legal,
+      });
       // Nothing in the payload says who moves next, and there is no extras
       // block to lean on, so the rule is positional: the recipient always moves
       // first. This is also what keeps loading a link from triggering an engine
-      // search.
-      //
-      // Read at the cursor
-      const atCursor = shared.snapshots?.[shared.cursor ?? 0] ?? shared.game;
+      // search. Read at the cursor.
+      const atCursor = link.snapshots?.[link.cursor ?? 0] ?? link.game;
       setSetupAiColor(atCursor.turn === "w" ? "b" : "w");
-      // Whatever time was left on the recipient's own clock has nothing to do
-      // with this position.
-      resetClock(saved?.timerMinutes ?? 10);
-      if (!shared.legal) {
+      if (!link.legal) {
         // Logged verbatim so "the link is weird" is diagnosable from a
         // screenshot of the console (spec §5.2).
-        console.warn(`evochess: shared link failed legality check [${shared.reasons.join(", ")}]`);
-        engineLockedRef.current = true;
-        setUnverified(true);
+        console.warn(`evochess: shared link failed legality check [${link.reasons.join(", ")}]`);
       }
-      resetPonder(); // a position from outside this session (ponder-spec.md §5.3)
     } else if (saved) {
-      gameRef.current = resumeHistory(saved);
+      const resumed = resumeHistory(saved);
+      gameRef.current = resumed.game;
+      historyRef.current = resumed.history;
+      clockHistoryRef.current = resumed.history.map(() => ({ ...saved.clock }));
       gameMetaRef.current = resumeMeta(saved);
-      setFromShared(saved.fromShared);
-      // The lockout has to come back with the position. `engineLockedRef` is
-      // memory-only, and three of the legality failures (over nine pieces per
-      // side, side-not-to-move-in-check, en passant incoherence) produce FENs
+      shared.setFromShared(saved.fromShared);
+      // The lockout has to come back with the position. It is memory-only, and
+      // three of the legality failures (over nine pieces per side,
+      // side-not-to-move-in-check, en passant incoherence) produce FENs
       // chess.js loads happily, so a reload would otherwise hand the search a
       // board it must never see. The save carries the player's own setup, so
       // `unverified` is what puts the board back in human-vs-human.
       if (saved.unverified) {
         console.warn("evochess: resuming a game played from an unverified shared position");
-        engineLockedRef.current = true;
-        setUnverified(true);
+        setLockout(true);
       }
       // A finished game was already scored live before the page was saved/
       // reloaded (the scores effect runs the moment isGameOver() first goes
@@ -604,13 +415,14 @@ function App() {
       // every subsequent reload of the same finished game.
       if (gameRef.current.isGameOver()) scoredGameRef.current = gameRef.current;
       resetPonder(); // loading a save (ponder-spec.md §5.3, §6.2)
-    } else if (!daily && !loadProgress().seen) {
+    } else if (!daily && !lm && !progress.seen) {
       // Deliberately not offered on top of a shared board (spec §11), nor over
       // a puzzle that is about to arrive on one: someone arriving on a link
       // came to look at a position, and the invite would cover it. A later
       // visit without a link still gets the offer.
-      setShowInvite(true);
+      tutorial.offerInvite();
     }
+    if (lm) void live.openLiveMatch(lm, saved);
     if (daily) {
       // Stripped now, exactly as `?p=` is stripped once it goes live: a reload
       // must not re-enter the puzzle over a game in progress.
@@ -618,69 +430,21 @@ function App() {
       url.searchParams.delete("daily");
       window.history.replaceState(null, "", url.pathname + url.search + url.hash);
     }
-    // gameRef is whichever game took the board above, so this is the ply count
-    // the request is racing.
-    const plyAtLoad = gameRef.current.moveLog.length;
-    // The entry point is hidden when there is no puzzle, so the client has to
-    // know about one on an ordinary load and not only under `?daily`. The cache
-    // puts the button on screen from the first paint; `?daily` takes its puzzle
-    // from there too, rather than waiting for a response it already has an
-    // answer for.
-    const cached = loadCachedPuzzle();
-    if (cached) {
-      setPuzzle(cached);
-      // Deferred rather than applied here, so it lands at the same point in the
-      // life of the page the response's own load does. Everything above is
-      // still deciding what the board holds, and swapping the position in
-      // before `loaded` would leave the mount-time `maybeAiMove` running
-      // against the colours of the game the puzzle displaced — which is the
-      // engine taking the solver's first move.
-      if (daily) setTimeout(() => loadDailyPuzzle(cached, saved), 0);
-    }
-    // Fired on every load, not awaited, and it does not gate `setLoaded`. The
-    // cache is a fallback for offline and for the moment before this lands, not
-    // a reason to skip it: the client cannot tell whether its own idea of today
-    // is right, and one request per load is cheap.
-    void fetchDailyPuzzle().then((row) => {
-      // Null: keep whatever the cache held.
-      if (!row) return;
-      cachePuzzle(row);
-      // A response that lands while a puzzle is already on the board stops
-      // here: it must not swap the position out from under a player who is
-      // mid-solve. The exception is the puzzle it has just found to be a day
-      // stale, sitting untouched on the board because the cache is what `?daily`
-      // and the button had to go on — that one is replaced with today's, which
-      // is the puzzle the player asked for.
-      const onBoard = puzzleRef.current;
-      const staleOnBoard =
-        onBoard !== null &&
-        onBoard.date < row.date &&
-        gameRef.current.moveLog.length === onBoard.startPly;
-      if (onBoard && !staleOnBoard) return;
-      setPuzzle(row);
-      // A game in progress wins, and only under `?daily`: the player never
-      // asked for the puzzle at that moment, and taking the board would lose
-      // the moves they just made, since `savedGameRef` would hold the snapshot
-      // from page load and "back to my game" would rewind past them. A dropped
-      // puzzle is a load without one, and the next `?daily` gets it. The button
-      // is the player asking, so it has no such rule.
-      //
-      // The ply count, not `gameMetaRef.current.started`, which `resumeMeta`
-      // carries over from the save and which is therefore already true for any
-      // resumed game in progress.
-      // The replacement takes the game already being held for the puzzle on the
-      // board, not the page-load autosave: the player may have reached the
-      // stale one through the button after twenty moves, and `saved` would
-      // rewind past them.
-      if (staleOnBoard) loadDailyPuzzle(row, savedGameRef.current);
-      else if (daily && gameRef.current.moveLog.length === plyAtLoad) loadDailyPuzzle(row, saved);
+    puzzle.bootstrapPuzzle({
+      daily,
+      saved,
+      // gameRef is whichever game took the board above, so this is the ply
+      // count the request is racing.
+      plyAtLoad: gameRef.current.moveLog.length,
+      load: loadDailyPuzzle,
+      heldGame: () => savedGameRef.current,
     });
     setLoaded(true);
     // A history link's cursor (docs/share-links-spec.md §4.4): `enterBrowse`
     // already clamps to live, so a cursor at the end of the line needs no
     // special case.
-    if (shared?.ok && shared.cursor !== undefined && shared.cursor < historyRef.current.length) {
-      enterBrowse(shared.cursor);
+    if (link?.ok && link.cursor !== undefined && link.cursor < historyRef.current.length) {
+      enterBrowse(link.cursor);
     }
     rerender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -710,10 +474,9 @@ function App() {
   });
 
   // Sends the move log and the `game_end` event of a finished game, once.
-  // Deliberately wider than the
-  // scoring effect, which skips human-vs-human and shared games: those are
-  // finished games too. `logged` rides in the save, so a reload of a game
-  // already sent does not send it again.
+  // Deliberately wider than the scoring effect, which skips human-vs-human and
+  // shared games: those are finished games too. `logged` rides in the save, so
+  // a reload of a game already sent does not send it again.
   useEffect(() => {
     if (!loaded) return;
     // Same rule as the save effect: nothing about a shared position is recorded
@@ -740,7 +503,7 @@ function App() {
       level,
       aiColor,
       fromShared,
-      puzzleDate: puzzleRef.current?.date ?? null,
+      puzzleDate: puzzle.puzzleDate(),
       outcome,
       moves: game.moveLog,
       moveTokens: game.moveTokens,
@@ -757,7 +520,7 @@ function App() {
         from_shared: fromShared,
         // Tagged, not suppressed: a puzzle attempt is a real game down the
         // shared-position path, and only this tells the two apart.
-        puzzle_date: puzzleRef.current?.date ?? null,
+        puzzle_date: puzzle.puzzleDate(),
         takebacks: meta.takebacks,
       },
       meta.uid
@@ -767,9 +530,9 @@ function App() {
   }, [loaded, mode, aiColor, level, fromShared, sharedPending, timeUp, gameRef.current, gameRef.current.moveLog.length]);
 
   // Best-effort game_abandon on tab close: `pagehide` fires on navigation,
-  // close and backgrounding alike, and is the one unload event bfcache
-  // doesn't skip. A game already caught by the `game_end` effect above is a
-  // no-op here (`abandonGame` checks `meta.logged`).
+  // close and backgrounding alike, and is the one unload event bfcache doesn't
+  // skip. A game already caught by the `game_end` effect above is a no-op here
+  // (`abandonGame` checks `meta.logged`).
   useEffect(() => {
     if (!loaded) return;
     function onPageHide(e: PageTransitionEvent) {
@@ -789,9 +552,9 @@ function App() {
 
   // Resumes an AI-to-move position on load (e.g. reloading mid-game with the
   // AI to move). Deliberately NOT re-run when mode/aiColor change: toggling
-  // "AI plays: White" before the first move would otherwise let the AI jump
-  // in immediately with no human action. Starting/resuming after a setup
-  // change goes through the explicit "New Game" button instead.
+  // "AI plays: White" before the first move would otherwise let the AI jump in
+  // immediately with no human action. Starting/resuming after a setup change
+  // goes through the explicit "New Game" button instead.
   useEffect(() => {
     if (!loaded) return;
     maybeAiMove();
@@ -808,8 +571,8 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modal]);
 
-  // Escape and focus for the confirmation dialog. Focus lands on Cancel, not
-  // on the destructive action, so a stray Enter or Space does nothing.
+  // Escape and focus for the confirmation dialog. Focus lands on Cancel, not on
+  // the destructive action, so a stray Enter or Space does nothing.
   useEffect(() => {
     if (!confirmAction) return;
     confirmCancelBtnRef.current?.focus();
@@ -832,8 +595,8 @@ function App() {
     if (game.turn !== effAiColor) return;
     setSelected(null);
     setAiThinking(true);
-    // Let the UI paint the "thinking" state before blocking the main
-    // thread with the search.
+    // Let the UI paint the "thinking" state before blocking the main thread
+    // with the search.
     await new Promise((r) => setTimeout(r, 30));
     const candidate = await searchInWorker(game, effLevel, Math.floor(Math.random() * 1_000_000));
     // gameRef.current is reassigned (not mutated) by takeback/new game, so an
@@ -846,7 +609,7 @@ function App() {
     setAiThinking(false);
     // The engine's own move can end the game too: mating the solver, or
     // stalemating them. Both are failures.
-    checkPuzzle({ aiColor: effAiColor });
+    puzzle.checkPuzzle(effAiColor);
     rerender();
     // The AI just moved and it's now the human's turn: start pondering the
     // position the human is looking at (ponder-spec.md §3, §5.3).
@@ -854,10 +617,11 @@ function App() {
     setTimeout(() => maybeAiMove(overrides), 0);
   }
 
-  function applyAndAdvance(from: Square, to: Square, options: ApplyMoveOptions) {
-    // Must land before the historyRef push and well before the 30ms UI-paint
-    // delay in maybeAiMove — the whole point is getting the worker off the
-    // CPU at the earliest instant we know the human has committed to a move
+  /** `remote` marks a move that arrived from the opponent, so it is not sent back. */
+  function applyAndAdvance(from: Square, to: Square, options: ApplyMoveOptions, remote = false) {
+    // Must land before the history push and well before the 30ms UI-paint delay
+    // in maybeAiMove — the whole point is getting the worker off the CPU at the
+    // earliest instant we know the human has committed to a move
     // (ponder-spec.md §5.3's overriding priority, §1).
     stopPonder();
     const game = gameRef.current;
@@ -876,17 +640,20 @@ function App() {
       maybeStartPonder(game);
       return;
     }
-    // Only record the snapshot once the move actually applied.
-    dismissInvite();
-    // The top of the funnel. Only this path: the AI applies its own moves.
-    trackSessionOnce("first_move", "first_move", {
-      ms_since_load: msSinceSessionStart(),
-      resumed_game: resumedRef.current,
-    });
+    if (!remote) live.sendLocalMove(game, from, to, options);
+    tutorial.dismissInvite();
+    // The top of the funnel. Only this path, and only a move of this player's
+    // own: the AI applies its own moves, and the opponent's arrive over the
+    // wire already counted on their side.
+    if (!remote)
+      trackSessionOnce("first_move", "first_move", {
+        ms_since_load: msSinceSessionStart(),
+        resumed_game: resumedRef.current,
+      });
     // A game begins when it is played, so the human's first move is the event.
     // Not the first ply: the AI opens for itself when it has White, and a
     // takeback to the opening would otherwise start the same game twice.
-    if (!gameMetaRef.current.started) {
+    if (!remote && !gameMetaRef.current.started) {
       gameMetaRef.current.started = true;
       track(
         "game_start",
@@ -895,19 +662,21 @@ function App() {
           level: mode === "human-ai" ? level : null,
           ai_color: aiColor,
           from_shared: fromShared,
-          puzzle_date: puzzleRef.current?.date ?? null,
+          puzzle_date: puzzle.puzzleDate(),
           unverified,
-            },
+        },
         gameMetaRef.current.uid
       );
     }
-    // The recipient has played from the shared position, so it becomes the
-    // live game and normal autosaving resumes (spec §6.4). Their own game is
-    // parked rather than lost, so they can still go back to it.
-    if (sharedPending) parkOwnGameAndGoLive();
+    // The recipient has played from the shared position, so it becomes the live
+    // game and normal autosaving resumes (spec §6.4). Their own game is parked
+    // rather than lost, so they can still go back to it. Not on a remote move:
+    // an observer never commits to the match, so their own game stays where it
+    // is, and a seat holder commits when they play.
+    if (sharedPending && !remote) shared.parkOwnGameAndGoLive();
     // Straight after the solver's move and before the reply, which is the only
     // moment at which a mate-in-N delivered on move N still counts.
-    const outcome = checkPuzzle();
+    const outcome = puzzle.checkPuzzle(aiColor);
     historyRef.current.push(snapshot);
     clockHistoryRef.current.push({ ...clockRef.current });
     rerender();
@@ -918,12 +687,17 @@ function App() {
     if (outcome === "failed") return;
     setTimeout(maybeAiMove, 0);
   }
+  applyMoveRef.current = applyAndAdvance;
 
   function takeback() {
+    // A live match owns its own move list, and the server will not take a ply
+    // it already holds: rewinding here would diverge the two boards for good.
+    // The button is hidden too. This guards the keyboard and confirm paths.
+    if (liveRef.current) return;
     const hist = historyRef.current;
     const clockHist = clockHistoryRef.current;
     if (hist.length === 0) return;
-    let restored: EvoChessGame | undefined;
+    let restored: ReturnType<typeof hist.pop>;
     let restoredClock: Record<Color, number> | undefined;
     if (mode === "human-ai") {
       // Roll back to the most recent position where the human is to move,
@@ -943,14 +717,12 @@ function App() {
     gameMetaRef.current.takebacks += 1;
     gameRef.current = restored;
     resetPonder(); // takeback discards game state (ponder-spec.md §5.3, §6.2)
-    setModal(null);
-    setSelected(null);
-    setTimeUp(null);
+    clearPrompts();
     setShowFireworks(false);
     clockRef.current = restoredClock ?? { w: timerMinutes * 60, b: timerMinutes * 60 };
     rerender();
-    // Only reachable when taking back to the opening in an AI-plays-White
-    // game: let the AI make its first move again.
+    // Only reachable when taking back to the opening in an AI-plays-White game:
+    // let the AI make its first move again.
     if (mode === "human-ai" && !restored.isGameOver() && restored.turn === aiColor) {
       setTimeout(maybeAiMove, 0);
     } else {
@@ -965,10 +737,11 @@ function App() {
   // browsing is allowed to change the game, and only via this explicit action
   // (spec: the board itself stays read-only while browsing).
   //
-  // Always behind the confirmation dialog, never a bare tap: it
-  // throws away every move after the cursor. The dialog is in-page rather than
+  // Always behind the confirmation dialog, never a bare tap: it throws away
+  // every move after the cursor. The dialog is in-page rather than
   // `window.confirm`, which some mobile browsers suppress outright.
   function playFromHere(ply: number) {
+    if (liveRef.current) return; // as takeback: a live match cannot rewind
     const hist = historyRef.current;
     const clockHist = clockHistoryRef.current;
     const snapshot = hist[ply];
@@ -980,9 +753,7 @@ function App() {
     clockHistoryRef.current = clockHist.slice(0, ply);
     clockRef.current = restoredClock ? { ...restoredClock } : { w: timerMinutes * 60, b: timerMinutes * 60 };
     resetPonder(); // discards everything after the cursor (ponder-spec.md §5.3, §6.2)
-    setModal(null);
-    setSelected(null);
-    setTimeUp(null);
+    clearPrompts();
     setShowFireworks(false);
     browseLive();
     rerender();
@@ -1000,84 +771,33 @@ function App() {
     return attemptMove(sourceSquare as Square, targetSquare as Square);
   }
 
-  function attemptMove(from: Square, to: Square): boolean {
+  /** Whether the move is allowed to be tried at all, before its own rules. */
+  function moveAllowed(from: Square, to: Square): boolean {
     const game = gameRef.current;
     if (browsePly !== null) return false;
     if (from === to) return false;
     if (mode === "human-ai" && game.turn === aiColor) return false;
+    // No seat token means every move is refused. That is the observer case.
+    if (!canMoveNow(liveRef.current, game.moveLog.length)) return false;
     if (game.isGameOver()) return false;
     // A resolved puzzle is over even when the position is still playable.
-    if (puzzleResult) return false;
+    if (puzzle.puzzleResult) return false;
+    return true;
+  }
 
-    const piece = game.chess.get(from);
-    if (!piece) return false;
-
-    const isPawn = piece.type === "p";
-    const isRook = piece.type === "r";
-    const reachesLastRank = isPawn && (to[1] === "8" || to[1] === "1");
-
-    if (reachesLastRank) {
-      setModal({ from, to, kind: "forced", color: game.turn, canMinor: false, canRook: false });
-      return true;
-    }
-
-    if (isRook) {
-      const remaining = (game.rookCharges.get(from) ?? ROOK_CHARGES) - 1;
-      // Validate legality on a scratch copy first (a dummy downgrade choice
-      // is only needed to get past the mandatory-downgrade check; it isn't
-      // applied to the real game).
-      const scratch = game.copy();
-      try {
-        scratch.applyMove(from, to, remaining <= 0 ? { downgradeTo: "n" } : {});
-      } catch {
-        return false;
-      }
-      if (remaining <= 0) {
-        setModal({ from, to, kind: "downgrade", color: game.turn, canMinor: false, canRook: false });
-      } else {
-        applyAndAdvance(from, to, {});
-      }
-      return true;
-    }
-
-    // Preview the move on a scratch copy to see what it would earn/unlock
-    // this same turn (including a right granted by the move itself), so
-    // the promotion prompt doesn't lag a move behind.
-    const scratch = game.copy();
-    let scratchNote: string;
-    try {
-      scratchNote = scratch.applyMove(from, to);
-    } catch {
-      return false;
-    }
-    void scratchNote;
-
-    const color = game.turn;
-    const isMinor = piece.type === "n" || piece.type === "b";
-    const canMinor = isPawn && scratch.minorRights[color] > 0;
-    // The rook right may be spent only on the minor piece that just moved,
-    // which now sits on `to`.
-    const canRook = isMinor && scratch.canRookPromote(color, to);
-
-    if (!canMinor && !canRook) {
-      applyAndAdvance(from, to, {});
-      return true;
-    }
-
-    setModal({ from, to, kind: "optional", color, canMinor, canRook });
+  function attemptMove(from: Square, to: Square): boolean {
+    if (!moveAllowed(from, to)) return false;
+    const plan = planMove(gameRef.current, from, to);
+    if (plan.kind === "reject") return false;
+    if (plan.kind === "prompt") setModal(plan.modal);
+    else applyAndAdvance(plan.from, plan.to, plan.options);
     return true;
   }
 
   function onSquareClick({ square }: { square: string }) {
     const game = gameRef.current;
     const sq = square as Square;
-    const humanCanMove =
-      browsePly === null &&
-      !(mode === "human-ai" && game.turn === aiColor) &&
-      !game.isGameOver() &&
-      !puzzleResult &&
-      !modal;
-    if (!humanCanMove) {
+    if (!view.humanCanMove) {
       setSelected(null);
       return;
     }
@@ -1089,9 +809,7 @@ function App() {
         setSelected(null);
         return;
       }
-      const isLegalTarget = game
-        .legalMoves()
-        .some((m) => m.from === selected && m.to === sq);
+      const isLegalTarget = game.legalMoves().some((m) => m.from === selected && m.to === sq);
       if (isLegalTarget) {
         const from = selected;
         setSelected(null);
@@ -1137,7 +855,7 @@ function App() {
       level,
       aiColor,
       fromShared,
-      puzzleDate: puzzleRef.current?.date ?? null,
+      puzzleDate: puzzle.puzzleDate(),
       outcome: "abandoned",
       moves: game.moveLog,
       moveTokens: game.moveTokens,
@@ -1151,7 +869,7 @@ function App() {
         level: mode === "human-ai" ? level : null,
         ai_color: aiColor,
         from_shared: fromShared,
-        puzzle_date: puzzleRef.current?.date ?? null,
+        puzzle_date: puzzle.puzzleDate(),
         takebacks: meta.takebacks,
       },
       meta.uid
@@ -1164,33 +882,28 @@ function App() {
 
   function startNewGame(newMode: Mode, newAiColor: Color, newLevel: AiLevel) {
     abandonGame();
-    gameRef.current = new EvoChessGame();
-    gameMetaRef.current = newGameMeta(START_FEN);
-    resumedRef.current = false;
-    historyRef.current = [];
+    resetGame();
     clockHistoryRef.current = [];
     resetPonder(); // new game discards the old position (ponder-spec.md §5.3, §6.2)
     // A fresh game is a well-formed position, so the engine is allowed back.
-    engineLockedRef.current = false;
-    setUnverified(false);
+    setLockout(false);
     setLinkNotice(null);
     // A new game starts from the opening, so it counts again.
-    setFromShared(false);
+    shared.setFromShared(false);
     // Starting a new game is an explicit choice to leave the shared position
     // and the game it displaced, so "back to my game" retires here too.
-    if (sharedPending) goLive();
+    if (sharedPending) shared.goLive();
+    // A new game leaves the live match too.
+    live.leaveLiveMatch();
     // …and out of the puzzle with it, so the new game is not tagged as one and
     // no stale banner outlives the position it described.
-    puzzleRef.current = null;
-    setPuzzleResult(null);
+    puzzle.clearPuzzle();
     clearParkedGame();
-    setParked(false);
+    shared.setParked(false);
     setSetupMode(newMode);
     setSetupAiColor(newAiColor);
     setSetupLevel(newLevel);
-    setModal(null);
-    setSelected(null);
-    setTimeUp(null);
+    clearPrompts();
     setShowFireworks(false);
     resetClock(timerMinutes);
     clearSavedGame();
@@ -1198,72 +911,34 @@ function App() {
     setTimeout(() => maybeAiMove({ mode: newMode, aiColor: newAiColor, level: newLevel }), 0);
   }
 
+  const view = deriveBoardView({
+    game: gameRef.current,
+    history: historyRef.current,
+    browsePly,
+    mode,
+    aiColor,
+    level,
+    autoFlip,
+    aiThinking,
+    timeUp,
+    live: live.live,
+    puzzle: puzzleOnBoard,
+    puzzleResult: puzzle.puzzleResult,
+    fromShared,
+    hasScoreHistory:
+      scores[level].wins + scores[level].losses + scores[level].draws > 0,
+    promptOpen: !!modal,
+  });
+
   if (!loaded) return null;
   // The tutorial plays Black through the same worker and the same Easy search
   // the game itself uses, so what it teaches against is a real opponent.
-  if (showTutorial) return <Tutorial onExit={() => setShowTutorial(false)} onSearch={searchInWorker} />;
+  if (tutorial.showTutorial) {
+    return <Tutorial onExit={() => tutorial.setShowTutorial(false)} onSearch={searchInWorker} />;
+  }
 
   const game = gameRef.current;
-  const totalPlies = historyRef.current.length;
-  const browsing = browsePly !== null;
-  // Everything rendered below tracks this, not `game`, so the board, the evo
-  // strips and the status line all show the browsed ply rather than the live
-  // position. historyRef only holds positions strictly before the live one
-  // (see browsePly's declaration), so an out-of-range index falls back to it.
-  const displayGame = browsing && browsePly! < totalPlies ? historyRef.current[browsePly!] : game;
-  const turnLabel = displayGame.turn === "w" ? "White" : "Black";
-  // With no bar under the board, this line is the only readout of where in
-  // the game you are, so ply 0 says what it is rather than "Move 0 of N".
-  const browsingStatus = browsePly === 0 ? "Start position" : `Move ${browsePly} of ${totalPlies}`;
-  // A puzzle owns the board until it resolves, at which point the banner over
-  // the board carries the news and this line goes back to saying what it says
-  // for any other game.
-  const activePuzzle = puzzleResult ? null : puzzleRef.current;
-  let status = browsing ? browsingStatus : `${turnLabel} to move.`;
-  if (!browsing && activePuzzle) {
-    // The solver's colour, not whoever is to move: this line is the label of the
-    // puzzle and it has to hold still. Taken from the live turn it would flip to
-    // "Black to play, mate in 2" for the length of every engine reply.
-    status = `${aiColor === "w" ? "Black" : "White"} to play, mate in ${activePuzzle.mateIn}`;
-  } else if (!browsing) {
-    if (game.chess.isCheck()) status += " Check!";
-    if (game.isGameOver()) status = game.resultString();
-    else if (timeUp) {
-      const winner = timeUp === "w" ? "Black" : "White";
-      status = `${timeUp === "w" ? "White" : "Black"} ran out of time. ${winner} wins!`;
-    } else if (aiThinking) status += " (AI thinking...)";
-  }
-  const gameOver = gameRef.current.isGameOver() || !!timeUp;
-
-  const currentRecord = scores[level];
-  const hasScoreHistory = currentRecord.wins + currentRecord.losses + currentRecord.draws > 0;
-  // The overlay mounts as soon as the game ends and dims in over 2.5s (CSS);
-  // `scoreOverlayReady` then reveals the score text and the button.
-  // Suppressed for a game played from a shared position: that result was never
-  // recorded, so the score would be the running total of unrelated games, and
-  // "play again" would start from the opening rather than from the position.
-  // Also suppressed while browsing: the overlay and the fireworks belong to
-  // the end of the live game, not to whichever ply is on screen.
-  const showScoreOverlay = mode === "human-ai" && gameOver && hasScoreHistory && !fromShared && !browsing;
-
-  const levelLabel = level.charAt(0).toUpperCase() + level.slice(1);
-
-  const rw = displayGame.rightsFor("w");
-  const rb = displayGame.rightsFor("b");
-
-  // Both the board and the evolution strips flanking it depend on which way the
-  // board faces, so it's computed once here rather than inline in the board.
-  const boardOrientation: "white" | "black" =
-    mode === "human-human"
-      ? autoFlip && game.turn === "b"
-        ? "black"
-        : "white"
-      : aiColor === "w"
-      ? "black"
-      : "white";
-  const bottomColor: Color = boardOrientation === "white" ? "w" : "b";
-  const topColor: Color = bottomColor === "w" ? "b" : "w";
-  const rightsFor = { w: rw, b: rb };
+  const { totalPlies, browsing } = view;
 
   /**
    * The one route to a restart, for New Game and for the three settings
@@ -1271,18 +946,16 @@ function App() {
    * something to lose: a game with moves in it that has not finished. Starting
    * over from the opening, or after a result, goes straight through.
    *
-   * `apply` is what a switch does when no game is under way — set the value
-   * and leave the board alone, rather than restarting it for nothing.
+   * `apply` is what a switch does when no game is under way — set the value and
+   * leave the board alone, rather than restarting it for nothing.
    */
-  const restart = (
-    what: RestartReason,
-    next: { mode: Mode; aiColor: Color; level: AiLevel },
-    apply?: () => void
-  ) => {
+  const restart = (what: RestartReason, next: { mode: Mode; aiColor: Color; level: AiLevel }, apply?: () => void) => {
     if (totalPlies === 0 && apply) {
       resetPonder(); // setting change (ponder-spec.md §5.3, §6.2)
       apply();
-    } else if (totalPlies > 0 && !gameOver) {
+      // A live match is always worth asking about, even at ply 0. The seat is
+      // what is lost, and no number of moves says that.
+    } else if (!view.gameOver && (totalPlies > 0 || live.live)) {
       setConfirmAction({ kind: "restart", what, ...next });
     } else {
       startNewGame(next.mode, next.aiColor, next.level);
@@ -1290,39 +963,46 @@ function App() {
   };
 
   // Kept short: the banner sits above the board, and every extra line of it is
-  // a line the board loses on a phone.
-  // A puzzle replaces the shared-position wording with the day it is for. The
-  // zone is spelled out because one global boundary is what makes "today's
-  // puzzle" mean the same thing everywhere.
-  const sharedStatusText = puzzleRef.current
-    ? `Puzzle of ${formatPuzzleDate(puzzleRef.current.date)} (UTC)`
+  // a line the board loses on a phone. A puzzle replaces the shared-position
+  // wording with the day it is for. The zone is spelled out because one global
+  // boundary is what makes "today's puzzle" mean the same thing everywhere.
+  const sharedStatusText = puzzleOnBoard
+    ? `Puzzle of ${formatPuzzleDate(puzzleOnBoard.date)} (UTC)`
     : [
-        sharedPending &&
-          (savedGameRef.current ? "Shared position. Your own game is saved." : "Shared position."),
+        sharedPending && (savedGameRef.current ? "Shared position. Your own game is saved." : "Shared position."),
         unverified &&
           "This position could not have occurred in a game, so the computer opponent is unavailable for it.",
       ]
         .filter(Boolean)
         .join(" ");
 
-  // Whether there is a game of the player's own to go back to. The parked slot
-  // counts: retrying a puzzle sets `sharedPending` again, and by then their own
-  // game has already moved there, so without the second half the way back would
-  // vanish for the rest of the session.
-  const hasSavedGame = savedGameRef.current !== null || parked;
-
-  const squareStyles: Record<string, CSSProperties> = {};
-  if (selected) {
-    squareStyles[selected] = { background: "rgba(255, 255, 0, 0.4)" };
-    for (const m of game.legalMoves()) {
-      if (m.from !== selected) continue;
-      squareStyles[m.to] = {
-        background: m.isCapture
-          ? "radial-gradient(circle, transparent 55%, rgba(0, 0, 0, 0.35) 55%)"
-          : "radial-gradient(circle, rgba(0, 0, 0, 0.35) 19%, transparent 20%)",
-      };
-    }
-  }
+  // Mounted twice, in the desktop panel and in the mobile sheet.
+  const controls = {
+    mode,
+    aiColor,
+    level,
+    puzzleActive: puzzleOnBoard !== null,
+    unverified,
+    autoFlip,
+    timerEnabled,
+    timerMinutes,
+    hasHistory: totalPlies > 0,
+    onRestart: restart,
+    setMode: setSetupMode,
+    setAiColor: setSetupAiColor,
+    setLevel: setSetupLevel,
+    setAutoFlip,
+    setTimerEnabled,
+    setTimerMinutes,
+    setTimeUp,
+    resetClock,
+  };
+  const moveLogProps = {
+    moveLog: game.moveLog,
+    blackFirst: game.logStartsWithBlack,
+    browsePly,
+    browsable: totalPlies > 0,
+  };
 
   return (
     <div className="layout">
@@ -1331,7 +1011,8 @@ function App() {
           onDone={() => setShowFireworks(false)}
           launchX={
             boardWrapRef.current
-              ? boardWrapRef.current.getBoundingClientRect().left + boardWrapRef.current.getBoundingClientRect().width / 2
+              ? boardWrapRef.current.getBoundingClientRect().left +
+                boardWrapRef.current.getBoundingClientRect().width / 2
               : undefined
           }
           launchY={boardWrapRef.current?.getBoundingClientRect().bottom}
@@ -1342,14 +1023,14 @@ function App() {
         sharedPending={sharedPending}
         unverified={unverified}
         sharedStatusText={sharedStatusText}
-        hasSavedGame={hasSavedGame}
-        puzzleActive={puzzleRef.current !== null}
+        hasSavedGame={shared.hasSavedGame}
+        puzzleActive={puzzleOnBoard !== null}
         setLinkNotice={setLinkNotice}
-        backToMyGame={backToMyGame}
-        parked={parked}
-        showInvite={showInvite}
-        openTutorial={openTutorial}
-        dismissInvite={dismissInvite}
+        backToMyGame={() => (live.live ? setConfirmAction({ kind: "leave-live" }) : backToMyGame())}
+        parked={shared.parked}
+        showInvite={tutorial.showInvite}
+        openTutorial={tutorial.openTutorial}
+        dismissInvite={tutorial.dismissInvite}
       />
       <BoardArea
         boardWrapRef={boardWrapRef}
@@ -1357,28 +1038,26 @@ function App() {
         timerEnabled={timerEnabled}
         clock={clockRef.current}
         turn={game.turn}
-        gameOver={gameOver}
-        status={status}
+        gameOver={view.gameOver}
+        status={view.status}
         aiThinking={aiThinking}
         nnueReady={nnueReady}
-        topColor={topColor}
-        bottomColor={bottomColor}
-        displayGame={displayGame}
-        rightsFor={rightsFor}
+        topColor={view.topColor}
+        bottomColor={view.bottomColor}
+        displayGame={view.displayGame}
+        rightsFor={view.rightsFor}
         onBoardTouchStart={onBoardTouchStart}
         onBoardTouchEnd={onBoardTouchEnd}
-        boardPosition={displayGame.chess.fen()}
+        boardPosition={view.displayGame.chess.fen()}
         onPieceDrop={onPieceDrop}
         onSquareClick={onSquareClick}
-        squareStyles={squareStyles}
-        boardOrientation={boardOrientation}
-        allowDragging={
-          !browsing && !(mode === "human-ai" && game.turn === aiColor) && !gameOver && !puzzleResult
-        }
-        showScoreOverlay={showScoreOverlay}
+        squareStyles={buildSquareStyles(game, selected)}
+        boardOrientation={view.boardOrientation}
+        allowDragging={view.allowDragging}
+        showScoreOverlay={view.showScoreOverlay}
         scoreOverlayReady={scoreOverlayReady}
-        levelLabel={levelLabel}
-        currentRecord={currentRecord}
+        levelLabel={view.levelLabel}
+        currentRecord={scores[level]}
         onPlayAgain={() => startNewGame(setupMode, setupAiColor, setupLevel)}
         browsing={browsing}
         browsePly={browsePly}
@@ -1389,168 +1068,64 @@ function App() {
         browsePrevHoldable={holdable(browseHome, browsePrev)}
         browseNextHoldable={holdable(browseLive, browseNext)}
         setConfirmAction={setConfirmAction}
-        openTutorial={openTutorial}
+        openTutorial={tutorial.openTutorial}
         openWidget={setWidget}
-        onPuzzle={puzzle ? openPuzzle : null}
+        onPuzzle={puzzle.puzzle ? openPuzzle : null}
         onPuzzleRetry={openPuzzle}
-        puzzleActive={puzzleRef.current !== null}
-        puzzleMateIn={puzzleRef.current?.mateIn ?? 0}
-        puzzleResult={puzzleResult}
-        onShare={handleShare}
+        puzzleActive={puzzleOnBoard !== null}
+        liveActive={live.live !== null}
+        joinSeat={live.live && !live.live.seat && live.live.status !== "over" ? live.live.freeSeat : null}
+        joining={live.joining}
+        onJoin={() => void live.joinLiveMatch()}
+        puzzleMateIn={puzzleOnBoard?.mateIn ?? 0}
+        puzzleResult={puzzle.puzzleResult}
+        onShare={share.handleShare}
       />
-      <div className="panel">
-        {/* The banner is already asking; this is the permanent way back in. */}
-        {!showInvite && (
-          <button className="learn-btn" onClick={openTutorial}>
-            Learn Evo Basics
-          </button>
-        )}
-        {/* Hidden entirely when there is no puzzle: no disabled state, no
-            spinner, no placeholder. Someone who has never loaded one and is
-            offline sees the panel exactly as it was. */}
-        {puzzle && (
-          <button
-            type="button"
-            className="learn-btn share-btn"
-            aria-label="Puzzle of the day"
-            title="Puzzle of the day"
-            onClick={openPuzzle}
-          >
-            <PuzzleIcon /> Puzzle of the day
-          </button>
-        )}
-        {/* The panel is desktop-only, so this one always opens the dialog: the
-            URL field is the point of it. */}
-        <button
-          type="button"
-          className="learn-btn share-btn"
-          aria-label="Share position"
-          title="Share position"
-          onClick={(e) => handleShare(e, false)}
-        >
-          <ShareIcon /> Share
-        </button>
-        <ControlsPanel
-          mode={mode}
-          aiColor={aiColor}
-          level={level}
-          puzzleActive={puzzleRef.current !== null}
-          unverified={unverified}
-          autoFlip={autoFlip}
-          timerEnabled={timerEnabled}
-          timerMinutes={timerMinutes}
-          hasHistory={historyRef.current.length > 0}
-          onRestart={restart}
-          setMode={setSetupMode}
-          setAiColor={setSetupAiColor}
-          setLevel={setSetupLevel}
-          setAutoFlip={setAutoFlip}
-          setTimerEnabled={setTimerEnabled}
-          setTimerMinutes={setTimerMinutes}
-          setTimeUp={setTimeUp}
-          resetClock={resetClock}
-        />
-        <details
-          className="collapsible"
-          open={openPanel === "log"}
-          onToggle={(e) => togglePanel("log", e.currentTarget.open)}
-        >
-          <summary>Move log</summary>
-          <MoveLog
-            moveLog={game.moveLog}
-            blackFirst={game.logStartsWithBlack}
-            browsePly={browsePly}
-            browsable={totalPlies > 0}
-            onSelectPly={enterBrowse}
-          />
-        </details>
-        <details
-          className="collapsible rules-summary"
-          open={openPanel === "rules"}
-          onToggle={(e) => togglePanel("rules", e.currentTarget.open)}
-        >
-          <summary>Rules summary</summary>
-          <RulesSummary />
-        </details>
-      </div>
+      <AppPanel
+        showInvite={tutorial.showInvite}
+        openTutorial={tutorial.openTutorial}
+        hasPuzzle={puzzle.puzzle !== null}
+        openPuzzle={openPuzzle}
+        onShare={share.handleShare}
+        controls={controls}
+        moveLog={moveLogProps}
+        onSelectPly={enterBrowse}
+        openPanel={openPanel}
+        togglePanel={togglePanel}
+      />
 
       {widget && (
         <MobileWidgetSheet widget={widget} onClose={() => setWidget(null)}>
-          {widget === "log" && (
-            <MoveLog
-              moveLog={game.moveLog}
-              blackFirst={game.logStartsWithBlack}
-              browsePly={browsePly}
-              browsable={totalPlies > 0}
-              onSelectPly={(ply) => {
-                enterBrowse(ply);
-                setWidget(null);
-              }}
-            />
-          )}
-          {widget === "settings" && (
-            <>
-              <ControlsPanel
-                mode={mode}
-                aiColor={aiColor}
-                level={level}
-                puzzleActive={puzzleRef.current !== null}
-                unverified={unverified}
-                autoFlip={autoFlip}
-                timerEnabled={timerEnabled}
-                timerMinutes={timerMinutes}
-                hasHistory={historyRef.current.length > 0}
-                onRestart={restart}
-                setMode={setSetupMode}
-                setAiColor={setSetupAiColor}
-                setLevel={setSetupLevel}
-                setAutoFlip={setAutoFlip}
-                setTimerEnabled={setTimerEnabled}
-                setTimerMinutes={setTimerMinutes}
-                setTimeUp={setTimeUp}
-                resetClock={resetClock}
-              />
-              {/* The puzzle button took the rules' slot in the bar, so this is
-                  the phone route to them. The sheet already scrolls inside
-                  itself, and the wrapper is what keeps their styling. */}
-              <div className="rules-summary sheet-rules">
-                <h3>Rules summary</h3>
-                <RulesSummary />
-              </div>
-            </>
-          )}
+          <MobileSheetContent
+            widget={widget}
+            controls={controls}
+            moveLog={moveLogProps}
+            onSelectPly={(ply) => {
+              enterBrowse(ply);
+              setWidget(null);
+            }}
+          />
         </MobileWidgetSheet>
       )}
 
-      {modal && <PromoModal modal={modal} finishModalMove={finishModalMove} />}
-
-      {shareModal && (
-        <ShareModal
-          shareModal={shareModal}
-          closeShareModal={closeShareModal}
-          copyShareUrl={copyShareUrl}
-          copyMoveLog={copyMoveLog}
-          setShareWithHistory={setShareWithHistory}
-          shareViaSheet={shareViaSheet}
-          shareCopyBtnRef={shareCopyBtnRef}
-          shareCloseBtnRef={shareCloseBtnRef}
-        />
-      )}
-      {confirmAction && (
-        <ConfirmModal
-          confirmAction={confirmAction}
-          totalPlies={totalPlies}
-          close={() => setConfirmAction(null)}
-          confirmCancelBtnRef={confirmCancelBtnRef}
-          onPlayHere={playFromHere}
-          onStartNewGame={() => {
-            setConfirmAction(null);
-            if (confirmAction.kind === "restart") {
-              startNewGame(confirmAction.mode, confirmAction.aiColor, confirmAction.level);
-            }
-          }}
-        />
-      )}
+      <Dialogs
+        modal={modal}
+        finishModalMove={finishModalMove}
+        share={share}
+        confirmAction={confirmAction}
+        closeConfirm={() => setConfirmAction(null)}
+        totalPlies={totalPlies}
+        confirmCancelBtnRef={confirmCancelBtnRef}
+        onPlayHere={playFromHere}
+        onLeaveLive={backToMyGame}
+        liveActive={live.live !== null}
+        onStartNewGame={() => {
+          setConfirmAction(null);
+          if (confirmAction?.kind === "restart") {
+            startNewGame(confirmAction.mode, confirmAction.aiColor, confirmAction.level);
+          }
+        }}
+      />
     </div>
   );
 }

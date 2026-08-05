@@ -1,41 +1,32 @@
-# EvoChess
+# Evochess
 
-**You start with only pawns and kings, and your army evolves out of pawn activity**.
+**A chess variant where pieces evolve mid-game. No starting pieces, you earn them.**
 
-Play vs Human or AI.
-NNUE engine was trained from self-play because EvoChess is a variant that has no
-existing engine, no book, no corpus.
+Related [blog post](https://penkovsky.com/post/evochess).
 
-Written in TypeScript/React. All game logic (rules engine + AI) runs
-client-side; there is no server.
+[Play in your browser](https://penkovsky.github.io/evochess/). No install. No account.
 
-[Play it in your browser](https://penkovsky.github.io/evochess/). No install, no signup.
 
-## Rules in 60 seconds
+## Rules
 
-Each side starts with 8 pawns and a king. That is all. There are no queens,
-rooks, knights, or bishops on the board. You grow your army by playing.
+"You shall start with only Pawns and a King. The pieces shall be earned."
 
-**Pawns become minor pieces.** Every 3 pawn moves earn you one promotion
-right. Spend it to turn the pawn that just moved into a knight or a bishop.
+"Every 3 Pawn moves shall earn a Knight or a Bishop for any Pawn."
 
-**Minor pieces become rooks.** Every 3 minor piece moves earn you one more
-promotion right. Spend it to turn the minor piece that just moved into a rook.
+"Every 3 minor moves shall earn a Rook for any minor."
 
-**Rights are saved up.** You never have to spend one right away. But you can
-only spend it on the piece that just moved. A pawn right needs a pawn move. A
-minor right needs a minor piece move. One promotion per move, no more.
+"Rights shall keep until spent. One per turn."
 
-**Rooks run out.** Every rook has 5 charges. Each rook move spends one. At 0
-charges the rook downgrades on the spot into a knight or a bishop. That piece
-can never become a rook again. So a rook is a burst of power you time, not a
-piece you keep.
+"Promote at once or wait you can."
 
-Everything else is normal chess. Same moves, same checks, same mates. En
-passant works. A pawn reaching the 8th rank promotes as usual, and that is
-still obligatory. Castling does not exist.
+"5 moves a Rook shall last then fall to a minor. Never to rise again."
 
-Complete EvoChess rules are [here](./rules.txt).
+"A Pawn on the last rank shall promote as in chess."
+
+"Castle shall you not."
+
+Complete evochess rules are [here](./rules.txt).
+
 
 ## Stack
 
@@ -46,7 +37,8 @@ Complete EvoChess rules are [here](./rules.txt).
   current game.
 - Initial version used [chess.js](https://github.com/jhlywa/chess.js) for base chess legality.
 
-## Development
+
+## Dev
 
 ```bash
 npm install
@@ -56,17 +48,18 @@ npm run test:e2e # run the e2e suite (playwright, auto-starts the dev server)
 npm run build    # typecheck + production build
 ```
 
+
 ## Deployment
 
 Pushing to `main` builds and deploys to GitHub Pages via
 `.github/workflows/deploy.yml`.
 
+
 ## NNUE Training (optional)
 
 By default, the engine uses Piece-Square Table (PST), a hand-crafted positional
 evaluation technique. Alternatively, it also supports Efficiently‑Updated
-Neural Networks (called NNUE due to some Japanese translation issues).
-This section describes how to train such a neural network.
+Neural Networks (NNUE, written backwards).
 
 ### Step 1 - generate (or relabel) data
 
