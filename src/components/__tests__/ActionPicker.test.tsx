@@ -3,22 +3,25 @@ import { describe, expect, it } from "vitest";
 import { ActionPicker } from "../ActionPicker";
 
 function renderPicker(over: { browsing?: boolean; puzzleActive?: boolean; liveActive?: boolean } = {}) {
+  const { browsing = false, ...rest } = over;
   const { container } = render(
     <ActionPicker
       extraClass=""
-      browsing={false}
-      browsePly={null}
-      totalPlies={4}
+      browse={{
+        browsing,
+        browsePly: null,
+        totalPlies: 4,
+        browsePrevHoldable: {},
+        browseNextHoldable: {},
+        onBrowseLive: () => {},
+      }}
       aiThinking={false}
       onRestart={() => {}}
       onTakeback={() => {}}
-      onBrowseLive={() => {}}
-      browsePrevHoldable={{}}
-      browseNextHoldable={{}}
       setConfirmAction={() => {}}
       puzzleActive={false}
       liveActive={false}
-      {...over}
+      {...rest}
     />,
   );
   return container;

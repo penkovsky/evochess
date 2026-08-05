@@ -1,16 +1,21 @@
 import type {
-  CSSProperties,
-  HTMLAttributes,
   RefObject,
   TouchEvent as ReactTouchEvent,
   MouseEvent as ReactMouseEvent,
 } from "react";
 import { Chessboard } from "react-chessboard";
-import type { Color, Square } from "chess.js";
-import type { EvoChessGame, Rights } from "../evochess/game";
-import type { AiLevel } from "../evochess/ai";
-import type { ConfirmState, Mode, MobileWidget } from "../appTypes";
-import type { Scores } from "../evochess/scores";
+import type { Square } from "chess.js";
+import type {
+  BoardViewProps,
+  BrowseProps,
+  ClockProps,
+  ConfirmState,
+  LiveProps,
+  Mode,
+  MobileWidget,
+  PuzzleProps,
+  ScoreProps,
+} from "../appTypes";
 import { EvoStrip } from "../EvoStrip";
 import { ActionPicker } from "./ActionPicker";
 import { ClockDisplay } from "./ClockDisplay";
@@ -19,105 +24,58 @@ import { MobileBar } from "./MobileBar";
 export function BoardArea({
   boardWrapRef,
   mode,
-  timerEnabled,
   clock,
-  turn,
+  board,
+  browse,
+  puzzle,
+  live,
+  score,
   gameOver,
   status,
   aiThinking,
   nnueReady,
-  topColor,
-  bottomColor,
-  displayGame,
-  rightsFor,
   onBoardTouchStart,
   onBoardTouchEnd,
-  boardPosition,
   onPieceDrop,
   onSquareClick,
-  squareStyles,
-  boardOrientation,
   allowDragging,
-  showScoreOverlay,
-  scoreOverlayReady,
-  levelLabel,
-  currentRecord,
-  onPlayAgain,
-  browsing,
-  browsePly,
-  totalPlies,
   onRestart,
   onTakeback,
-  onBrowseLive,
-  browsePrevHoldable,
-  browseNextHoldable,
   setConfirmAction,
   openTutorial,
   openWidget,
-  onPuzzle,
-  onPuzzleRetry,
-  puzzleActive,
-  liveActive,
-  joinSeat,
-  joining,
-  onJoin,
-  puzzleMateIn,
-  puzzleResult,
   onShare,
 }: {
   boardWrapRef: RefObject<HTMLDivElement | null>;
   mode: Mode;
-  timerEnabled: boolean;
-  clock: Record<Color, number>;
-  turn: Color;
+  clock: ClockProps;
+  board: BoardViewProps;
+  browse: BrowseProps;
+  puzzle: PuzzleProps;
+  live: LiveProps;
+  score: ScoreProps;
   gameOver: boolean;
   status: string;
   aiThinking: boolean;
   nnueReady: boolean;
-  topColor: Color;
-  bottomColor: Color;
-  displayGame: EvoChessGame;
-  rightsFor: Record<Color, Rights>;
   onBoardTouchStart: (e: ReactTouchEvent) => void;
   onBoardTouchEnd: (e: ReactTouchEvent) => void;
-  boardPosition: string;
   onPieceDrop: (args: { sourceSquare: string; targetSquare: string | null }) => boolean;
   onSquareClick: (args: { square: string }) => void;
-  squareStyles: Record<string, CSSProperties>;
-  boardOrientation: "white" | "black";
   allowDragging: boolean;
-  showScoreOverlay: boolean;
-  scoreOverlayReady: boolean;
-  levelLabel: string;
-  currentRecord: Scores[AiLevel];
-  onPlayAgain: () => void;
-  browsing: boolean;
-  browsePly: number | null;
-  totalPlies: number;
   onRestart: () => void;
   onTakeback: () => void;
-  onBrowseLive: () => void;
-  browsePrevHoldable: HTMLAttributes<HTMLButtonElement>;
-  browseNextHoldable: HTMLAttributes<HTMLButtonElement>;
   setConfirmAction: (action: ConfirmState) => void;
   openTutorial: () => void;
   openWidget: (widget: MobileWidget) => void;
-  /** Null when there is no puzzle to offer, which hides the bar's button. */
-  onPuzzle: (() => void) | null;
-  onPuzzleRetry: () => void;
-  puzzleActive: boolean;
-  liveActive: boolean;
-  /** The free seat on a live match this browser holds none of. Null offers nothing. */
-  joinSeat: Color | null;
-  joining: boolean;
-  onJoin: () => void;
-  puzzleMateIn: number;
-  puzzleResult: null | "solved" | "failed";
   onShare: (e: ReactMouseEvent<HTMLButtonElement>, useShareSheet: boolean) => void;
 }) {
+  const { displayGame, topColor, bottomColor, squareStyles, rightsFor } = board;
   return (
     <div className="board-wrap" ref={boardWrapRef}>
-      {mode === "human-human" && timerEnabled && <ClockDisplay clock={clock} turn={turn} gameOver={gameOver} />}
+      {mode === "human-human" && clock.timerEnabled && (
+        <ClockDisplay clock={clock.clock} turn={clock.turn} gameOver={gameOver} />
+      )}
       <div className="board-status">{status}</div>
       <div
         className={`board-status-underline${aiThinking ? " thinking" : nnueReady ? " nnue-ready" : ""}`}
@@ -126,7 +84,7 @@ export function BoardArea({
       <div className="board-container" onTouchStart={onBoardTouchStart} onTouchEnd={onBoardTouchEnd}>
         <Chessboard
           options={{
-            position: boardPosition,
+            position: board.boardPosition,
             onPieceDrop,
             onSquareClick,
             squareRenderer: ({ square, children }) => {
@@ -140,17 +98,18 @@ export function BoardArea({
                 </div>
               );
             },
-            boardOrientation,
+            boardOrientation: board.boardOrientation,
             allowDragging,
           }}
         />
-        {showScoreOverlay && (
-          <div className={`score-overlay${scoreOverlayReady ? " revealed" : ""}`}>
+        {score.showScoreOverlay && (
+          <div className={`score-overlay${score.scoreOverlayReady ? " revealed" : ""}`}>
             <div className="score-overlay-text">
-              {levelLabel} <span className="score-win">{currentRecord.wins}</span>-{currentRecord.draws}-
-              <span className="score-loss">{currentRecord.losses}</span>
+              {score.levelLabel} <span className="score-win">{score.currentRecord.wins}</span>-
+              {score.currentRecord.draws}-
+              <span className="score-loss">{score.currentRecord.losses}</span>
             </div>
-            <button className="play-again-btn" onClick={onPlayAgain}>
+            <button className="play-again-btn" onClick={score.onPlayAgain}>
               Play again?
             </button>
           </div>
@@ -159,10 +118,10 @@ export function BoardArea({
             does not dim: the position is what the offer is being judged on.
             Never fired on load, since taking a seat is a deliberate act
             (docs/live-match.md). */}
-        {joinSeat && (
+        {live.joinSeat && (
           <div className="live-join-overlay">
-            <button className="play-again-btn" onClick={onJoin} disabled={joining}>
-              {joining ? "Joining…" : `Play as ${joinSeat === "w" ? "White" : "Black"}`}
+            <button className="play-again-btn" onClick={live.onJoin} disabled={live.joining}>
+              {live.joining ? "Joining…" : `Play as ${live.joinSeat === "w" ? "White" : "Black"}`}
             </button>
           </div>
         )}
@@ -170,15 +129,15 @@ export function BoardArea({
             layout above or below it and cannot push the board under the fold.
             The two can never collide: a puzzle is always `fromShared`, and the
             score overlay is suppressed for those. */}
-        {puzzleResult && (
+        {puzzle.puzzleResult && (
           <div className="puzzle-overlay" role="status">
             <div className="puzzle-overlay-text">
-              {puzzleResult === "solved"
-                ? `Solved! Mate in ${puzzleMateIn}.`
-                : `Not mate in ${puzzleMateIn}.`}
+              {puzzle.puzzleResult === "solved"
+                ? `Solved! Mate in ${puzzle.puzzleMateIn}.`
+                : `Not mate in ${puzzle.puzzleMateIn}.`}
             </div>
-            {puzzleResult === "failed" && (
-              <button className="play-again-btn" onClick={onPuzzleRetry}>
+            {puzzle.puzzleResult === "failed" && (
+              <button className="play-again-btn" onClick={puzzle.onPuzzleRetry}>
                 Try again
               </button>
             )}
@@ -193,23 +152,18 @@ export function BoardArea({
       />
       <ActionPicker
         extraClass="action-picker-below-board"
-        browsing={browsing}
-        browsePly={browsePly}
-        totalPlies={totalPlies}
+        browse={browse}
         aiThinking={aiThinking}
         onRestart={onRestart}
         onTakeback={onTakeback}
-        onBrowseLive={onBrowseLive}
-        browsePrevHoldable={browsePrevHoldable}
-        browseNextHoldable={browseNextHoldable}
         setConfirmAction={setConfirmAction}
-        puzzleActive={puzzleActive}
-        liveActive={liveActive}
+        puzzleActive={puzzle.puzzleActive}
+        liveActive={live.liveActive}
       />
       <MobileBar
         openTutorial={openTutorial}
         openWidget={openWidget}
-        onPuzzle={onPuzzle}
+        onPuzzle={puzzle.onPuzzle}
         onShare={onShare}
       />
     </div>

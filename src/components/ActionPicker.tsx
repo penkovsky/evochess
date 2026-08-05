@@ -1,34 +1,21 @@
-import type { HTMLAttributes } from "react";
-import type { ConfirmState } from "../appTypes";
+import type { BrowseProps, ConfirmState } from "../appTypes";
 import { ChevronLeftIcon, ChevronRightIcon, PawnIcon, UndoIcon } from "../Icons";
 
 export function ActionPicker({
   extraClass,
-  browsing,
-  browsePly,
-  totalPlies,
+  browse,
   aiThinking,
   onRestart,
   onTakeback,
-  onBrowseLive,
-  browsePrevHoldable,
-  browseNextHoldable,
   setConfirmAction,
   puzzleActive,
   liveActive,
 }: {
   extraClass: string;
-  browsing: boolean;
-  browsePly: number | null;
-  totalPlies: number;
+  browse: BrowseProps;
   aiThinking: boolean;
   onRestart: () => void;
   onTakeback: () => void;
-  onBrowseLive: () => void;
-  /** Handlers for the previous-move chevron: hold jumps to the start. */
-  browsePrevHoldable: HTMLAttributes<HTMLButtonElement>;
-  /** Handlers for the next-move chevron: hold jumps to the live position. */
-  browseNextHoldable: HTMLAttributes<HTMLButtonElement>;
   setConfirmAction: (action: ConfirmState) => void;
   /**
    * A puzzle owns the board, which takes away both of the actions that change
@@ -39,6 +26,7 @@ export function ActionPicker({
   /** A live match: the line cannot be rewound, so the slot holds no button. */
   liveActive: boolean;
 }) {
+  const { browsing, browsePly, totalPlies, browsePrevHoldable, browseNextHoldable, onBrowseLive } = browse;
   return (
     <div className={`action-picker ${extraClass}`}>
       {/* Four slots, the same widths whichever state the row is in, so nothing

@@ -29,7 +29,19 @@ import {
 } from "./telemetry";
 import { Fireworks } from "./Fireworks";
 import { Tutorial } from "./Tutorial";
-import { PUZZLE_LEVEL, type ConfirmState, type Mode, type PromoModalState, type RestartReason } from "./appTypes";
+import {
+  PUZZLE_LEVEL,
+  type BoardViewProps,
+  type BrowseProps,
+  type ClockProps,
+  type ConfirmState,
+  type LiveProps,
+  type Mode,
+  type PromoModalState,
+  type PuzzleProps,
+  type RestartReason,
+  type ScoreProps,
+} from "./appTypes";
 import { deriveBoardView } from "./boardView";
 import { buildSquareStyles } from "./boardStyles";
 import { useEvoGame } from "./hooks/useEvoGame";
@@ -1002,6 +1014,46 @@ function App() {
     browsable: totalPlies > 0,
   };
 
+  // The board's props, in clusters (docs/refactor-board-props.md).
+  const clockProps: ClockProps = { clock: clockRef.current, timerEnabled, turn: game.turn };
+  const boardProps: BoardViewProps = {
+    displayGame: view.displayGame,
+    boardPosition: view.displayGame.chess.fen(),
+    boardOrientation: view.boardOrientation,
+    squareStyles: buildSquareStyles(game, selected),
+    topColor: view.topColor,
+    bottomColor: view.bottomColor,
+    rightsFor: view.rightsFor,
+  };
+  const browseProps: BrowseProps = {
+    browsing,
+    browsePly,
+    totalPlies,
+    browsePrevHoldable: holdable(browseHome, browsePrev),
+    browseNextHoldable: holdable(browseLive, browseNext),
+    onBrowseLive: browseLive,
+  };
+  const puzzleProps: PuzzleProps = {
+    onPuzzle: puzzle.puzzle ? openPuzzle : null,
+    onPuzzleRetry: openPuzzle,
+    puzzleActive: puzzleOnBoard !== null,
+    puzzleMateIn: puzzleOnBoard?.mateIn ?? 0,
+    puzzleResult: puzzle.puzzleResult,
+  };
+  const liveProps: LiveProps = {
+    liveActive: live.live !== null,
+    joinSeat: live.live && !live.live.seat && live.live.status !== "over" ? live.live.freeSeat : null,
+    joining: live.joining,
+    onJoin: () => void live.joinLiveMatch(),
+  };
+  const scoreProps: ScoreProps = {
+    showScoreOverlay: view.showScoreOverlay,
+    scoreOverlayReady,
+    levelLabel: view.levelLabel,
+    currentRecord: scores[level],
+    onPlayAgain: () => startNewGame(setupMode, setupAiColor, setupLevel),
+  };
+
   return (
     <div className="layout">
       {showFireworks && !browsing && (
@@ -1033,50 +1085,26 @@ function App() {
       <BoardArea
         boardWrapRef={boardWrapRef}
         mode={mode}
-        timerEnabled={timerEnabled}
-        clock={clockRef.current}
-        turn={game.turn}
+        clock={clockProps}
+        board={boardProps}
+        browse={browseProps}
+        puzzle={puzzleProps}
+        live={liveProps}
+        score={scoreProps}
         gameOver={view.gameOver}
         status={view.status}
         aiThinking={aiThinking}
         nnueReady={nnueReady}
-        topColor={view.topColor}
-        bottomColor={view.bottomColor}
-        displayGame={view.displayGame}
-        rightsFor={view.rightsFor}
         onBoardTouchStart={onBoardTouchStart}
         onBoardTouchEnd={onBoardTouchEnd}
-        boardPosition={view.displayGame.chess.fen()}
         onPieceDrop={onPieceDrop}
         onSquareClick={onSquareClick}
-        squareStyles={buildSquareStyles(game, selected)}
-        boardOrientation={view.boardOrientation}
         allowDragging={view.allowDragging}
-        showScoreOverlay={view.showScoreOverlay}
-        scoreOverlayReady={scoreOverlayReady}
-        levelLabel={view.levelLabel}
-        currentRecord={scores[level]}
-        onPlayAgain={() => startNewGame(setupMode, setupAiColor, setupLevel)}
-        browsing={browsing}
-        browsePly={browsePly}
-        totalPlies={totalPlies}
         onRestart={() => restart("new-game", { mode: setupMode, aiColor: setupAiColor, level: setupLevel })}
         onTakeback={takeback}
-        onBrowseLive={browseLive}
-        browsePrevHoldable={holdable(browseHome, browsePrev)}
-        browseNextHoldable={holdable(browseLive, browseNext)}
         setConfirmAction={setConfirmAction}
         openTutorial={tutorial.openTutorial}
         openWidget={setWidget}
-        onPuzzle={puzzle.puzzle ? openPuzzle : null}
-        onPuzzleRetry={openPuzzle}
-        puzzleActive={puzzleOnBoard !== null}
-        liveActive={live.live !== null}
-        joinSeat={live.live && !live.live.seat && live.live.status !== "over" ? live.live.freeSeat : null}
-        joining={live.joining}
-        onJoin={() => void live.joinLiveMatch()}
-        puzzleMateIn={puzzleOnBoard?.mateIn ?? 0}
-        puzzleResult={puzzle.puzzleResult}
         onShare={share.handleShare}
       />
       <AppPanel

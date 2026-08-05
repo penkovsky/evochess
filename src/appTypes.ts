@@ -1,6 +1,9 @@
+import type { CSSProperties, HTMLAttributes } from "react";
 import type { Color } from "chess.js";
 import type { Square } from "chess.js";
 import type { AiLevel } from "./evochess/ai";
+import type { EvoChessGame, Rights } from "./evochess/game";
+import type { Scores } from "./evochess/scores";
 
 export type Mode = "human-ai" | "human-human";
 
@@ -72,3 +75,66 @@ export const RESTART_TITLE: Record<RestartReason, string> = {
   color: "Switch colors?",
   level: "Switch level?",
 };
+
+/*
+ * The board's props, in the clusters they already formed
+ * (`docs/refactor-board-props.md`). Each one is built in `App` and handed down
+ * whole, so a new field is one edit there and one in whichever component
+ * reads it.
+ */
+
+/** The human-vs-human clock. Not shown in any other mode. */
+export interface ClockProps {
+  clock: Record<Color, number>;
+  timerEnabled: boolean;
+  turn: Color;
+}
+
+/** What is on the squares, and which way round. */
+export interface BoardViewProps {
+  displayGame: EvoChessGame;
+  boardPosition: string;
+  boardOrientation: "white" | "black";
+  squareStyles: Record<string, CSSProperties>;
+  topColor: Color;
+  bottomColor: Color;
+  rightsFor: Record<Color, Rights>;
+}
+
+/** History browsing: where in the line the board is, and how to move. */
+export interface BrowseProps {
+  browsing: boolean;
+  browsePly: number | null;
+  totalPlies: number;
+  /** Handlers for the previous-move chevron: hold jumps to the start. */
+  browsePrevHoldable: HTMLAttributes<HTMLButtonElement>;
+  /** Handlers for the next-move chevron: hold jumps to the live position. */
+  browseNextHoldable: HTMLAttributes<HTMLButtonElement>;
+  onBrowseLive: () => void;
+}
+
+export interface PuzzleProps {
+  /** Null when there is no puzzle to offer, which hides the bar's button. */
+  onPuzzle: (() => void) | null;
+  onPuzzleRetry: () => void;
+  puzzleActive: boolean;
+  puzzleMateIn: number;
+  puzzleResult: null | "solved" | "failed";
+}
+
+export interface LiveProps {
+  liveActive: boolean;
+  /** The free seat on a live match this browser holds none of. Null offers nothing. */
+  joinSeat: Color | null;
+  joining: boolean;
+  onJoin: () => void;
+}
+
+/** The end-of-game overlay: the running record, and the way out of it. */
+export interface ScoreProps {
+  showScoreOverlay: boolean;
+  scoreOverlayReady: boolean;
+  levelLabel: string;
+  currentRecord: Scores[AiLevel];
+  onPlayAgain: () => void;
+}
