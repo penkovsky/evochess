@@ -13,6 +13,7 @@ import { ConfirmModal } from "./ConfirmModal";
 export function Dialogs({
   modal,
   finishModalMove,
+  cancelModalMove,
   share,
   confirmAction,
   closeConfirm,
@@ -25,6 +26,7 @@ export function Dialogs({
 }: {
   modal: PromoModalState | null;
   finishModalMove: (options: ApplyMoveOptions) => void;
+  cancelModalMove: () => void;
   share: UseShareModal;
   confirmAction: ConfirmState | null;
   closeConfirm: () => void;
@@ -37,7 +39,9 @@ export function Dialogs({
 }) {
   return (
     <>
-      {modal && <PromoModal modal={modal} finishModalMove={finishModalMove} />}
+      {modal && (
+        <PromoModal modal={modal} finishModalMove={finishModalMove} cancelModalMove={cancelModalMove} />
+      )}
       {share.shareModal && (
         <ShareModal
           shareModal={share.shareModal}

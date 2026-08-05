@@ -5,9 +5,12 @@ import type { PromoModalState } from "../appTypes";
 export function PromoModal({
   modal,
   finishModalMove,
+  cancelModalMove,
 }: {
   modal: PromoModalState;
   finishModalMove: (options: ApplyMoveOptions) => void;
+  /** Closing the dialog takes the move back. "Skip" is how to play it unpromoted. */
+  cancelModalMove: () => void;
 }) {
   return (
     <div className="modal-backdrop">
@@ -44,8 +47,9 @@ export function PromoModal({
               <p>Promote (optional)</p>
               <button
                 className="modal-close"
-                aria-label="Close (no promotion)"
-                onClick={() => finishModalMove({})}
+                aria-label="Cancel move"
+                title="Cancel move"
+                onClick={cancelModalMove}
               >
                 ×
               </button>

@@ -178,6 +178,49 @@ test("opening a shared position offers g4, g4=N and g4=B", async ({ page }) => {
   await expect(page.locator(".log > div").first()).toContainText("g4");
 });
 
+test("closing the optional-promotion dialog cancels the move", async ({ page }) => {
+  await openShareLink(page, VECTOR_A);
+  const pawn = '[data-square="g5"] img, [data-square="g5"] svg';
+
+  // Escape first. "Skip" is how to play the move unpromoted, so the two ways
+  // out of the dialog take the move back instead.
+  await page.locator('[data-square="g5"]').click();
+  await page.locator('[data-square="g4"]').click();
+  await expect(page.locator('.promo-icon[title="No promotion"]')).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".modal")).toHaveCount(0);
+  await expect(page.locator(".log > div")).toHaveCount(0);
+  await expect(page.locator(".board-status")).toHaveText("Black to move.");
+  await expect(page.locator(pawn)).toBeVisible();
+
+  // Then the ×, on a dialog reopened by the same move.
+  await page.locator('[data-square="g5"]').click();
+  await page.locator('[data-square="g4"]').click();
+  await page.locator(".modal-close").click();
+  await expect(page.locator(".modal")).toHaveCount(0);
+  await expect(page.locator(".log > div")).toHaveCount(0);
+  await expect(page.locator(pawn)).toBeVisible();
+
+  // And the dragged pawn goes back to g5, rather than sitting where it was
+  // dropped: the board's position never changed.
+  const a = (await page.locator('[data-square="g5"]').boundingBox())!;
+  const b = (await page.locator('[data-square="g4"]').boundingBox())!;
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 10 });
+  await page.mouse.up();
+  await expect(page.locator(".modal")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(pawn)).toBeVisible();
+  await expect(page.locator('[data-square="g4"] img, [data-square="g4"] svg')).toHaveCount(0);
+
+  // The cancelled move is still there to play.
+  await page.locator('[data-square="g5"]').click();
+  await page.locator('[data-square="g4"]').click();
+  await page.locator('.promo-icon[title="No promotion"]').click();
+  await expect(page.locator(".log > div").first()).toContainText("g4");
+});
+
 test("a shared position leaves the recipient's own game saved and restorable", async ({ page }) => {
   const save = ownGameSave();
   await openShareLink(page, VECTOR_B, { [SAVE_KEY]: save });

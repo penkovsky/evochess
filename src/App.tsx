@@ -574,7 +574,7 @@ function App() {
   useEffect(() => {
     if (!modal || modal.kind !== "optional") return;
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") finishModalMove({});
+      if (e.key === "Escape") cancelModalMove();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -838,6 +838,17 @@ function App() {
     const { from, to } = modal;
     setModal(null);
     applyAndAdvance(from, to, options);
+  }
+
+  /**
+   * Closing the optional-promotion dialog abandons the move, rather than
+   * playing it without the promotion. "Skip" is the way to do that, and it
+   * says so. Escape and the × mean "I did not mean this", so the piece goes
+   * back where it was.
+   */
+  function cancelModalMove() {
+    setModal(null);
+    setSelected(null);
   }
 
   // Logs a started-but-unfinished game as abandoned, before its state is
@@ -1137,6 +1148,7 @@ function App() {
       <Dialogs
         modal={modal}
         finishModalMove={finishModalMove}
+        cancelModalMove={cancelModalMove}
         share={share}
         confirmAction={confirmAction}
         closeConfirm={() => setConfirmAction(null)}
