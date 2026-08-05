@@ -3,7 +3,7 @@ import type { Color, Square } from "chess.js";
 import { EvoChessError, type ApplyMoveOptions } from "./evochess/game";
 import type { AiLevel } from "./evochess/ai";
 import { planMove } from "./evochess/moveOptions";
-import { decodeShareLink, readShareParam } from "./evochess/shareLink";
+import { decodeShareLink } from "./evochess/shareLink";
 import {
   saveGame,
   loadGame,
@@ -15,8 +15,8 @@ import {
   resumeMeta,
 } from "./evochess/persistence";
 import { loadProgress } from "./evochess/tutorialProgress";
-import { canMoveNow, readMatchParam } from "./liveMatch";
-import { formatPuzzleDate, type DailyPuzzle } from "./evochess/dailyPuzzle";
+import { canMoveNow } from "./liveMatch";
+import { formatPuzzleDate, loadCachedPuzzle, type DailyPuzzle } from "./evochess/dailyPuzzle";
 import {
   accruePlyTime,
   initTelemetry,
@@ -43,6 +43,7 @@ import { useTutorialInvite } from "./hooks/useTutorialInvite";
 import { useEngineLockout } from "./features/share/useEngineLockout";
 import { useSharedPosition } from "./features/share/useSharedPosition";
 import { useDailyPuzzle } from "./features/puzzle/useDailyPuzzle";
+import { resolveStartup } from "./features/startup/resolveStartup";
 import { useLiveMatch, type ApplyMove } from "./features/live/useLiveMatch";
 import { TopBanners } from "./components/TopBanners";
 import { BoardArea } from "./components/BoardArea";
@@ -322,34 +323,28 @@ function App() {
 
   useEffect(() => {
     initTelemetry();
-    const saved = loadGame();
     // A game parked by an earlier visit on a link, if the recipient never went
     // back to it. The offer outlives the reload that made it necessary.
     shared.setParked(hasParkedGame());
-    // `?p=` is read before the autosave is used, and decoded before anything
-    // else can claim the board (share-links-spec.md §6).
-    const param = readShareParam(window.location.search);
-    const link = param ? decodeShareLink(param) : null;
-    // `?p=` wins if both are present, being the more specific of the two. This
-    // reads the flag before it is stripped below.
-    const daily = !param && new URLSearchParams(window.location.search).has("daily");
-    // `?lm=` is fetched, so it cannot claim the board here; it takes it when
-    // the response lands, the way `?daily` does. Until then the autosave below
-    // is what is on screen.
-    const lm = readMatchParam(window.location.search);
-    if (link && !link.ok) {
-      console.warn(`evochess: shared link refused [${link.code}]`);
-      setLinkNotice(link.message);
-    }
-    // After the decode, since `from_share` and `share_refused` depend on it.
-    // The device class is the pointer and the viewport: no user agent string,
-    // which is a fingerprint and answers nothing these do not.
+    // Everything the four sources are decided from is read here, and the
+    // decision itself is pure (`resolveStartup`). What follows only applies it,
+    // in order: the order below is load-bearing (docs/refactor-startup.md).
     const progress = loadProgress();
-    // A valid link takes the board, and the autosave is left where it is.
-    resumedRef.current = !!saved && !link?.ok;
+    const saved = loadGame();
+    const cache = loadCachedPuzzle();
+    const startup = resolveStartup({ search: window.location.search, saved, cache, progress });
+    const { board } = startup;
+    if (startup.notice) {
+      console.warn(`evochess: shared link refused [${startup.refusedCode}]`);
+      setLinkNotice(startup.notice);
+    }
+    // Before `page_load`, which reports it. The device class is the pointer and
+    // the viewport: no user agent string, which is a fingerprint and answers
+    // nothing these do not.
+    resumedRef.current = startup.resumed;
     trackOnce("page_load", "page_load", {
-      from_share: !!param,
-      share_refused: !!link && !link.ok,
+      from_share: startup.fromShare,
+      share_refused: startup.shareRefused,
       resumed_game: resumedRef.current,
       viewport_w: window.innerWidth,
       viewport_h: window.innerHeight,
@@ -358,20 +353,22 @@ function App() {
       tutorial_seen: progress.seen,
       lessons_done: progress.completed.length,
     });
-    if (saved) {
-      // Applied whichever game wins the board below: a position-only link
-      // carries no extras block (share-links-spec.md §4.5), so orientation,
-      // mode and level are the recipient's own.
-      setSetupMode(saved.mode);
-      setSetupAiColor(saved.aiColor);
-      setSetupLevel(saved.level);
-      setAutoFlip(saved.autoFlip);
-      setTimerEnabled(saved.timerEnabled);
-      setTimerMinutes(saved.timerMinutes);
-      clockRef.current = saved.clock;
-      setPonderEnabled(saved.ponderEnabled);
+    if (startup.settings) {
+      // Applied before whichever game wins the board below: a position-only
+      // link carries no extras block (share-links-spec.md §4.5), so
+      // orientation, mode and level are the recipient's own.
+      const s = startup.settings;
+      setSetupMode(s.mode);
+      setSetupAiColor(s.aiColor);
+      setSetupLevel(s.level);
+      setAutoFlip(s.autoFlip);
+      setTimerEnabled(s.timerEnabled);
+      setTimerMinutes(s.timerMinutes);
+      clockRef.current = s.clock;
+      setPonderEnabled(s.ponderEnabled);
     }
-    if (link?.ok) {
+    if (board.kind === "shared") {
+      const { link, param } = board;
       // A history link's `game` is already the end of the line (spec §6.1);
       // the history holds everything strictly before it.
       shared.adoptPosition({
@@ -392,7 +389,8 @@ function App() {
         // screenshot of the console (spec §5.2).
         console.warn(`evochess: shared link failed legality check [${link.reasons.join(", ")}]`);
       }
-    } else if (saved) {
+    } else if (board.kind === "resume") {
+      const saved = board.saved;
       const resumed = resumeHistory(saved);
       gameRef.current = resumed.game;
       historyRef.current = resumed.history;
@@ -415,23 +413,23 @@ function App() {
       // every subsequent reload of the same finished game.
       if (gameRef.current.isGameOver()) scoredGameRef.current = gameRef.current;
       resetPonder(); // loading a save (ponder-spec.md §5.3, §6.2)
-    } else if (!daily && !lm && !progress.seen) {
-      // Deliberately not offered on top of a shared board (spec §11), nor over
-      // a puzzle that is about to arrive on one: someone arriving on a link
-      // came to look at a position, and the invite would cover it. A later
-      // visit without a link still gets the offer.
+    } else if (board.offerTutorial) {
       tutorial.offerInvite();
     }
-    if (lm) void live.openLiveMatch(lm, saved);
-    if (daily) {
-      // Stripped now, exactly as `?p=` is stripped once it goes live: a reload
-      // must not re-enter the puzzle over a game in progress.
+    if (startup.match) void live.openLiveMatch(startup.match, saved);
+    if (startup.daily) {
+      // Stripped after `?lm=` has been read, and exactly as `?p=` is stripped
+      // once it goes live: a reload must not re-enter the puzzle over a game in
+      // progress.
       const url = new URL(window.location.href);
       url.searchParams.delete("daily");
       window.history.replaceState(null, "", url.pathname + url.search + url.hash);
     }
+    // After the board is decided, and applied on a timer.
     puzzle.bootstrapPuzzle({
-      daily,
+      daily: startup.daily,
+      cached: cache,
+      auto: startup.puzzle,
       saved,
       // gameRef is whichever game took the board above, so this is the ply
       // count the request is racing.
@@ -443,8 +441,8 @@ function App() {
     // A history link's cursor (docs/share-links-spec.md §4.4): `enterBrowse`
     // already clamps to live, so a cursor at the end of the line needs no
     // special case.
-    if (link?.ok && link.cursor !== undefined && link.cursor < historyRef.current.length) {
-      enterBrowse(link.cursor);
+    if (board.kind === "shared" && board.link.cursor !== undefined && board.link.cursor < historyRef.current.length) {
+      enterBrowse(board.link.cursor);
     }
     rerender();
     // eslint-disable-next-line react-hooks/exhaustive-deps

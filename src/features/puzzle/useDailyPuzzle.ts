@@ -6,7 +6,6 @@ import {
   cachePuzzle,
   countAttempt,
   fetchDailyPuzzle,
-  loadCachedPuzzle,
   resolvePuzzle,
   type DailyPuzzle,
   type PuzzleAttempts,
@@ -43,6 +42,13 @@ export interface UseDailyPuzzle {
 export interface BootstrapPuzzleOptions {
   /** Whether the page was opened with `?daily`. */
   daily: boolean;
+  /** The cached puzzle, which is what puts the entry point on the first paint. */
+  cached: DailyPuzzle | null;
+  /**
+   * The cached puzzle `?daily` asked to have put on the board, or null. Decided
+   * by `resolveStartup`, so the precedence lives in one place.
+   */
+  auto: DailyPuzzle | null;
   /** The autosave read at page load, handed to `load` so it can be held. */
   saved: LoadedGame | null;
   /** The ply count the fetch is racing. */
@@ -125,7 +131,7 @@ export function useDailyPuzzle({ gameRef }: UseDailyPuzzleArgs): UseDailyPuzzle 
   }
 
   /**
-   * The cache read and the fetch, run once from the startup path.
+   * The cache handover and the fetch, run once from the startup path.
    *
    * The cache puts the button on screen from the first paint; `?daily` takes
    * its puzzle from there too, rather than waiting for a response it already
@@ -133,18 +139,15 @@ export function useDailyPuzzle({ gameRef }: UseDailyPuzzleArgs): UseDailyPuzzle 
    * awaited: the client cannot tell whether its own idea of today is right, and
    * one request per load is cheap.
    */
-  function bootstrapPuzzle({ daily, saved, plyAtLoad, load, heldGame }: BootstrapPuzzleOptions) {
-    const cached = loadCachedPuzzle();
-    if (cached) {
-      setPuzzle(cached);
-      // Deferred rather than applied here, so it lands at the same point in the
-      // life of the page the response's own load does. The startup path is
-      // still deciding what the board holds, and swapping the position in
-      // before that would leave the mount-time engine chain running against the
-      // colours of the game the puzzle displaced, which is the engine taking
-      // the solver's first move.
-      if (daily) setTimeout(() => load(cached, saved), 0);
-    }
+  function bootstrapPuzzle({ daily, cached, auto, saved, plyAtLoad, load, heldGame }: BootstrapPuzzleOptions) {
+    if (cached) setPuzzle(cached);
+    // Deferred rather than applied here, so it lands at the same point in the
+    // life of the page the response's own load does. The startup path is still
+    // applying what the board holds, and swapping the position in before that
+    // would leave the mount-time engine chain running against the colours of
+    // the game the puzzle displaced, which is the engine taking the solver's
+    // first move.
+    if (auto) setTimeout(() => load(auto, saved), 0);
     void fetchDailyPuzzle().then((row) => {
       // Null: keep whatever the cache held.
       if (!row) return;
