@@ -1,155 +1,87 @@
- The EvoChess Game
- =================
+The EvoChess Game
+=================
 
- == EvoChess rules
+== EvoChess rules
 
- 0. === Chess-Based Rules
-    - In general, the pieces move and the Pawns are promoted similarly to chess.
-    - During the promotion, only the pieces of the same color are available.
-    - The first long Pawn move is allowed and is counted as a single move.
-    - En passant is defined as in chess.
-    - Checks, mates, and stalemates are defined by the standard chess rules.
+0. === Chess-Based Rules
+   - Pieces move as in chess.
+   - Pawn promotion is as in chess, to own-color pieces only.
+   - The double Pawn move and en passant are as in chess.
+   - Check, mate, and stalemate are as in chess.
 
- 1. === EvoChess Starting Position
-    The game starts only with 8 Pawns and a King of each color
-    on their standard chess positions.
+1. === Starting Position
+   Each side starts with 8 Pawns and a King on their standard squares.
 
- 2. === The First Evolutionary Addendum aka "To Minor Piece Promotion"
-    In addition to chess rules, Pawns may be promoted to minor pieces
-    under the following conditions. After every N = 3 Pawn moves,
-    the player gains the right to promote to a minor piece (a Knight or a Bishop)
-    the last Pawn that moved.
+2. === The First Evolutionary Addendum aka "To Minor Piece Promotion"
+   Every 3 Pawn moves earn the right to promote the last Pawn that
+   moved to a Knight or a Bishop.
 
- 3. === The Second Evolutionary Addendum aka "To Rook Promotion"
-    After every M = 3 moves made by a player's own minor pieces (Knights
-    and Bishops), that player gains the right to promote to a Rook the last
-    minor piece that moved. This fully mirrors the Pawn rule: just as the
-    "To Minor Piece Promotion" right promotes the last Pawn that moved, the
-    "To Rook Promotion" right promotes the last minor piece that moved.
-    Captures play no part in the "To Rook Promotion" right.
+3. === The Second Evolutionary Addendum aka "To Rook Promotion"
+   Every 3 moves by a player's own minor pieces earn the right to
+   promote the last minor piece that moved to a Rook. This mirrors the
+   Pawn rule.
 
- 4. === Clarifications
-    - The promotion rights, both for Pawns and minor pieces, are accumulated
-      indefinitely.
+4. === The Third Evolutionary Addendum aka "Rook Charges"
+   Every Rook carries 5 charges from the moment it is created, whether by
+   the "To Rook Promotion" right or by an 8th-rank Pawn promotion.
 
-      ==== Consider the white Pawns promotion example
+   - Only the Rook's own moves spend charges.
 
-           | Move # | Comment
-      ======================================================================
-      e4   | 1      | A Pawn moves.
-      ..   |        |
-      d4   | 3      | Another Pawn moves.
-      ..   |        |
-      d5   | 5      | The same Pawn moves again, and the "To Minor Piece Promotion"
-           |        | right is obtained. No promotion is obligatory.
-      ..   |        |
-      d6   | 7      | A Pawn moves without promotion.
-           |        | The player's "To Minor Piece Promotion" right from the
-           |        | previous moves is preserved.
-      ..   |        |
-      b4=N | 9      | A Pawn moves and is promoted to a minor piece.
-      ..   |        |
-      Nd5  | 11     | The minor piece moves. No evolution.
-      ..   |        |
-      a4=B | 13     | The 6th Pawn move counts towards regaining the
-           |        | "To Minor Piece Promotion" right. The Pawn gets promoted.
+   - On reaching 0 charges the Rook downgrades on the same square and turn
+     to a Knight or a Bishop, the owner's choice. This is mandatory.
 
-      Remark: The next N - 1 = 2 Pawn moves, Pawns have no evochess promotion
-              rights unless the 8th rank was reached.
+   - The downgraded piece counts towards "To Rook Promotion" but can never
+     become a Rook again.
 
-      Remark: The 8th rank Pawn promotion is obligatory as in standard chess
-              and is also counted towards the Pawn moves.
+   - Capturing a Rook removes it and its charges.
 
-    - A move by a minor piece counts towards "To Rook Promotion" whether or
-      not it is a capture. Pawn moves (including Pawn captures) count towards
-      "To Minor Piece Promotion" only, never towards "To Rook Promotion".
+   - Check, mate, and stalemate are judged after the downgrade, not on the
+     position before it.
 
-    - A Pawn move on which the Pawn evolves into a minor piece (via the
-      "To Minor Piece Promotion" right) is counted as a Pawn move: it counts
-      towards "To Minor Piece Promotion" and never towards "To Rook Promotion",
-      because the piece that moved was a Pawn. The freshly created minor piece
-      only begins counting towards "To Rook Promotion" on its own later moves.
+5. === Clarifications
+   - Promotion rights accumulate indefinitely.
 
-    - En passant is unaffected by an evolution on the same move. If a Pawn
-      makes its first long move and evolves into a minor piece at the end of
-      that move, the en passant capture is still available to the opponent on
-      the next move, exactly as if no evolution had taken place. The capturing
-      Pawn moves to the skipped square and removes the evolved piece, minor
-      piece or not. Rationale: the right to capture en passant is created by
-      the Pawn move, and the piece that moved was a Pawn; an evolution resolves
-      only at the end of that move and cannot retroactively undo it. Otherwise
-      spending a promotion right would double as an en passant immunity.
+   - A right is spent only on the piece that just moved, so only on a turn
+     when such a piece moves. Unused rights carry over.
 
-    - A promotion is available only in the end of the player's move.
+   - Only one piece is promoted per move, however many rights are held.
 
-    - Both evolutionary promotions apply to the piece that just moved: the
-      "To Minor Piece Promotion" right may only be spent on the Pawn that
-      just moved, and the "To Rook Promotion" right may only be spent on the
-      minor piece that just moved. Consequently a rook-promotion right can
-      only be exercised on a turn on which a minor piece moves, just as a
-      minor-promotion right can only be exercised on a turn on which a Pawn
-      moves. Unused rights are preserved for a later such turn.
+   - Pawn moves, captures included, count only towards "To Minor Piece
+     Promotion". Minor-piece moves, captures included, count only towards
+     "To Rook Promotion".
 
-    - Only one piece at a time can be promoted even if several rights are
-      accumulated (e.g. an unused Pawn-promotion right together with an unused
-      minor-piece-promotion right).
+   - A Pawn move that evolves counts as a Pawn move. The new minor piece
+     starts counting on its own later moves.
 
-    - If the 8th rank is reached by a Pawn, the Pawn promotion is obligatory.
-      No other promotions are possible at that move.
+   - Evolution does not cancel en passant. The capturing Pawn takes the
+     evolved piece on the skipped square. The right was created by a Pawn
+     move. Otherwise a promotion right would double as en passant immunity.
 
-    - Castling is not defined.
+   - Promotion resolves at the end of the move.
 
- 5. === The Third Evolutionary Addendum aka "Rook Charges"
-    A Rook is a one-shot power spike, not a permanent fixture. Every Rook
-    carries 5 charges, starting from the moment it is created (whether by
-    the "To Rook Promotion" right or by a standard 8th-rank Pawn promotion
-    to Rook).
+   - Reaching the 8th rank forces the standard promotion. No other
+     promotion that move.
 
-    - A charge is spent only when the Rook itself moves. Moves by other
-      pieces do not affect a Rook's charges.
+   - Castling is not defined.
 
-    - When a Rook move brings its charges to 0, the Rook immediately
-      downgrades, on the same square and the same turn, into a minor piece
-      (a Knight or a Bishop, the owner's choice). This downgrade is
-      mandatory: a Rook move that would exhaust its last charge cannot be
-      completed without it.
+     ==== White Pawn promotion example
 
-    - The downgraded minor piece begins a fresh "To Rook Promotion" counter
-      at zero, like any other minor piece, but it can never again be
-      promoted to a Rook: once downgraded, a piece is permanently locked
-      out of the "To Rook Promotion" right, even if it later earns one.
-
-    - Capturing a Rook is a normal capture: the Rook and its remaining
-      charges are simply removed from the game. Capture never triggers a
-      downgrade — downgrade only ever results from the Rook's own move
-      exhausting its own charges.
-
-    - Because a downgrade can remove the very piece giving check (or bring
-      a new piece into a checking position), check, checkmate, and
-      stalemate are judged only after the downgrade is resolved, not on
-      the intermediate position immediately after the Rook's move.
+          | Move # | Comment
+     ======================================================================
+     e4   | 1      | A Pawn moves.
+     d4   | 3      | Another Pawn moves.
+     d5   | 5      | 3rd Pawn move: the minor-promotion right is earned.
+          |        | Promoting is optional.
+     d6   | 7      | A Pawn moves. The unused right is preserved.
+     b4=N | 9      | A Pawn moves and spends the right.
+     Nd5  | 11     | A minor piece moves. No evolution.
+     a4=B | 13     | The 6th Pawn move earns the right again, and spends it.
 
 
 September 2017, Bogdan Penkovsky
 
-Revised July 2026: the "To Rook Promotion" right was changed from being earned
-by non-Pawn captures (K = 2) to being earned by minor-piece moves (M = 3),
-making it structurally symmetric with the Pawn rule and rewarding activity
-rather than captures.
-
-Revised July 2026: the "To Rook Promotion" right was further narrowed so that
-it promotes only the last minor piece that moved (rather than any minor piece
-on the board), completing the symmetry with the "To Minor Piece Promotion"
-right, which promotes only the last Pawn that moved.
-
-Revised July 2026: clarified that an evolution on a first long Pawn move does
-not cancel the opponent's en passant capture, resolving an ambiguity between
-"En passant is defined as in chess" (rule 0) and evolution changing the piece
-on the arrival square.
-
-Revised July 2026: added "Rook Charges" (rule 5), so that a Rook is a scarce,
-temporary asset rather than a permanent fixture once earned. Charges are
-spent per Rook move, not per turn, so developing other pieces costs a Rook
-nothing. The permanent lock-out on re-promotion (rather than allowing a
-downgraded piece to become a Rook again) keeps Rooks a burst of power to be
-timed rather than a piece that cycles indefinitely.
+Revised July 2026:
+- "To Rook Promotion" is earned by minor-piece moves, not by non-Pawn captures.
+- It promotes only the last minor piece that moved.
+- Disambiguated evolution on a double Pawn move: en passant still stands.
+- Added Rook Charges.
