@@ -457,9 +457,11 @@ test("New Game leaves the puzzle, and the banner with it", async ({ page }) => {
   await page.locator('[data-square="g1"]').click();
   await expect(page.locator(".puzzle-overlay")).toHaveText(/Not mate in 2\./);
 
-  // The attempt has moves in it and has not finished, so this asks first.
-  await page.locator(".new-game-btn").click();
-  await page.getByRole("button", { name: "Discard and start" }).click();
+  // New Game is where the mode is picked now, so it always opens the dialog,
+  // and the warning about the moves it discards shares it.
+  await page.locator(".action-picker .new-game-btn").click();
+  await expect(page.locator(".modal")).toContainText("Discard the game?");
+  await page.getByRole("button", { name: "Computer" }).click();
 
   await expect(page.locator(".puzzle-overlay")).toHaveCount(0);
   await expect(page.locator(".board-status")).toHaveText("White to move.");

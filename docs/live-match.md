@@ -2,43 +2,45 @@
 
 The smallest thing two people can play over a link.
 
-Status: M1 built (`sql/live-match.sql`, `src/liveMatch.ts`, `src/App.tsx`,
-`src/__tests__/liveMatch.test.ts`); M2 is still design. The schema has to be
-applied by hand, like every other file in `sql/`. `lm_fetch` also returns
-`free_seat`, so the join button can name the colour it is offering.
-
-Three rules the build settled that the sections below do not spell out. Creating a
-match puts that match on the board, replayed from `start_payload` with an empty
-move list, so the creator's first send is ply 1 exactly as the joiner's is.
-Takeback and "play from here" are hidden while a match is on the board, and the
-functions refuse as well as the buttons: both rewind the move list, and the
-server will not take a ply it already holds. Browsing stays, being read-only.
-
-Leaving is the third. New Game and "back to my game" are the two ways out, and
-both go through `leaveLiveMatch`, which drops the seat, the `?lm=` parameter and
-the poll together. Neither may leave by accident, so both ask first. "Back to my
-game" gets its own dialog, since what it costs is the seat and not the moves,
-and New Game asks even at ply 0 for the same reason. Without this, a stale poll
-keeps applying the opponent's moves onto the game just restored.
-
 ## Shape
 
 - Moves only over the wire. Both clients run the engine. The backend knows no
   chess.
-- Polling, bare `fetch` like `telemetry.ts`. No new dependency.
+- Polling with bare `fetch`, like `telemetry.ts`. No new dependency.
 - The match id in the link is the read capability. A per-seat token in
   `localStorage` is the write capability. It never appears in a URL.
-- Untimed. No clocks, no clock columns.
+- Untimed. No clocks.
+- `live` is not a mode. It is vs-Human with a transport, so `mode` stays
+  two-valued and persistence and scoring types are untouched.
 
-Dropped until asked for: takeback, resign, draw, presence, rematch, seat
-reclaim, `beforeunload` guard, `lm_end`, the `outcome` column, e2e tests,
-websockets.
+Later: takeback, resign, draw, presence, seat reclaim, `beforeunload` guard,
+`lm_end`, the `outcome` column, e2e tests, websockets.
+
+Rules the build settled:
+
+- Creating a match puts it on the board, replayed from `start_payload` with an
+  empty move list, so the creator's first send is ply 1 just like the joiner's.
+- Takeback and "play from here" are hidden while a match is on the board, and
+  the functions refuse too: both rewind the move list, and the server will not
+  take a ply it already holds. Browsing stays, being read-only.
+- New Game and "back to my game" are the only ways out, both through
+  `leaveLiveMatch`, which drops the seat, the `?lm=` parameter and the poll
+  together. Both ask first, New Game even at ply 0. Otherwise a stale poll keeps
+  applying the opponent's moves onto the game just restored.
+
+## Relevant files
+
+- sql/live-match.sql
+- src/liveMatch.ts
+- src/features/live/useLiveMatch.ts
+- src/components/ConfirmModal.tsx
+- src/components/InviteModal.tsx
+- src/App.tsx
 
 ## Backend
 
 One function set, `security definer`. The anon key gets EXECUTE and nothing
-else. No SELECT, INSERT, UPDATE or DELETE on any table. Today's insert-only,
-read-nothing posture is unchanged.
+else: no SELECT, INSERT, UPDATE or DELETE on any table.
 
 ```sql
 create table lm_matches (
@@ -64,61 +66,43 @@ create table lm_moves (
 );
 ```
 
-`opts` is `ApplyMoveOptions` as JSON. The primary key is load-bearing. It
-dedupes a retried send, fixes the order, and makes a double insert at one ply
-impossible.
+`opts` is `ApplyMoveOptions` as JSON. The primary key dedupes a retried send,
+fixes the order, and makes a double insert at one ply impossible. Every
+attacker-controlled column is bounded by a `check`, the cheapest place for a
+bound and one a client cannot forget. On receipt the client rebuilds `opts` by
+allowlisting keys, never by spreading it.
 
-Every attacker-controlled column is bounded by a `check`. That is the cheapest
-place for a bound, and a client cannot forget it. `opts` is a few short fields,
-so 256 bytes is generous. `start_payload` is a `?p=` payload, so 2 KB is. On
-receipt the client rebuilds `opts` by allowlisting keys, never by spreading it.
-An unexpected key is dropped before the engine sees it.
-
-Turn ownership is ply parity against `first_mover`. Odd plies are
-`first_mover`'s, even plies the other side's. **This is the whole "White cannot
-append Black's moves" rule.** It lives in `lm_play`, not the client.
-
-Parity alone still lets a seat holder insert any ply of their own colour,
-including far-future ones. That means unbounded rows and a permanent gap in the
-opponent's move list. So `lm_play` also pins the ply to
-`coalesce(max(ply), 0) + 1`. One sub-select in the same statement. Moves are now
-append-only as well as alternating.
+Turn ownership is ply parity against `first_mover`: odd plies are
+`first_mover`'s, even plies the other side's. That is the whole "White cannot
+append Black's moves" rule, and it lives in `lm_play`. Parity alone would still
+let a seat holder insert far-future plies, so `lm_play` also pins the ply to
+`coalesce(max(ply), 0) + 1`. Moves are append-only as well as alternating.
 
 Tokens come from `gen_random_bytes(32)` (pgcrypto), base64url'd. Not `random()`,
-which is seeded and predictable. Not a uuid either. The token is all that stands
-between a reader and a seat, so it is the one value that has to be
-cryptographic.
-
-Four functions:
+which is seeded and predictable. The token is all that stands between a reader
+and a seat.
 
 | Function | Does |
 |---|---|
 | `lm_create(start_payload, first_mover, creator_seat)` → `(match_id, token)` | Generates the id and the creator's token. |
 | `lm_join(match_id)` → `(seat, token)` | Conditional update on the null token column; sets `status='live'`. Zero rows means the seat is taken → raise. That one statement is the entire race resolution. |
-| `lm_play(match_id, token, ply, from, to, opts)` | Rejects unless `status='live'`, the token matches the seat owning `ply` by parity, **and `ply` is exactly one past the highest stored ply**. Inserts. PK conflict surfaced distinctly. |
-| `lm_fetch(match_id, since_ply)` | Returns status, `first_mover`, `start_payload`, whether the second seat is taken, and every move above `since_ply` in order. Never returns a token. Unknown id returns nothing. |
+| `lm_play(match_id, token, ply, from, to, opts)` | Rejects unless `status='live'`, the token matches the seat owning `ply` by parity, and `ply` is exactly one past the highest stored ply. PK conflict surfaced distinctly. |
+| `lm_fetch(match_id, since_ply)` | Returns status, `first_mover`, `start_payload`, `free_seat` (so the join button can name the colour), and every move above `since_ply` in order. Never returns a token. Unknown id returns nothing. |
 
-`created_at` on a move is how stale a match is: `max(created_at)` is its last
-move, and nothing else advances after creation. Retention and abandonment both
-need that. `lm_fetch` never returns it.
+`lm_fetch` is the only read path in the app. `created_at` on a move is how stale
+a match is; retention and abandonment both need it, and `lm_fetch` never returns
+it. Rows are deletable after 30 days. No player identifier is stored.
 
-`lm_fetch` is the only read path in the app. Rows are deletable after 30 days.
-No player identifier is stored.
-
-**Observers are free.** Anyone with the link can call `lm_fetch` and watch. They
-cannot move. `lm_play` needs a seat token, and only `lm_create` and `lm_join`
-return one. This holds in M1, which has no observer UI.
-
-Which is why **`lm_join` is never called on page load**. The link only reads.
-Joining turns it into a write capability, so it takes a deliberate act.
-Otherwise the first person to open a link pasted into a group chat becomes the
-opponent. The invited player arrives second and watches their own game, with no
-seat reclaim in this MVP to undo it.
+**Observers are free.** Anyone with the link can call `lm_fetch` and watch, and
+cannot move: `lm_play` needs a seat token, and only `lm_create` and `lm_join`
+return one. Which is why **`lm_join` is never called on page load**. Joining
+takes a deliberate act, or the first person to open a link pasted into a group
+chat becomes the opponent, and there is no seat reclaim to undo it.
 
 ## Milestone 1: playable, no UI
 
 `src/liveMatch.ts`, the two touch points in `App.tsx` a move passes through, and
-the join button below. Nothing in `ControlsPanel` or the share dialog.
+the join button. Nothing in `ControlsPanel` or the share dialog.
 
 Creating a match is a console call, exposed on `window` in this build:
 
@@ -130,17 +114,12 @@ It calls `lm_create` with the current position's `?p=` payload (null at the
 opening), stores the seat under `evochess-live-v1`, and switches to vs-Human
 mode.
 
-Opening `?lm=<id>` fetches the match and shows it read-only. Taking the seat is
-a second step: one button, "Play as Black", which calls `lm_join`. If the seat
-is taken, or the match is unknown or over, the button is not offered and the
-client stays read-only. That button is the only control M1 adds. Everything else
-stays on the console.
-
-On success the seat is stored and play begins. This reuses the existing `?p=`
-inbound path, so the opener's own autosave is parked as it already is for a
-shared link. The result is not scored locally.
-
-Seat record:
+Opening `?lm=<id>` fetches the match and shows it read-only. Taking the seat is a
+second step: one button, "Play as Black", calling `lm_join`. If the seat is
+taken, or the match is unknown or over, the button is not offered. That button is
+the only control M1 adds. On success the seat is stored and play begins. This
+reuses the existing `?p=` inbound path, so the opener's own autosave is parked as
+it already is for a shared link. The result is not scored locally.
 
 ```ts
 interface LiveSeat {
@@ -155,15 +134,15 @@ interface LiveSeat {
 Behaviour:
 
 - `attemptMove` refuses unless the ply belongs to the local seat, mirroring the
-  vs-AI turn guard. **No seat token → every move is refused.** That is the
-  observer case, and the whole point.
-- `applyAndAdvance` calls `sendMove` after the move applies locally, so the
-  board never waits on the network. A failed send retries with backoff. A PK
-  conflict counts as success.
-- Poll `lm_fetch` at 1200 ms while it is the opponent's turn, or while waiting
-  for a join. Never on the local turn. Nothing can arrive then. Stop on
-  `document.hidden`, poll once on becoming visible, stop at game end.
-- A move at the expected ply goes through `applyAndAdvance`. The move log,
+  vs-AI turn guard. No seat token means every move is refused. That is the
+  observer case.
+- `applyAndAdvance` calls `sendMove` after the move applies locally, so the board
+  never waits on the network. A failed send retries with backoff. A PK conflict
+  counts as success.
+- Poll `lm_fetch` at 1200 ms while it is the opponent's turn or while waiting for
+  a join, never on the local turn. Stop on `document.hidden`, poll once on
+  becoming visible, stop at game end.
+- A move at the expected ply goes through `applyAndAdvance`, so the move log,
   history and game-end detection are unchanged code.
 - A gap, or a remote move the engine rejects, refetches from ply 0 and replays
   from the start position. Replay is also how a reload resumes.
@@ -173,39 +152,128 @@ for the opponent to join, or for their move.
 
 Tests, mocked `fetch`, in the style of `telemetry.test.ts`: parity → seat for
 both values of `first_mover`; replay equals playing move by move; a gap triggers
-refetch and replay; the poll stops on the local turn, on hidden, and at game
-end; `?lm=` issues no `lm_join` until the button is pressed; an unknown key in
-`opts` is dropped. Two-browser play is checked by hand.
+refetch and replay; the poll stops on the local turn, on hidden, and at game end;
+`?lm=` issues no `lm_join` until the button is pressed; an unknown key in `opts`
+is dropped. Two-browser play is checked by hand.
 
-## Milestone 2: New Game picker
+## Milestone 2: New Game chooses the mode
 
-New Game offers three options:
+M1 works and cannot be found. M2 makes it reachable.
+
+### The mode picker moves into New Game
+
+Changing mode already restarts the game (`onRestart("mode", …)`), so the picker
+is a new game in disguise. M2 drops it for three New Game options:
 
 | Option | Mode | Then |
 |---|---|---|
-| vs AI | `human-ai` | As today. |
-| vs Friend | `human-human` | Creates a live match and shows the invite link. |
+| Computer | `human-ai` | As today. Colour and level. |
+| Friend | `human-human` | Creates a match, shows the invite link. |
 | Over the board | `human-human` | As today, both sides local. |
 
-So `live` is not a fourth mode. It is vs-Human with a transport attached. `mode`
-stays two-valued, and the persistence and scoring types are untouched.
+Consequences:
 
-vs Friend replaces M1's console call. Create, show the link with a copy button,
-then wait for the second seat. If the creator holds the side to move, they may
-move before anyone joins. It is stored and waiting when the opponent arrives.
+- `RestartReason` loses `"mode"`. `"color"` and `"level"` stay in
+  `ControlsPanel`, still disabled after the first move.
+- New Game stays one dialog. The three options and the "discards N moves"
+  warning share it. Choosing is the confirmation.
+- The Friend row carries its own seat choice, two kings on the same line as the
+  button, one selected. Its value is passed to `createLiveMatch(seatColor)`. Not
+  the panel's colour picker, which only exists in vs-AI and so is not on screen
+  when New Game is pressed from a human-vs-human game.
+- One-word labels, and a 280px dialog rather than one as wide as its longest
+  sentence.
 
-Also in M2, since they are one screen's worth of text between them:
+New Game resets the board first, so a match created here starts at the opening
+and `start_payload` is null. Starting one from the current position stays on the
+console.
 
-- Cannot-join notice in `TopBanners`. Covers full, unknown or over. Includes a
-  way to start a normal game.
-- Read-only banner for an observer, and no drag affordance on the board.
-- Connection-lost line after three failed polls. Keeps retrying, keeps the
+### The invite
+
+`createLiveMatch` already returns the URL and copies it. M2 gives it a dialog:
+link, copy button, waiting state. It closes to the board; the waiting status line
+brings it back.
+
+### States with no UI yet
+
+M1 handles all of these and says so only to the console.
+
+| State | Shown as | Needs |
+|---|---|---|
+| Waiting for your friend | Status line, plus the invite dialog | Nothing. `status === "waiting"`. |
+| Opponent's turn | Status line, styled like the AI's "thinking" | Nothing. |
+| Read-only | Banner, no drag affordance | Nothing. `seat === null` already refuses moves. |
+| Cannot join | `TopBanners` notice, with a way to start a normal game | Nothing. `setLinkNotice` carries it. |
+| Connection lost | Status line after three failed polls. Keeps retrying, keeps the board | `lmFetch` returns null for a failure and an unknown match alike. Split them, then count. |
+| Out of sync | Status line, terminal, offers a new game only | A flag set where `replay` fails and where a send is refused. |
+
+So: two additions to the transport, and the rest is presentation.
+
+- `lmFetch` returns `LiveState | "unknown" | null`: an answer, no such match, or
+  a failed read. Only the last is counted, by `countFailure`/`isConnectionLost`,
+  and any answer resets the count. Three, about four seconds at 1200 ms.
+- An answer merges onto the view as it is now, not the one polled against: the
+  seat and `outOfSync` are ours, and a slow read must not undo them. Retrying
+  includes our own turn while lost, since only a read that works clears it.
+- `LiveView` gains `outOfSync`. `shouldPoll` and `canMoveNow` return false on
+  it, which is what makes it terminal. Only New Game clears it, by dropping the
+  match. It is set where `replay` fails and where a send is refused; a refused
+  send no longer resyncs, since no refetch can unplay a move already on our
   board.
-- Out-of-sync line for divergence. Terminal for that match. Offers a new game
-  and nothing else.
 
-Mobile first, as everywhere else. Each of these has to read on a narrow screen
-without pushing the board or the evo strip out of view.
+Rules the build settled:
+
+- New Game always opens the dialog, even at ply 0 with nothing to discard: the
+  dialog is where the mode is picked, so there is nothing to skip to. The colour
+  and level switches keep the old two-button confirm.
+- The waiting status line is a button that reopens the invite. Closing the
+  dialog would otherwise lose the only copy of the URL.
+
+`LiveProps` carries these to `BoardArea`. Nothing else in the prop tree changes.
+
+Mobile first. Watch the invite dialog: a URL is long, and must wrap rather than
+widen the page.
+
+### Tests
+
+- Each New Game option lands in the right mode. Live creates a match.
+- A failed poll is not an unknown match. Three raise connection-lost; a success
+  between them resets.
+- The out-of-sync flag stops the poll and refuses a local move.
+
+Two-browser play still checked by hand.
+
+## Milestone 2b: game over, then rematch
+
+Game over ends the warnings. No "leaving the game", no "giving up the seat":
+the seat is worth nothing once the result is in.
+
+Then both players see one green **Rematch** button.
+
+| Seen | You | Opponent |
+|---|---|---|
+| Neither asked | Green "Rematch" | Green "Rematch" |
+| You asked | Waiting | Line above the button: "Your opponent wants a rematch". Button turns blue, reads "Accept" |
+| Both asked | New match starts | New match starts |
+
+On rematch the seats swap colour. Whoever was White plays Black.
+
+Transport: the ask is a flag per seat on the match row, polled like the moves.
+Both flags set creates the new match, its id written back so each side follows
+it. The poll keeps running after game end while a rematch is pending.
+
+Rules the build settled:
+
+- `lm_rematch` is the ask, the accept, and how each side collects its token for
+  the next match, which `lm_fetch` will not give it. The row is locked, so two
+  accepts at once create one match.
+- The poll runs after game over for any seat holder, not only once an ask is in:
+  an ask you cannot see is an ask nobody can answer. It stops at `rematch_id`.
+- The old match is set `over`, and `?lm=` and the stored seat move to the new
+  one, so a reload lands in the rematch.
+- The offer survives browsing: it is the only sign the opponent asked.
+- Untimed is enforced: a match switches the clock off, since only one side
+  would see a flag fall. Auto flip goes with it, the seat orienting the board.
 
 ## Accepted limits
 
@@ -214,10 +282,9 @@ without pushing the board or the evo strip out of view.
   server-side rules would mean a second EvoChess implementation.
 - Losing `localStorage` loses the seat. The player can still watch. Reclaiming a
   seat safely needs presence, which is not in this MVP.
-- The link is public once sent. Holding it means reading the game, and taking
-  the free seat by pressing the button. Sending it to the wrong person is the
-  one mistake the design cannot catch. What it does avoid is losing the seat to
-  someone who only meant to look.
+- The link is public once sent. Sending it to the wrong person is the one mistake
+  the design cannot catch. What it does avoid is losing the seat to someone who
+  only meant to look.
 - The anon key ships in the bundle and always has. With no table grants it buys
   nothing but `lm_create` spam. That is rate limiting's job, and is already true
   of today's telemetry inserts.

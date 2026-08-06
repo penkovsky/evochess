@@ -284,7 +284,9 @@ test("the recipient's own game stays reachable after they move on the shared boa
   await page.locator(".parked-game-btn").click();
   await expect(page.locator(".log > div")).toHaveCount(1);
   await expect(page.locator(".log > div").first()).toHaveText("1. e4");
-  await expect(page.getByRole("button", { name: "vs Human" })).toHaveClass(/active/);
+  // Their own game was human-vs-human, and the level picker is the readout of
+  // that now the mode picker is gone (docs/live-match.md §Milestone 2).
+  await expect(page.locator(".level-picker")).toHaveCount(0);
   // Going back is final: the offer retires and the shared game is discarded.
   await expect(page.locator(".parked-game-btn")).toHaveCount(0);
   await page.reload();
@@ -302,9 +304,10 @@ test("New Game gives up the game a shared link displaced", async ({ page }) => {
 
   // New Game is an explicit fresh start, so it clears the parked game too
   // rather than leaving a button that outlives what the player asked for.
-  // It discards a game in progress, so it asks first.
+  // It discards a game in progress, and says so in the dialog the mode is
+  // picked in.
   await page.getByRole("button", { name: "New Game" }).click();
-  await page.getByRole("button", { name: "Discard and start" }).click();
+  await page.getByRole("button", { name: "Computer" }).click();
   await expect(page.locator(".log > div")).toHaveCount(0);
   await expect(page.locator(".parked-game-btn")).toHaveCount(0);
   await page.reload();
@@ -317,7 +320,7 @@ test("a game played from a shared position is not scored", async ({ page }) => {
 
   // vs AI, so an ordinary game ending here would be recorded and the score
   // overlay would cover the board.
-  await expect(page.getByRole("button", { name: "vs AI" })).toHaveClass(/active/);
+  await expect(page.locator(".level-picker")).toBeVisible();
 
   await page.locator('[data-square="c7"]').click();
   await page.locator('[data-square="b8"]').click();
@@ -375,11 +378,11 @@ test("an unverified position renders with the engine locked out", async ({ page 
     "computer opponent is unavailable"
   );
 
-  // Mode is forced to human-human and vs-AI cannot be selected, so the search
-  // never sees the position. The AI level control goes with the mode.
-  await expect(page.getByRole("button", { name: "vs Human" })).toHaveClass(/active/);
-  await expect(page.getByRole("button", { name: "vs AI" })).toBeDisabled();
+  // Mode is forced to human-human, so the search never sees the position. The
+  // AI level and colour pickers go with the mode, and there is no way back to
+  // vs-AI that does not start a new game and so leave the position.
   await expect(page.locator(".level-picker")).toHaveCount(0);
+  await expect(page.locator(".color-picker")).toHaveCount(0);
 
   // The reason codes are logged, so a report of "the link is weird" is
   // diagnosable from a screenshot of the console.
@@ -387,8 +390,9 @@ test("an unverified position renders with the engine locked out", async ({ page 
 
   // New Game is the way out, and it lets the engine back in.
   await page.getByRole("button", { name: "New Game" }).click();
+  await page.getByRole("button", { name: "Computer" }).click();
   await expect(page.locator(".link-banner.unverified")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "vs AI" })).toBeEnabled();
+  await expect(page.locator(".level-picker")).toBeVisible();
 });
 
 test("the engine stays locked out after a reload", async ({ page }) => {
@@ -402,7 +406,7 @@ test("the engine stays locked out after a reload", async ({ page }) => {
   });
 
   await openShareLink(page, illegalLink());
-  await expect(page.getByRole("button", { name: "vs AI" })).toBeDisabled();
+  await expect(page.locator(".level-picker")).toHaveCount(0);
 
   // A move is what makes the shared game the live one, and so what puts the
   // position into the autosave in the first place.
@@ -417,17 +421,17 @@ test("the engine stays locked out after a reload", async ({ page }) => {
 
   // Same lockout, same banner, on a page that never saw a `?p=`.
   await expect(page.locator(".link-banner.unverified")).toContainText("computer opponent is unavailable");
-  await expect(page.getByRole("button", { name: "vs Human" })).toHaveClass(/active/);
-  await expect(page.getByRole("button", { name: "vs AI" })).toBeDisabled();
   await expect(page.locator(".level-picker")).toHaveCount(0);
+  await expect(page.locator(".color-picker")).toHaveCount(0);
   expect(warnings.join("\n")).toContain("unverified shared position");
 
   // And New Game is still the way out.
   await page.getByRole("button", { name: "New Game" }).click();
-  await expect(page.getByRole("button", { name: "vs AI" })).toBeEnabled();
+  await page.getByRole("button", { name: "Computer" }).click();
+  await expect(page.locator(".level-picker")).toBeVisible();
   await page.reload();
   await expect(page.locator(".link-banner.unverified")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "vs AI" })).toBeEnabled();
+  await expect(page.locator(".level-picker")).toBeVisible();
 });
 
 test("a corrupt link reports the reason and falls back to the autosave", async ({ page }) => {

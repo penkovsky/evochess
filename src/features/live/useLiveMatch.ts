@@ -6,16 +6,24 @@ import type { LoadedGame } from "../../evochess/persistence";
 import {
   POLL_MS,
   clearSeat,
+  countFailure,
+  isConnectionLost,
   inviteUrl,
   lmCreate,
   lmFetch,
   lmJoin,
+  lmRematch,
   loadSeat,
+  mergeLive,
   newMatchState,
+  rematchState,
   replay,
   saveSeat,
+  setMatchParam,
   sendMove,
   shouldPoll,
+  type FetchResult,
+  type LiveSeat,
   type LiveState,
   type LiveView,
 } from "../../liveMatch";
@@ -34,14 +42,18 @@ export interface UseLiveMatch {
   liveRef: RefObject<LiveView | null>;
   /** The free seat is being claimed, so the button cannot race itself. */
   joining: boolean;
+  /** Three polls in a row failed. The board stays, the poll keeps trying. */
+  connectionLost: boolean;
   /** `?lm=` on load, and a reload with it. Read-only until the seat is taken. */
   openLiveMatch: (matchId: string, saved: LoadedGame | null) => Promise<void>;
   joinLiveMatch: () => Promise<void>;
   createLiveMatch: (seatColor: Color) => Promise<string | null>;
   /** Leaves the match on the board, if there is one. The seat goes with it. */
   leaveLiveMatch: () => void;
-  /** Sends a move of ours, and resyncs if the server will not take it. */
+  /** Sends a move of ours, and breaks the match if the server refuses it. */
   sendLocalMove: (game: EvoChessGame, from: Square, to: Square, options: ApplyMoveOptions) => void;
+  /** Asks for a rematch, or accepts the opponent's. Both are the same call. */
+  askRematch: () => Promise<void>;
 }
 
 export interface UseLiveMatchArgs {
@@ -57,6 +69,8 @@ export interface UseLiveMatchArgs {
   setSetupMode: (mode: "human-human") => void;
   clearPrompts: () => void;
   resetPonder: () => void;
+  /** A rematch has put a fresh game on the board: whatever the last one left. */
+  onRematchStart: () => void;
   /**
    * The move path. A box rather than a value, because it is defined after this
    * hook and the poll reaches it from a timer.
@@ -65,7 +79,7 @@ export interface UseLiveMatchArgs {
 }
 
 /**
- * A match played over a link (docs/live-match.md, M1). Owns which match is on
+ * A match played over a link (docs/live-match.md). Owns which match is on
  * the board, the poll that brings the opponent's moves in, and the seat.
  * Putting the position on the board goes through `adoptPosition`, the same path
  * a `?p=` link takes, so the opener's own game is held and restorable exactly
@@ -83,12 +97,36 @@ export function useLiveMatch({
   setSetupMode,
   clearPrompts,
   resetPonder,
+  onRematchStart,
   applyMoveRef,
 }: UseLiveMatchArgs): UseLiveMatch {
   const [live, setLive] = useState<LiveView | null>(null);
   const liveRef = useRef<LiveView | null>(null);
   liveRef.current = live;
   const [joining, setJoining] = useState(false);
+  // A rematch call is in flight. The press and the poll both make it, and only
+  // one of them may.
+  const rematchingRef = useRef(false);
+  const [connectionLost, setConnectionLost] = useState(false);
+  const failuresRef = useRef(0);
+
+  /** Every read goes through here: a failure counts, an answer clears. */
+  function noteRead(result: FetchResult) {
+    failuresRef.current = countFailure(failuresRef.current, result);
+    setConnectionLost(isConnectionLost(failuresRef.current));
+  }
+
+  /**
+   * The boards have diverged. Terminal: `canMoveNow` and `shouldPoll` both
+   * refuse on it, so the only way out is a new game, which drops the match.
+   * Written through the ref as well, since the poll reads it before React has
+   * re-rendered.
+   */
+  function markOutOfSync() {
+    console.warn("evochess: live match is out of sync");
+    if (liveRef.current) liveRef.current = { ...liveRef.current, outOfSync: true };
+    setLive((v) => (v ? { ...v, outOfSync: true } : v));
+  }
 
   /**
    * Puts a match on the board, replayed from its start position. The `?lm=`
@@ -100,10 +138,7 @@ export function useLiveMatch({
    */
   function showLiveMatch(matchId: string, state: LiveState, saved: LoadedGame | null, initial: boolean) {
     const built = replay(state.startPayload, state.moves);
-    if (!built) {
-      console.warn("evochess: live match would not replay, so it is out of sync");
-      return false;
-    }
+    if (!built) return false;
     if (initial) {
       adoptPosition({
         game: built.game,
@@ -127,7 +162,11 @@ export function useLiveMatch({
       startPayload: state.startPayload,
       joined: state.joined,
       freeSeat: state.freeSeat,
+      rematchW: state.rematchW,
+      rematchB: state.rematchB,
+      rematchId: state.rematchId,
       seat: loadSeat(matchId),
+      outOfSync: false,
     });
     rerender();
     return true;
@@ -135,17 +174,21 @@ export function useLiveMatch({
 
   async function openLiveMatch(matchId: string, saved: LoadedGame | null) {
     const state = await lmFetch(matchId, 0);
-    if (!state) {
-      setLinkNotice("That match link could not be opened.");
+    if (state === null) {
+      setLinkNotice("Could not reach that match. Check your connection and reload.");
       return;
     }
-    showLiveMatch(matchId, state, saved, true);
+    if (state === "unknown" || !showLiveMatch(matchId, state, saved, true)) {
+      setLinkNotice("That match link could not be opened.");
+    }
   }
 
-  /** A gap, or a move the engine rejects: throw the line away and replay. */
+  /** A gap: throw the line away and replay. A failed read is just retried. */
   async function resyncLive(lv: LiveView) {
     const state = await lmFetch(lv.matchId, 0);
-    if (state) showLiveMatch(lv.matchId, state, null, false);
+    noteRead(state);
+    if (state === null) return;
+    if (state === "unknown" || !showLiveMatch(lv.matchId, state, null, false)) markOutOfSync();
   }
 
   /**
@@ -158,10 +201,20 @@ export function useLiveMatch({
     if (!lv) return;
     const game = gameRef.current;
     const plies = game.moveLog.length;
-    if (!shouldPoll(lv, plies, game.isGameOver(), document.hidden)) return;
+    if (!shouldPoll(lv, plies, game.isGameOver(), document.hidden, isConnectionLost(failuresRef.current))) return;
     const state = await lmFetch(lv.matchId, plies);
-    if (!state || gameRef.current !== game) return;
-    setLive({ ...lv, status: state.status, joined: state.joined, freeSeat: state.freeSeat });
+    if (gameRef.current !== game) return;
+    noteRead(state);
+    if (state === null) return;
+    // A match that is not there is an answer, not a failure. Nothing to apply.
+    if (state === "unknown") return;
+    // Functional: this poll started before the seat was taken or the match
+    // broke, and `lv` is that old view. Merging onto the current one is what
+    // keeps a join, and out of sync, from being undone by a slow read.
+    setLive((v) => (v ? mergeLive(v, state) : v));
+    // The opponent accepted, so the next match exists and holds a seat of ours.
+    // Collecting it is the same call the ask is.
+    if (state.rematchId && lv.seat) return void askRematch();
     for (const m of state.moves) {
       if (m.ply !== gameRef.current.moveLog.length + 1) return void resyncLive(lv); // a gap
       const before = gameRef.current.moveLog.length;
@@ -188,12 +241,13 @@ export function useLiveMatch({
 
   function leaveLiveMatch() {
     if (!liveRef.current) return;
-    // Nothing in M1 can reclaim a seat, so keeping the token would only mislead.
+    // Nothing here can reclaim a seat, so keeping the token would only mislead.
     clearSeat();
     setLive(null);
-    const url = new URL(window.location.href);
-    url.searchParams.delete("lm");
-    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    liveRef.current = null;
+    failuresRef.current = 0;
+    setConnectionLost(false);
+    window.history.replaceState(null, "", setMatchParam(window.location.href, null));
   }
 
   /**
@@ -204,17 +258,16 @@ export function useLiveMatch({
    * as the joiner is. Keeping the old board would make their first send ply
    * N+1, which the server rejects as a gap.
    *
-   * M1's only entry point is the console (`evoLive.create`); `?lm=` goes into
-   * the address bar so a reload resumes it the way the invited player's does.
+   * New Game resets the board first, so a match started there has no
+   * `start_payload`. `?lm=` goes into the address bar so a reload resumes it
+   * the way the invited player's does.
    */
   async function createLiveMatch(seatColor: Color): Promise<string | null> {
     const game = gameRef.current;
     const payload = game.moveLog.length === 0 ? null : encodeShareLink(game);
     const seat = await lmCreate(payload, game.turn, seatColor);
     saveSeat(seat);
-    const url = new URL(window.location.href);
-    url.searchParams.set("lm", seat.matchId);
-    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    window.history.replaceState(null, "", setMatchParam(window.location.href, seat.matchId));
     const shown = showLiveMatch(
       seat.matchId,
       newMatchState(payload, game.turn, seatColor),
@@ -222,7 +275,7 @@ export function useLiveMatch({
       true
     );
     // The row exists, but the position will not replay, so there is no board to
-    // play it on. `showLiveMatch` has logged why.
+    // play it on.
     if (!shown) {
       setLinkNotice("That position could not start a live match.");
       return null;
@@ -247,10 +300,10 @@ export function useLiveMatch({
     setJoining(true);
     try {
       const state = await lmFetch(lv.matchId, 0);
-      if (!state) return;
+      if (state === null || state === "unknown") return;
       const seat = await lmJoin(lv.matchId, state);
       saveSeat(seat);
-      setLive({ ...lv, status: "live", joined: true, freeSeat: null, seat });
+      setLive((v) => (v ? { ...v, status: "live", joined: true, freeSeat: null, seat } : v));
       rerender();
     } catch {
       // Taken, unknown or over. The client stays read-only; a refetch on the
@@ -261,33 +314,74 @@ export function useLiveMatch({
     }
   }
 
+  /** The next match, on the board, with our swapped seat in it. */
+  function startRematch(next: LiveSeat) {
+    saveSeat(next);
+    window.history.replaceState(null, "", setMatchParam(window.location.href, next.matchId));
+    failuresRef.current = 0;
+    setConnectionLost(false);
+    if (!showLiveMatch(next.matchId, rematchState(next), null, false)) {
+      markOutOfSync();
+      return;
+    }
+    onRematchStart();
+  }
+
+  /**
+   * The ask and the accept, which are one call: the second one to arrive is
+   * what creates the next match. Also how each side collects its token for it,
+   * since `lm_fetch` hands out no tokens.
+   */
+  async function askRematch() {
+    const lv = liveRef.current;
+    if (!lv?.seat || rematchingRef.current) return;
+    rematchingRef.current = true;
+    try {
+      const result = await lmRematch(lv.matchId, lv.seat.token);
+      if (result === null) return;
+      if (result === "asked") {
+        const me = lv.seat.seat;
+        setLive((v) => (v ? { ...v, rematchW: me === "w" || v.rematchW, rematchB: me === "b" || v.rematchB } : v));
+        return;
+      }
+      startRematch(result);
+    } finally {
+      rematchingRef.current = false;
+    }
+  }
+
   function sendLocalMove(game: EvoChessGame, from: Square, to: Square, options: ApplyMoveOptions) {
     const lv = liveRef.current;
     if (!lv?.seat) return;
     // Not awaited: the board never waits on the network, and `sendMove` retries.
     void sendMove(lv.seat, game.moveLog.length, from, to, options).then((sent) => {
-      // A terminal rejection: a gap, a conflict, not-your-seat, or an
-      // unconfigured collector. M1 has no out-of-sync UI, so the signal is a
-      // console line and the same resync a gap in the poll triggers. Worst case
-      // it rolls this move back off the board, which is honest, since the
-      // server never took it.
-      if (sent || gameRef.current !== game) return;
-      console.warn("evochess: live move was not accepted, so the board is out of sync");
-      void resyncLive(lv);
+      // A gap, a conflict, not-your-seat, or an unconfigured collector. The
+      // move is on our board and will never be on theirs, and no refetch can
+      // undo that, so the match is over as a match.
+      if (!sent && gameRef.current === game) markOutOfSync();
     });
   }
 
   useEffect(() => {
-    // M1 has no UI for creating a match (docs/live-match.md §"Milestone 1").
+    // New Game creates a match from the opening. Creating one from the position
+    // on the board has no UI, and stays here (docs/live-match.md §Milestone 2).
     (window as unknown as Record<string, unknown>).evoLive = {
       create: (seatColor: Color = "w") => createLiveMatch(seatColor),
       state: () => liveRef.current,
-      leave: () => {
-        clearSeat();
-        setLive(null);
-      },
+      leave: () => leaveLiveMatch(),
     };
   });
 
-  return { live, liveRef, joining, openLiveMatch, joinLiveMatch, createLiveMatch, leaveLiveMatch, sendLocalMove };
+  return {
+    live,
+    liveRef,
+    joining,
+    connectionLost,
+    openLiveMatch,
+    joinLiveMatch,
+    createLiveMatch,
+    leaveLiveMatch,
+    sendLocalMove,
+    askRematch,
+  };
 }

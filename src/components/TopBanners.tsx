@@ -70,10 +70,10 @@ export function TopBanners({
       {showInvite && (
         <div className="tutorial-invite">
           <div className="tutorial-invite-text">
-            <h2>New to EvoChess?</h2>
+            <h2>New to Evochess?</h2>
             <p>
-              It's chess, but you start with only Pawns and a King. Everything else has to be
-              earned. Three one-minute lessons, or just start playing and pick it up.
+              It's chess, but start with Pawns and a King. Other pieces you
+              earn. Three-minute lesson, or just start playing.
             </p>
           </div>
           <div className="tutorial-invite-actions">

@@ -76,7 +76,15 @@ export function BoardArea({
       {mode === "human-human" && clock.timerEnabled && (
         <ClockDisplay clock={clock.clock} turn={clock.turn} gameOver={gameOver} />
       )}
-      <div className="board-status">{status}</div>
+      {/* While a match is waiting, the line is the way back to the link: the
+          dialog closes to the board and this is the only copy of the URL. */}
+      {live.onShowInvite ? (
+        <button type="button" className="board-status board-status-invite" onClick={live.onShowInvite}>
+          {status} <span className="board-status-invite-hint">Show link</span>
+        </button>
+      ) : (
+        <div className="board-status">{status}</div>
+      )}
       <div
         className={`board-status-underline${aiThinking ? " thinking" : nnueReady ? " nnue-ready" : ""}`}
       />
@@ -129,6 +137,24 @@ export function BoardArea({
             <button className="play-again-btn" onClick={live.onJoin} disabled={live.joining}>
               {live.joining ? "Joining…" : `Play as ${live.joinSeat === "w" ? "White" : "Black"}`}
             </button>
+          </div>
+        )}
+        {/* The rematch, in the same slot: the game is over, so the board below
+            is only a record of it. One press both asks and accepts
+            (docs/live-match.md §Milestone 2b). */}
+        {live.rematch && (
+          <div className="live-join-overlay live-rematch-overlay">
+            {live.rematch.theirs && <div className="live-rematch-text">Your opponent wants a rematch</div>}
+            {live.rematch.mine && !live.rematch.theirs ? (
+              <div className="live-rematch-text">Waiting for your opponent...</div>
+            ) : (
+              <button
+                className={`play-again-btn${live.rematch.theirs ? " accept-btn" : ""}`}
+                onClick={live.rematch.onAsk}
+              >
+                {live.rematch.theirs ? "Accept" : "Rematch"}
+              </button>
+            )}
           </div>
         )}
         {/* Over the board, like the score overlay, so the outcome costs no

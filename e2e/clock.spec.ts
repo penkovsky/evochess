@@ -1,12 +1,12 @@
 import { test, expect } from "@playwright/test";
-import { freshGamePage } from "./helpers";
+import { freshGamePage, startOverTheBoard } from "./helpers";
 
 // The clock is human-vs-human only, off by default, and its minutes field
 // locks once a game is under way — so every test here sets it up before the
 // first move (src/hooks/useGameClock.ts, ControlsPanel.tsx).
 test.beforeEach(async ({ page }) => {
   await freshGamePage(page);
-  await page.getByRole("button", { name: "vs Human" }).click();
+  await startOverTheBoard(page);
   await page.getByRole("button", { name: "Clock" }).click();
   await page.getByLabel("Minutes per side:").fill("1");
 });

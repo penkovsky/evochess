@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { freshGamePage } from "./helpers";
+import { freshGamePage, startOverTheBoard } from "./helpers";
 
 /**
  * Playwright's touchscreen has no swipe primitive, so the pair of events the
@@ -23,7 +23,7 @@ async function swipe(page: Page, fromX: number, toX: number, withStart = true) {
 /** Four plies of a human-vs-human game, so there is a line to step through. */
 async function playFourPlies(page: Page) {
   await freshGamePage(page);
-  await page.getByRole("button", { name: "vs Human" }).click();
+  await startOverTheBoard(page);
   for (const [from, to] of [
     ["e2", "e4"],
     ["e7", "e5"],

@@ -1,10 +1,12 @@
 import type { RefObject } from "react";
 import type { ApplyMoveOptions } from "../evochess/game";
-import type { ConfirmState, PromoModalState } from "../appTypes";
+import type { Color } from "chess.js";
+import type { ConfirmState, NewGameChoice, PromoModalState } from "../appTypes";
 import type { UseShareModal } from "../hooks/useShareModal";
 import { PromoModal } from "./PromoModal";
 import { ShareModal } from "./ShareModal";
 import { ConfirmModal } from "./ConfirmModal";
+import { InviteModal } from "./InviteModal";
 
 /**
  * Everything that opens over the board. One component so App's tree ends with
@@ -22,7 +24,10 @@ export function Dialogs({
   onPlayHere,
   onLeaveLive,
   liveActive,
+  onNewGame,
   onStartNewGame,
+  invite,
+  closeInvite,
 }: {
   modal: PromoModalState | null;
   finishModalMove: (options: ApplyMoveOptions) => void;
@@ -35,7 +40,11 @@ export function Dialogs({
   onPlayHere: (ply: number) => void;
   onLeaveLive: () => void;
   liveActive: boolean;
+  onNewGame: (choice: NewGameChoice, seat: Color) => void;
   onStartNewGame: () => void;
+  /** The invite dialog's link and whether the second seat is taken, or null. */
+  invite: { url: string; joined: boolean } | null;
+  closeInvite: () => void;
 }) {
   return (
     <>
@@ -63,9 +72,11 @@ export function Dialogs({
           onPlayHere={onPlayHere}
           onLeaveLive={onLeaveLive}
           liveActive={liveActive}
+          onNewGame={onNewGame}
           onStartNewGame={onStartNewGame}
         />
       )}
+      {invite && <InviteModal url={invite.url} joined={invite.joined} close={closeInvite} />}
     </>
   );
 }

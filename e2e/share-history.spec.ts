@@ -4,19 +4,16 @@
  * it. Run at a phone viewport, since that is the primary target.
  */
 import { test, expect, type Page } from "@playwright/test";
-import { freshGamePage } from "./helpers";
+import { freshGamePage, startOverTheBoard } from "./helpers";
 
 test.use({ viewport: { width: 390, height: 844 } });
 
 /** Four plies of a human-vs-human game, so there is a line to step through. */
 async function playFourPlies(page: Page) {
   await freshGamePage(page);
-  // The mode picker is in the side panel, which this viewport hides: on a
-  // phone the same controls live in the settings sheet.
-  await page.locator(".mobile-bar").getByRole("button", { name: "Settings" }).click();
-  await page.locator(".sheet").getByRole("button", { name: "vs Human" }).click();
-  await page.keyboard.press("Escape");
-  await expect(page.locator(".sheet")).toHaveCount(0);
+  // Mode is picked in the New Game dialog, which is reachable at any
+  // viewport: the button is under the board, not in the hidden side panel.
+  await startOverTheBoard(page);
   for (const [from, to] of [
     ["e2", "e4"],
     ["e7", "e5"],

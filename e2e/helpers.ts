@@ -30,6 +30,16 @@ export async function firstVisitPage(page: Page) {
   await page.goto("./");
 }
 
+/**
+ * Switches to a two-humans-at-one-board game. Mode is picked in the New Game
+ * dialog rather than in the panel (docs/live-match.md §Milestone 2), so this is
+ * a restart, and it works at either viewport: the button is under the board.
+ */
+export async function startOverTheBoard(page: Page) {
+  await page.getByRole("button", { name: "New Game" }).click();
+  await page.getByRole("button", { name: "Over the board" }).click();
+}
+
 /** The collector the e2e build points at — keep in sync with `playwright.config.ts`. */
 export const COLLECTOR_URL = "http://127.0.0.1:59999";
 

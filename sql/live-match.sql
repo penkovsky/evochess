@@ -40,6 +40,14 @@ create table if not exists public.lm_moves (
 alter table public.lm_moves
   add column if not exists created_at timestamptz not null default now();
 
+-- The rematch ask, one flag per seat (docs/live-match.md §Milestone 2b). Both
+-- set creates the next match, whose id is written back here so each side
+-- follows it.
+alter table public.lm_matches
+  add column if not exists white_rematch boolean not null default false,
+  add column if not exists black_rematch boolean not null default false,
+  add column if not exists rematch_id uuid references public.lm_matches(id);
+
 -- No policies and no grants: RLS on with nothing granted is the lockout.
 alter table public.lm_matches enable row level security;
 alter table public.lm_moves   enable row level security;
@@ -127,6 +135,49 @@ begin
   values (p_match, p_ply, p_from, p_to, coalesce(p_opts, '{}'::jsonb));
 end $$;
 
+-- The rematch ask. Sets the caller's flag, and once both are set creates the
+-- next match and hands the caller its seat in it. The seats swap colour.
+--
+-- Idempotent: a client calls this to ask, and calls it again once a poll shows
+-- the next match exists, to collect a token lm_fetch will not give it. The row
+-- is locked because both sides may arrive at once, and only one next match may
+-- be created.
+create or replace function public.lm_rematch(p_match uuid, p_token text) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare m lm_matches; seat char(1); next_seat char(1); nxt_id uuid; tok text;
+begin
+  select * into m from lm_matches where id = p_match for update;
+  if not found then raise exception 'unknown match' using errcode = 'P0002'; end if;
+  seat := case when m.white_token = p_token then 'w'
+               when m.black_token = p_token then 'b' end;
+  if seat is null then raise exception 'not your seat' using errcode = 'P0001'; end if;
+  -- The seats swap, so the caller's next seat is the other one.
+  next_seat := lm_other(seat);
+  if seat = 'w' then
+    update lm_matches set white_rematch = true where id = p_match returning * into m;
+  else
+    update lm_matches set black_rematch = true where id = p_match returning * into m;
+  end if;
+  nxt_id := m.rematch_id;
+  if nxt_id is null and m.white_rematch and m.black_rematch then
+    insert into lm_matches (start_payload, first_mover, creator_seat, white_token, black_token, status)
+    values (m.start_payload, m.first_mover, next_seat, lm_token(), lm_token(), 'live')
+    returning id into nxt_id;
+    -- Nothing more can be appended to a game both players have left.
+    update lm_matches set rematch_id = nxt_id, status = 'over' where id = p_match;
+  end if;
+  if nxt_id is null then return jsonb_build_object('asked', true); end if;
+  select case when next_seat = 'w' then white_token else black_token end
+    into tok from lm_matches where id = nxt_id;
+  return jsonb_build_object(
+    'asked', true,
+    'match_id', nxt_id,
+    'seat', next_seat,
+    'token', tok,
+    'first_mover', m.first_mover,
+    'start_payload', m.start_payload);
+end $$;
+
 -- The only read path. Never returns a token; an unknown id returns null.
 create or replace function public.lm_fetch(p_match uuid, p_since int) returns jsonb
 language sql security definer set search_path = public, pg_temp as $$
@@ -139,6 +190,11 @@ language sql security definer set search_path = public, pg_temp as $$
     -- token, and it says nothing the `joined` flag does not already imply.
     'free_seat', case when m.white_token is null then 'w'
                       when m.black_token is null then 'b' end,
+    -- Who has asked for a rematch, and the match it turned into. An id, not a
+    -- token: it reads the next match, exactly as the link to this one does.
+    'rematch_w', m.white_rematch,
+    'rematch_b', m.black_rematch,
+    'rematch_id', m.rematch_id,
     'moves', coalesce((
       select jsonb_agg(jsonb_build_object('ply', x.ply, 'from', x.from_sq, 'to', x.to_sq, 'opts', x.opts)
                        order by x.ply)
@@ -154,8 +210,10 @@ revoke all on function public.lm_create(text, char, char) from public;
 revoke all on function public.lm_join(uuid)          from public;
 revoke all on function public.lm_play(uuid, text, int, text, text, jsonb) from public;
 revoke all on function public.lm_fetch(uuid, int)    from public;
+revoke all on function public.lm_rematch(uuid, text) from public;
 
 grant execute on function public.lm_create(text, char, char) to anon;
 grant execute on function public.lm_join(uuid)               to anon;
 grant execute on function public.lm_play(uuid, text, int, text, text, jsonb) to anon;
 grant execute on function public.lm_fetch(uuid, int)         to anon;
+grant execute on function public.lm_rematch(uuid, text)      to anon;

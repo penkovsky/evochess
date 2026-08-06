@@ -55,7 +55,21 @@ export interface ShareModalState {
 }
 
 /** Why a restart is being proposed. Only the dialog's wording depends on it. */
-export type RestartReason = "new-game" | "mode" | "color" | "level";
+export type RestartReason = "new-game" | "color" | "level";
+
+/**
+ * What New Game starts. Mode used to be a picker in the panel, but changing it
+ * always restarted the game, so it is a new game in disguise and lives here
+ * (docs/live-match.md §Milestone 2).
+ */
+export type NewGameChoice = "ai" | "live" | "otb";
+
+/** A match is vs-Human with a transport, so it needs no mode of its own. */
+export const NEW_GAME_MODE: Record<NewGameChoice, Mode> = {
+  ai: "human-ai",
+  live: "human-human",
+  otb: "human-human",
+};
 
 /**
  * The actions that discard moves, and so are asked about before they run.
@@ -70,8 +84,7 @@ export type ConfirmState =
   | { kind: "restart"; what: RestartReason; mode: Mode; aiColor: Color; level: AiLevel };
 
 export const RESTART_TITLE: Record<RestartReason, string> = {
-  "new-game": "Start a new game?",
-  mode: "Switch mode?",
+  "new-game": "New game",
   color: "Switch colors?",
   level: "Switch level?",
 };
@@ -128,6 +141,16 @@ export interface LiveProps {
   joinSeat: Color | null;
   joining: boolean;
   onJoin: () => void;
+  /**
+   * Reopens the invite dialog. Only while the match is waiting and the seat is
+   * ours: the status line is the way back to a link that was closed too soon.
+   */
+  onShowInvite: (() => void) | null;
+  /**
+   * The rematch offer, once the game is over and the seat is ours. Null when
+   * there is nothing to offer (docs/live-match.md §Milestone 2b).
+   */
+  rematch: { mine: boolean; theirs: boolean; onAsk: () => void } | null;
 }
 
 /** The end-of-game overlay: the running record, and the way out of it. */

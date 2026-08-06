@@ -15,13 +15,14 @@ import {
   resumeMeta,
 } from "./evochess/persistence";
 import { loadProgress } from "./evochess/tutorialProgress";
-import { canMoveNow } from "./liveMatch";
+import { canMoveNow, inviteUrl, rematchAsks, rematchOffered } from "./liveMatch";
 import { formatPuzzleDate, loadCachedPuzzle, type DailyPuzzle } from "./evochess/dailyPuzzle";
 import {
   accruePlyTime,
   initTelemetry,
   logFinishedGame,
   msSinceSessionStart,
+  newGameMeta,
   reportedDurationMs,
   track,
   trackOnce,
@@ -30,6 +31,7 @@ import {
 import { Fireworks } from "./Fireworks";
 import { Tutorial } from "./Tutorial";
 import {
+  NEW_GAME_MODE,
   PUZZLE_LEVEL,
   type BoardViewProps,
   type BrowseProps,
@@ -37,6 +39,7 @@ import {
   type ConfirmState,
   type LiveProps,
   type Mode,
+  type NewGameChoice,
   type PromoModalState,
   type PuzzleProps,
   type RestartReason,
@@ -80,6 +83,9 @@ function App() {
   // reading `browsePly` at the end, so the dialog commits to the position the
   // player was looking at when they asked, even if the AI moves meanwhile.
   const [confirmAction, setConfirmAction] = useState<ConfirmState | null>(null);
+  // Whether the invite dialog is up. The link itself is derived from the match
+  // on the board, so closing this loses nothing.
+  const [inviteOpen, setInviteOpen] = useState(false);
   const confirmCancelBtnRef = useRef<HTMLButtonElement>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -98,7 +104,7 @@ function App() {
   // On a phone the side panel is hidden entirely (CSS) and its widgets are
   // reached through the icon bar under the board, which opens one of them in a
   // bottom sheet over the page. null = no sheet open.
-  const { widget, setWidget } = useMobileWidget(!!modal || !!confirmAction);
+  const { widget, setWidget } = useMobileWidget(!!modal || !!confirmAction || inviteOpen);
   // Click-to-move: square selected by tapping a piece, awaiting a target square
   // tap. Cleared on every move attempt (successful or not).
   const [selected, setSelected] = useState<Square | null>(null);
@@ -123,7 +129,7 @@ function App() {
   } = useHistoryBrowse({
     historyRef,
     setSelected,
-    blocked: !!modal || !!share.shareModal || !!widget || !!confirmAction,
+    blocked: !!modal || !!share.shareModal || !!widget || !!confirmAction || inviteOpen,
   });
   browsePlyRef.current = browsePly;
 
@@ -205,9 +211,21 @@ function App() {
     setSetupMode,
     clearPrompts,
     resetPonder,
+    onRematchStart,
     applyMoveRef,
   });
   const liveRef = live.liveRef;
+  const liveActive = live.live !== null;
+
+  // A match is untimed (docs/live-match.md §Shape). It is human-vs-human, so
+  // the clock would otherwise run, and a clock that only one side keeps means a
+  // flag fall the opponent never sees: two boards, two results. The switch is
+  // hidden with it, so nothing turns it back on mid-match.
+  useEffect(() => {
+    if (!liveActive) return;
+    setTimerEnabled(false);
+    setTimeUp(null);
+  }, [liveActive, setTimerEnabled, setTimeUp]);
 
   // What happens when a game ends: the score record, the fireworks, and the
   // delayed reveal of the score overlay. Declared after the live hook because
@@ -222,6 +240,19 @@ function App() {
     timeUp,
     liveSeat: live.live?.seat?.seat ?? null,
   });
+
+  /**
+   * A rematch has replaced the board with a fresh game. The match hook has
+   * already swapped the position; what is left is everything the finished game
+   * left lying around (docs/live-match.md §Milestone 2b).
+   */
+  function onRematchStart() {
+    gameMetaRef.current = newGameMeta(gameRef.current.chess.fen());
+    setShowFireworks(false);
+    resetClock(timerMinutes);
+    browseLive();
+    setInviteOpen(false);
+  }
 
   function togglePanel(key: "rules" | "log", isOpen: boolean) {
     setOpenPanel((prev) => (isOpen ? key : prev === key ? null : prev));
@@ -593,6 +624,15 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [confirmAction]);
 
+  useEffect(() => {
+    if (!inviteOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setInviteOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [inviteOpen]);
+
   async function maybeAiMove(overrides?: { mode?: Mode; aiColor?: Color; level?: AiLevel }) {
     const effMode = overrides?.mode ?? mode;
     const effAiColor = overrides?.aiColor ?? aiColor;
@@ -924,12 +964,33 @@ function App() {
     setSetupMode(newMode);
     setSetupAiColor(newAiColor);
     setSetupLevel(newLevel);
+    setInviteOpen(false);
     clearPrompts();
     setShowFireworks(false);
     resetClock(timerMinutes);
     clearSavedGame();
     rerender();
     setTimeout(() => maybeAiMove({ mode: newMode, aiColor: newAiColor, level: newLevel }), 0);
+  }
+
+  /**
+   * New Game, which is also where the mode is chosen (docs/live-match.md
+   * §Milestone 2). The board is reset first either way, so a match created here
+   * starts at the opening and carries no `start_payload`.
+   */
+  function chooseNewGame(choice: NewGameChoice, seat: Color) {
+    setConfirmAction(null);
+    startNewGame(NEW_GAME_MODE[choice], setupAiColor, setupLevel);
+    if (choice !== "live") return;
+    // After the reset has flushed, so the match is created from the opening and
+    // not from the board `startNewGame` has only just replaced.
+    setTimeout(async () => {
+      try {
+        if (await live.createLiveMatch(seat)) setInviteOpen(true);
+      } catch {
+        setLinkNotice("Could not start a live match. Check your connection and try again.");
+      }
+    }, 0);
   }
 
   const view = deriveBoardView({
@@ -943,6 +1004,7 @@ function App() {
     aiThinking,
     timeUp,
     live: live.live,
+    liveConnectionLost: live.connectionLost,
     puzzle: puzzleOnBoard,
     puzzleResult: puzzle.puzzleResult,
     fromShared,
@@ -962,16 +1024,20 @@ function App() {
   const { totalPlies, browsing } = view;
 
   /**
-   * The one route to a restart, for New Game and for the three settings
-   * switches, which all end the current game. It only asks when there is
+   * The one route to a restart, for New Game and for the colour and level
+   * switches, which both end the current game. A switch only asks when there is
    * something to lose: a game with moves in it that has not finished. Starting
    * over from the opening, or after a result, goes straight through.
    *
-   * `apply` is what a switch does when no game is under way — set the value and
+   * `apply` is what a switch does when no game is under way: set the value and
    * leave the board alone, rather than restarting it for nothing.
    */
   const restart = (what: RestartReason, next: { mode: Mode; aiColor: Color; level: AiLevel }, apply?: () => void) => {
-    if (totalPlies === 0 && apply) {
+    // New Game always asks, because the dialog is also where the mode is
+    // picked. There is nothing to skip to.
+    if (what === "new-game") {
+      setConfirmAction({ kind: "restart", what, ...next });
+    } else if (totalPlies === 0 && apply) {
       resetPonder(); // setting change (ponder-spec.md §5.3, §6.2)
       apply();
       // A live match is always worth asking about, even at ply 0. The seat is
@@ -989,6 +1055,10 @@ function App() {
   // boundary is what makes "today's puzzle" mean the same thing everywhere.
   const sharedStatusText = puzzleOnBoard
     ? `Puzzle of ${formatPuzzleDate(puzzleOnBoard.date)} (UTC)`
+    : live.live
+    ? // A match arrives down the shared-position path, but "Shared position" is
+      // not what it is, least of all to the player who just created it.
+      `Live match.${sharedPending && savedGameRef.current ? " Your own game is saved." : ""}`
     : [
         sharedPending && (savedGameRef.current ? "Shared position. Your own game is saved." : "Shared position."),
         unverified &&
@@ -1003,13 +1073,12 @@ function App() {
     aiColor,
     level,
     puzzleActive: puzzleOnBoard !== null,
-    unverified,
+    liveActive,
     autoFlip,
     timerEnabled,
     timerMinutes,
     hasHistory: totalPlies > 0,
     onRestart: restart,
-    setMode: setSetupMode,
     setAiColor: setSetupAiColor,
     setLevel: setSetupLevel,
     setAutoFlip,
@@ -1051,11 +1120,21 @@ function App() {
     puzzleMateIn: puzzleOnBoard?.mateIn ?? 0,
     puzzleResult: puzzle.puzzleResult,
   };
+  // Ours, and still waiting for the second seat: the only state the invite has
+  // anything to say in.
+  const waitingMatch = live.live?.seat && !live.live.joined ? live.live : null;
+  // Ours, finished, and still a match: the rematch is the only thing left to
+  // do with it. Out of sync is not a game to play again.
+  const rematchMatch = rematchOffered(live.live, view.gameOver) ? live.live : null;
   const liveProps: LiveProps = {
-    liveActive: live.live !== null,
+    liveActive,
     joinSeat: live.live && !live.live.seat && live.live.status !== "over" ? live.live.freeSeat : null,
     joining: live.joining,
     onJoin: () => void live.joinLiveMatch(),
+    onShowInvite: waitingMatch ? () => setInviteOpen(true) : null,
+    rematch: rematchMatch
+      ? { ...rematchAsks(rematchMatch), onAsk: () => void live.askRematch() }
+      : null,
   };
   const scoreProps: ScoreProps = {
     showScoreOverlay: view.showScoreOverlay,
@@ -1087,7 +1166,10 @@ function App() {
         hasSavedGame={shared.hasSavedGame}
         puzzleActive={puzzleOnBoard !== null}
         setLinkNotice={setLinkNotice}
-        backToMyGame={() => (live.live ? setConfirmAction({ kind: "leave-live" }) : backToMyGame())}
+        backToMyGame={() =>
+          // A finished match has no seat worth warning about.
+          live.live && !view.gameOver ? setConfirmAction({ kind: "leave-live" }) : backToMyGame()
+        }
         parked={shared.parked}
         showInvite={tutorial.showInvite}
         openTutorial={tutorial.openTutorial}
@@ -1156,7 +1238,14 @@ function App() {
         confirmCancelBtnRef={confirmCancelBtnRef}
         onPlayHere={playFromHere}
         onLeaveLive={backToMyGame}
-        liveActive={live.live !== null}
+        liveActive={liveActive && !view.gameOver}
+        onNewGame={chooseNewGame}
+        invite={
+          inviteOpen && live.live?.seat
+            ? { url: inviteUrl(live.live.matchId), joined: live.live.joined }
+            : null
+        }
+        closeInvite={() => setInviteOpen(false)}
         onStartNewGame={() => {
           setConfirmAction(null);
           if (confirmAction?.kind === "restart") {

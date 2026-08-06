@@ -13,6 +13,8 @@ import { decodeShareLink } from "./evochess/shareLink";
 const SEAT_KEY = "evochess-live-v1";
 export const LM_PARAM = "lm";
 export const POLL_MS = 1200;
+/** Consecutive failed polls before the status line says so. About four seconds. */
+export const LOST_AFTER_FAILURES = 3;
 
 export interface LiveSeat {
   matchId: string;
@@ -37,6 +39,11 @@ export interface LiveState {
   joined: boolean;
   /** The seat still to be claimed, null once both are. */
   freeSeat: Color | null;
+  /** Who has asked for a rematch, by seat. */
+  rematchW: boolean;
+  rematchB: boolean;
+  /** The match this one turned into, once both sides asked. */
+  rematchId: string | null;
   moves: LiveMove[];
 }
 
@@ -48,7 +55,16 @@ export interface LiveView {
   startPayload: string | null;
   joined: boolean;
   freeSeat: Color | null;
+  rematchW: boolean;
+  rematchB: boolean;
+  rematchId: string | null;
   seat: LiveSeat | null;
+  /**
+   * The two boards have diverged: a replay failed, or the server refused a move
+   * we had already played. Terminal, because nothing here can repair it. Only a
+   * new game clears it, since that leaves the match altogether.
+   */
+  outOfSync: boolean;
 }
 
 /** Odd plies belong to `firstMover`. The whole turn-ownership rule. */
@@ -65,24 +81,71 @@ export function seatForPly(ply: number, firstMover: Color): Color {
  */
 export function canMoveNow(lv: LiveView | null, plies: number): boolean {
   if (!lv) return true;
-  if (!lv.seat || lv.status === "over") return false;
+  if (!lv.seat || lv.status === "over" || lv.outOfSync) return false;
+  // Nobody to play against yet, and `lm_play` refuses a move before the second
+  // seat is taken. Letting one through would put a move on our board that the
+  // server never takes, which is the out-of-sync case.
+  if (!lv.joined) return false;
   return seatForPly(plies + 1, lv.firstMover) === lv.seat.seat;
+}
+
+/**
+ * Whether the rematch offer belongs on the board. A seat of ours, a finished
+ * game, and a match that still works.
+ *
+ * Deliberately blind to whether the board is being browsed. Stepping back
+ * through the game just played is the normal thing to do after one, and the
+ * offer carries the only sign that the opponent has asked.
+ */
+export function rematchOffered(lv: LiveView | null, gameOver: boolean): boolean {
+  return !!lv?.seat && gameOver && !lv.outOfSync;
+}
+
+/** Our own rematch ask, and the opponent's. Neither, for an observer. */
+export function rematchAsks(lv: LiveView): { mine: boolean; theirs: boolean } {
+  if (!lv.seat) return { mine: false, theirs: false };
+  const w = { mine: lv.rematchW, theirs: lv.rematchB };
+  return lv.seat.seat === "w" ? w : { mine: w.theirs, theirs: w.mine };
 }
 
 /**
  * Whether a poll is worth issuing. Nothing can arrive on our own turn, while
  * the tab is hidden, or once the match is over. The exception is a match whose
  * other seat is still empty, where the join is the thing being waited for.
+ *
+ * A finished game keeps one thing to wait for: the opponent's rematch ask, and
+ * then the match it creates. Once that match exists there is nothing left here.
  */
 export function shouldPoll(
   lv: LiveView | null,
   plies: number,
   gameOver: boolean,
-  hidden: boolean
+  hidden: boolean,
+  connectionLost = false
 ): boolean {
-  if (!lv || hidden || gameOver || lv.status === "over") return false;
-  if (!lv.joined) return true;
+  if (!lv || hidden || lv.outOfSync) return false;
+  if (gameOver || lv.status === "over") return !!lv.seat && !lv.rematchId;
+  // A lost connection is only cleared by a read that works, so keep reading
+  // even on our own turn. Otherwise the warning outlives the outage.
+  if (!lv.joined || connectionLost) return true;
   return !(lv.seat && seatForPly(plies + 1, lv.firstMover) === lv.seat.seat);
+}
+
+/**
+ * A poll's answer folded into the match on screen. Only these three fields
+ * come from a poll: the seat and `outOfSync` are ours, and a poll in flight
+ * while either changes must not put the old value back.
+ */
+export function mergeLive(lv: LiveView, state: LiveState): LiveView {
+  return {
+    ...lv,
+    status: state.status,
+    joined: state.joined,
+    freeSeat: state.freeSeat,
+    rematchW: state.rematchW,
+    rematchB: state.rematchB,
+    rematchId: state.rematchId,
+  };
 }
 
 /**
@@ -127,7 +190,9 @@ async function rpc(fn: string, args: Record<string, unknown>): Promise<unknown> 
     const detail = await res.text().catch(() => "");
     throw new Error(`${fn}: http ${res.status}${detail ? ` ${detail}` : ""}`);
   }
-  return res.json();
+  // `lm_play` returns void, which PostgREST answers with an empty body. Parsing
+  // it would throw, and a stored move would be reported as a refusal.
+  return res.json().catch(() => null);
 }
 
 export async function lmCreate(
@@ -156,6 +221,24 @@ export function newMatchState(startPayload: string | null, firstMover: Color, cr
     startPayload,
     joined: false,
     freeSeat: creatorSeat === "w" ? "b" : "w",
+    rematchW: false,
+    rematchB: false,
+    rematchId: null,
+    moves: [],
+  };
+}
+
+/** A match that came out of a rematch: both seats taken, no moves yet. */
+export function rematchState(seat: LiveSeat): LiveState {
+  return {
+    status: "live",
+    firstMover: seat.firstMover,
+    startPayload: seat.startPayload,
+    joined: true,
+    freeSeat: null,
+    rematchW: false,
+    rematchB: false,
+    rematchId: null,
     moves: [],
   };
 }
@@ -172,22 +255,29 @@ export async function lmJoin(matchId: string, state: LiveState): Promise<LiveSea
   };
 }
 
-/** The only read path. Null for an unknown id, or any failure. */
-export async function lmFetch(matchId: string, sincePly: number): Promise<LiveState | null> {
+/**
+ * What a read came back with. `null` is a failure worth retrying, and is what
+ * the connection-lost count counts. `"unknown"` is an answer: there is no such
+ * match, and retrying will not change that.
+ */
+export type FetchResult = LiveState | "unknown" | null;
+
+/** The only read path. */
+export async function lmFetch(matchId: string, sincePly: number): Promise<FetchResult> {
   let row: unknown;
   try {
     row = await rpc("lm_fetch", { p_match: matchId, p_since: sincePly });
   } catch {
     return null;
   }
-  if (!row || typeof row !== "object") return null;
+  if (!row || typeof row !== "object") return "unknown";
   const r = row as Record<string, unknown>;
-  if (r.status !== "waiting" && r.status !== "live" && r.status !== "over") return null;
-  if (r.first_mover !== "w" && r.first_mover !== "b") return null;
+  if (r.status !== "waiting" && r.status !== "live" && r.status !== "over") return "unknown";
+  if (r.first_mover !== "w" && r.first_mover !== "b") return "unknown";
   const moves: LiveMove[] = [];
   for (const m of Array.isArray(r.moves) ? r.moves : []) {
     const x = m as Record<string, unknown>;
-    if (typeof x.ply !== "number" || typeof x.from !== "string" || typeof x.to !== "string") return null;
+    if (typeof x.ply !== "number" || typeof x.from !== "string" || typeof x.to !== "string") return "unknown";
     moves.push({ ply: x.ply, from: x.from, to: x.to, opts: sanitizeOpts(x.opts) });
   }
   return {
@@ -196,8 +286,50 @@ export async function lmFetch(matchId: string, sincePly: number): Promise<LiveSt
     startPayload: typeof r.start_payload === "string" ? r.start_payload : null,
     joined: r.joined === true,
     freeSeat: r.free_seat === "w" || r.free_seat === "b" ? r.free_seat : null,
+    rematchW: r.rematch_w === true,
+    rematchB: r.rematch_b === true,
+    rematchId: typeof r.rematch_id === "string" ? r.rematch_id : null,
     moves,
   };
+}
+
+/**
+ * Asks for a rematch, and collects the seat once both sides have. The same call
+ * does both: the ask is idempotent, and the next match's token is not something
+ * `lm_fetch` will hand out, so this is how each side gets its own.
+ *
+ * `"asked"` means the ask is in and the opponent has not answered. `null` is a
+ * failure worth trying again on the next press or poll.
+ */
+export async function lmRematch(matchId: string, token: string): Promise<LiveSeat | "asked" | null> {
+  let row: unknown;
+  try {
+    row = await rpc("lm_rematch", { p_match: matchId, p_token: token });
+  } catch (e) {
+    console.warn("evochess: lm_rematch failed", e);
+    return null;
+  }
+  const r = (row ?? {}) as Record<string, unknown>;
+  if (typeof r.match_id !== "string" || typeof r.token !== "string") return "asked";
+  if (r.seat !== "w" && r.seat !== "b") return "asked";
+  if (r.first_mover !== "w" && r.first_mover !== "b") return "asked";
+  return {
+    matchId: r.match_id,
+    seat: r.seat,
+    token: r.token,
+    firstMover: r.first_mover,
+    startPayload: typeof r.start_payload === "string" ? r.start_payload : null,
+  };
+}
+
+/** A failure adds one; any answer, including "no such match", clears it. */
+export function countFailure(count: number, result: FetchResult): number {
+  return result === null ? count + 1 : 0;
+}
+
+/** One failed read says nothing. Three in a row are worth telling the player. */
+export function isConnectionLost(count: number): boolean {
+  return count >= LOST_AFTER_FAILURES;
 }
 
 /**
@@ -224,7 +356,11 @@ export async function sendMove(
       });
       return true;
     } catch (e) {
-      if (!(e instanceof Retryable)) return false;
+      // The server's reason, which is otherwise lost behind "out of sync".
+      if (!(e instanceof Retryable)) {
+        console.warn("evochess: lm_play refused", e);
+        return false;
+      }
       await sleep(300 * 2 ** attempt);
     }
   }
@@ -298,6 +434,14 @@ export function clearSeat() {
 export function readMatchParam(search: string): string | null {
   const v = new URLSearchParams(search).get(LM_PARAM);
   return v && v.length > 0 ? v : null;
+}
+
+/** The address bar with the match on it, or off it. */
+export function setMatchParam(href: string, matchId: string | null): string {
+  const url = new URL(href);
+  if (matchId) url.searchParams.set(LM_PARAM, matchId);
+  else url.searchParams.delete(LM_PARAM);
+  return url.pathname + url.search + url.hash;
 }
 
 /** The invite link: the match id and nothing else. */

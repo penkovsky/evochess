@@ -235,6 +235,35 @@
   margin-bottom: 4px;
 }
 
+/* The same line, made tappable while a match waits for its second player. Full
+   width and 44px tall, so it is a thumb target on a phone and still reads as
+   the status line rather than a button. */
+button.board-status-invite {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.board-status-invite-hint {
+  font-weight: normal;
+  font-size: 13px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+}
+
 .board-status-underline {
   width: 80px;
   height: 2px;
@@ -695,7 +724,6 @@
   box-shadow: none;
 }
 
-.mode-picker,
 .color-picker,
 .level-picker,
 .action-picker {
@@ -721,7 +749,6 @@
   flex-wrap: wrap;
 }
 
-.mode-picker button,
 .color-picker button,
 .level-picker button,
 .action-picker button {
@@ -740,19 +767,16 @@
   border-radius: 6px;
 }
 
-.mode-picker button:not(:last-child),
 .color-picker button:not(:last-child),
 .level-picker button:not(:last-child) {
   border-right: none;
 }
 
-.mode-picker button:first-child,
 .color-picker button:first-child,
 .level-picker button:first-child {
   border-radius: 6px 0 0 6px;
 }
 
-.mode-picker button:last-child,
 .color-picker button:last-child,
 .level-picker button:last-child {
   border-radius: 0 6px 6px 0;
@@ -765,24 +789,16 @@
 }
 
 /* A puzzle fixes the setup, so the pickers read as locked. */
-.mode-picker button:disabled,
 .color-picker button:disabled,
 .level-picker button:disabled {
   cursor: default;
   color: #999;
 }
 
-.mode-picker button.active:disabled,
 .color-picker button.active:disabled,
 .level-picker button.active:disabled {
   color: white;
   opacity: 0.7;
-}
-
-.mode-picker button.active {
-  background: #7b3ff2;
-  border-color: #7b3ff2;
-  color: white;
 }
 
 .color-picker button.active {
@@ -957,6 +973,79 @@
 .modal .modal-actions .danger-btn {
   background: #c0392b;
   border-color: #c0392b;
+  color: white;
+}
+
+/* New Game's three options. A short stack of one-word buttons, so the dialog
+   is narrow rather than as wide as its longest sentence. */
+.modal-narrow {
+  min-width: 0;
+  width: min(280px, 90vw);
+}
+
+/* Two short lines rather than a sentence: the count is the detail, and it is
+   what keeps the dialog from widening to fit prose. */
+.discard-warning {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+}
+
+.discard-count {
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.new-game-options {
+  margin-top: 14px;
+}
+
+.modal .mode-option {
+  min-height: 48px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--text-h);
+  font-weight: bold;
+}
+
+/* The seat sits on the Friend button's own row: two kings, one selected. */
+.new-game-live {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.new-game-live .mode-option {
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+.seat-picker {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.modal .seat-picker button {
+  width: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-h);
+}
+
+.modal .seat-picker button.active {
+  background: #2f6feb;
+  border-color: #2f6feb;
   color: white;
 }
 
@@ -1179,6 +1268,32 @@
   padding: 0 12px;
   pointer-events: none;
   z-index: 5;
+}
+
+/* The rematch offer, in the same slot as the join button. Stacked, because it
+   may carry a line of its own above the button. */
+.live-rematch-overlay {
+  flex-direction: column;
+  gap: 12px;
+}
+
+.live-rematch-text {
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.72);
+  color: white;
+  font-weight: bold;
+  text-align: center;
+  text-wrap: balance;
+}
+
+/* Accept, not ask: the same button in the colour of an answer. */
+.play-again-btn.accept-btn {
+  background: #2a72d4;
+}
+
+.play-again-btn.accept-btn:hover {
+  background: #2565bb;
 }
 
 .live-join-overlay .play-again-btn:disabled {

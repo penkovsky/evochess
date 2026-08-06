@@ -121,7 +121,7 @@ function LessonMenu({
 
   return (
     <div className="tutorial tutorial-menu">
-      <h2 className="tutorial-title">Learn EvoChess</h2>
+      <h2 className="tutorial-title">Learn Evochess</h2>
       <p className="tutorial-lede">
         Chess, but you start with only Pawns and a King. Every other piece is earned. Three short
         lessons, about a minute each. Play along, or wander off and poke at the rules whenever you like.

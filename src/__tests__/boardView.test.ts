@@ -38,6 +38,7 @@ function input(over: Partial<BoardViewInput> = {}): BoardViewInput {
     aiThinking: false,
     timeUp: null,
     live: null,
+    liveConnectionLost: false,
     puzzle: null,
     puzzleResult: null,
     fromShared: false,
@@ -62,7 +63,11 @@ const match = (over: Partial<LiveView> = {}): LiveView => ({
   startPayload: null,
   joined: true,
   freeSeat: null,
+  rematchW: false,
+  rematchB: false,
+  rematchId: null,
   seat: null,
+  outOfSync: false,
   ...over,
 });
 
@@ -105,7 +110,7 @@ describe("deriveBoardView status", () => {
     // Our seat is Black and White opens, so there is nothing to do until the
     // other side is filled.
     const waiting = input({ mode: "human-human", live: match({ joined: false, seat: seat("b") }) });
-    expect(deriveBoardView(waiting).status).toBe("Waiting for your opponent to join.");
+    expect(deriveBoardView(waiting).status).toBe("Waiting for opponent");
 
     // Our seat is Black, so ply 1 is not ours.
     const theirTurn = input({ mode: "human-human", live: match({ seat: seat("b") }) });
@@ -114,6 +119,23 @@ describe("deriveBoardView status", () => {
     // No token at all: the link only reads.
     const observer = input({ mode: "human-human", live: match() });
     expect(deriveBoardView(observer).status).toBe("Watching. White to move.");
+  });
+
+  it("says a dropped connection outranks whose turn it is", () => {
+    const lost = input({ mode: "human-human", live: match({ seat: seat("b") }), liveConnectionLost: true });
+    expect(deriveBoardView(lost).status).toBe("Connection lost. Still trying...");
+  });
+
+  it("says out of sync over everything, since nothing else is true any more", () => {
+    const broken = input({
+      mode: "human-human",
+      live: match({ seat: seat("w"), outOfSync: true }),
+      liveConnectionLost: true,
+    });
+    const view = deriveBoardView(broken);
+    expect(view.status).toBe("This match is out of sync. Start a new game to carry on.");
+    // And the board is closed with it.
+    expect(view.allowDragging).toBe(false);
   });
 });
 

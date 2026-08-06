@@ -19,6 +19,8 @@ export interface BoardViewInput {
   aiThinking: boolean;
   timeUp: Color | null;
   live: LiveView | null;
+  /** Three polls in a row failed. Says so, keeps the board, keeps trying. */
+  liveConnectionLost: boolean;
   /** The puzzle on the board, if any. */
   puzzle: PuzzleState | null;
   puzzleResult: "solved" | "failed" | null;
@@ -144,10 +146,15 @@ function liveStatus(input: BoardViewInput, turnLabel: string): string {
     const winner = timeUp === "w" ? "Black" : "White";
     status = `${timeUp === "w" ? "White" : "Black"} ran out of time. ${winner} wins!`;
   } else if (aiThinking) status += " (AI thinking...)";
-  // The one line a live match adds: what the board is waiting for.
-  if (live && !canMoveNow(live, game.moveLog.length) && !game.isGameOver()) {
-    if (!live.joined) status = live.seat ? "Waiting for your opponent to join." : status;
+  if (!live) return status;
+  // The line a live match adds: what the board is waiting for.
+  if (!canMoveNow(live, game.moveLog.length) && !game.isGameOver()) {
+    if (!live.joined) status = live.seat ? "Waiting for opponent" : status;
     else status = live.seat ? "Waiting for your opponent's move." : `Watching. ${turnLabel} to move.`;
   }
+  // Both outrank it, and out of sync outranks the lot: it is terminal, so
+  // saying whose turn it is would be saying the match still works.
+  if (input.liveConnectionLost) status = "Connection lost. Still trying...";
+  if (live.outOfSync) status = "This match is out of sync. Start a new game to carry on.";
   return status;
 }

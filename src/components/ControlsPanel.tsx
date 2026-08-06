@@ -10,14 +10,17 @@ export interface ControlsPanelProps {
   level: AiLevel;
   /** A puzzle fixes the whole setup, so the pickers show it and are locked. */
   puzzleActive: boolean;
-  unverified: boolean;
+  /**
+   * A match is on the board. It is human-vs-human, but neither of that mode's
+   * switches applies to one, so neither is offered.
+   */
+  liveActive: boolean;
   autoFlip: boolean;
   timerEnabled: boolean;
   timerMinutes: number;
   /** Disables the color/timer settings that only make sense before the first move. */
   hasHistory: boolean;
   onRestart: (what: RestartReason, next: { mode: Mode; aiColor: Color; level: AiLevel }, apply?: () => void) => void;
-  setMode: (mode: Mode) => void;
   setAiColor: (color: Color) => void;
   setLevel: (level: AiLevel) => void;
   setAutoFlip: Dispatch<SetStateAction<boolean>>;
@@ -32,13 +35,12 @@ export function ControlsPanel({
   aiColor,
   level,
   puzzleActive,
-  unverified,
+  liveActive,
   autoFlip,
   timerEnabled,
   timerMinutes,
   hasHistory,
   onRestart,
-  setMode,
   setAiColor,
   setLevel,
   setAutoFlip,
@@ -49,30 +51,8 @@ export function ControlsPanel({
 }: ControlsPanelProps) {
   return (
     <div className="controls">
-      <div className="mode-picker" role="group" aria-label="Mode">
-        {(
-          [
-            { label: "vs AI", value: "human-ai" },
-            { label: "vs Human", value: "human-human" },
-          ] as const
-        ).map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            className={mode === opt.value ? "active" : ""}
-            // The engine lockout is what makes rendering an impossible position
-            // safe at all, so vs-AI is not reachable from one (spec §5.2).
-            disabled={puzzleActive || (unverified && opt.value === "human-ai")}
-            onClick={() => {
-              const newMode = opt.value;
-              if (newMode === mode) return;
-              onRestart("mode", { mode: newMode, aiColor, level }, () => setMode(newMode));
-            }}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
+      {/* No mode picker: changing mode always restarted the game, so it is a
+          New Game option now (docs/live-match.md §Milestone 2). */}
       {mode === "human-ai" && (
         <>
           <div className="color-picker" role="group" aria-label="Your color">
@@ -122,7 +102,11 @@ export function ControlsPanel({
           </div>
         </>
       )}
-      {mode === "human-human" && (
+      {/* Neither switch has anything to say in a match. The board is oriented
+          by the seat, and a match is untimed: the clock is local, so a flag
+          only one side sees would split the two boards
+          (docs/live-match.md §Shape). */}
+      {mode === "human-human" && !liveActive && (
         <div className="controls-row">
           <button
             type="button"
@@ -150,7 +134,7 @@ export function ControlsPanel({
           </button>
         </div>
       )}
-      {mode === "human-human" && timerEnabled && (
+      {mode === "human-human" && timerEnabled && !liveActive && (
         <label>
           Minutes per side:
           <input

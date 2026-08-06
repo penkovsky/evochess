@@ -4,14 +4,14 @@
  * something has been played.
  */
 import { test, expect } from "@playwright/test";
-import { freshGamePage } from "./helpers";
+import { freshGamePage, startOverTheBoard } from "./helpers";
 
 test.beforeEach(async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await freshGamePage(page);
   // Human vs human, so the engine doesn't reply in the middle of the moves
   // this spec plays.
-  await page.getByRole("button", { name: "vs Human" }).click();
+  await startOverTheBoard(page);
 });
 
 async function play(page: import("@playwright/test").Page, from: string, to: string) {
