@@ -6,6 +6,8 @@ import {
   cachePuzzle,
   countAttempt,
   fetchDailyPuzzle,
+  loadPuzzleSeen,
+  markPuzzleSeen,
   resolvePuzzle,
   type DailyPuzzle,
   type PuzzleAttempts,
@@ -21,6 +23,8 @@ export interface UseDailyPuzzle {
    * it was before this existed.
    */
   puzzle: DailyPuzzle | null;
+  /** True until the offered puzzle has been opened once. Highlights the button. */
+  puzzleFresh: boolean;
   /**
    * The attempt on the board, if any. A ref, because the move path and the
    * engine chain both read it from timer callbacks. Nothing persists: a reload
@@ -72,6 +76,8 @@ export interface UseDailyPuzzleArgs {
 export function useDailyPuzzle({ gameRef }: UseDailyPuzzleArgs): UseDailyPuzzle {
   const [puzzle, setPuzzle] = useState<DailyPuzzle | null>(null);
   const [puzzleResult, setPuzzleResult] = useState<null | "solved" | "failed">(null);
+  // Date of the last puzzle opened, persisted so the highlight survives a reload.
+  const [seen, setSeen] = useState<string | null>(() => loadPuzzleSeen());
   // `resolved` is the once-per-load guard on the solved/failed event: a takeback
   // can walk the ply count backwards, and the guard is what stops that becoming
   // a second event. The row itself is kept after that, since `game_end` and the
@@ -87,6 +93,8 @@ export function useDailyPuzzle({ gameRef }: UseDailyPuzzleArgs): UseDailyPuzzle 
     // last one goes.
     attemptsRef.current = countAttempt(attemptsRef.current, row.date);
     setPuzzleResult(null);
+    markPuzzleSeen(row.date);
+    setSeen(row.date);
     track("puzzle_open", { date: row.date, mate_in: row.mateIn, attempts: attemptsRef.current.count });
   }
 
@@ -181,6 +189,7 @@ export function useDailyPuzzle({ gameRef }: UseDailyPuzzleArgs): UseDailyPuzzle 
 
   return {
     puzzle,
+    puzzleFresh: puzzle !== null && seen !== puzzle.date,
     puzzleRef,
     puzzleResult,
     beginAttempt,

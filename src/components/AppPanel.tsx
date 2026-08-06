@@ -20,6 +20,7 @@ export function AppPanel({
   showInvite,
   openTutorial,
   hasPuzzle,
+  puzzleFresh,
   openPuzzle,
   onShare,
   controls,
@@ -33,6 +34,8 @@ export function AppPanel({
   openTutorial: () => void;
   /** Hidden entirely when there is no puzzle: no disabled state, no placeholder. */
   hasPuzzle: boolean;
+  /** Today's puzzle not opened yet. */
+  puzzleFresh: boolean;
   openPuzzle: () => void;
   onShare: (e: MouseEvent<HTMLButtonElement>, viaSheet: boolean) => void;
   controls: ControlsPanelProps;
@@ -52,7 +55,7 @@ export function AppPanel({
       {hasPuzzle && (
         <button
           type="button"
-          className="learn-btn share-btn"
+          className={`learn-btn share-btn${puzzleFresh ? " puzzle-fresh" : ""}`}
           aria-label="Puzzle of the day"
           title="Puzzle of the day"
           onClick={openPuzzle}

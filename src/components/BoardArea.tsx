@@ -196,6 +196,7 @@ export function BoardArea({
         openTutorial={openTutorial}
         openWidget={openWidget}
         onPuzzle={puzzle.onPuzzle}
+        puzzleFresh={puzzle.puzzleFresh}
         onShare={onShare}
       />
     </div>

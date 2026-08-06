@@ -12,6 +12,8 @@ import {
   fetchDailyPuzzle,
   formatPuzzleDate,
   loadCachedPuzzle,
+  loadPuzzleSeen,
+  markPuzzleSeen,
   puzzleOutcome,
   resolvePuzzle,
 } from "../dailyPuzzle";
@@ -174,6 +176,15 @@ describe("the cache", () => {
     expect(await fetchDailyPuzzle()).toBeNull();
     // Nothing expires it: a stale entry reads as an old puzzle, not a wrong one.
     expect(loadCachedPuzzle()).toEqual({ date: "2026-07-31", param: "AQABBB", mateIn: 3 });
+  });
+
+  it("remembers the last puzzle opened, per date", () => {
+    expect(loadPuzzleSeen()).toBeNull();
+    markPuzzleSeen("2026-08-01");
+    expect(loadPuzzleSeen()).toBe("2026-08-01");
+    // A new date is unseen again, which lights the button back up.
+    markPuzzleSeen("2026-08-02");
+    expect(loadPuzzleSeen()).toBe("2026-08-02");
   });
 });
 

@@ -23,12 +23,15 @@ export function MobileBar({
   openTutorial,
   openWidget,
   onPuzzle,
+  puzzleFresh,
   onShare,
 }: {
   openTutorial: () => void;
   openWidget: (widget: MobileWidget) => void;
   /** Null when there is no puzzle to offer, which hides the button entirely. */
   onPuzzle: (() => void) | null;
+  /** Today's puzzle not opened yet. */
+  puzzleFresh: boolean;
   onShare: (e: ReactMouseEvent<HTMLButtonElement>, useShareSheet: boolean) => void;
 }) {
   return (
@@ -59,7 +62,7 @@ export function MobileBar({
       {onPuzzle && (
         <button
           type="button"
-          className="widget-btn"
+          className={`widget-btn${puzzleFresh ? " puzzle-fresh" : ""}`}
           aria-label="Puzzle of the day"
           title="Puzzle of the day"
           onClick={onPuzzle}

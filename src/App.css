@@ -98,6 +98,31 @@
   cursor: pointer;
 }
 
+/* Today's puzzle, not opened yet. Same yellow on the bar and in the panel. */
+.puzzle-fresh,
+.learn-btn.share-btn.puzzle-fresh {
+  border-color: #e8c34a;
+  background: #fdf3cd;
+  color: #4a3b08;
+}
+
+.learn-btn.share-btn.puzzle-fresh:hover {
+  background: #f7e7a8;
+}
+
+@media (prefers-color-scheme: dark) {
+  .puzzle-fresh,
+  .learn-btn.share-btn.puzzle-fresh {
+    border-color: #8a7320;
+    background: #3a3212;
+    color: #f2e3a6;
+  }
+
+  .learn-btn.share-btn.puzzle-fresh:hover {
+    background: #4a411a;
+  }
+}
+
 .widget-btn.primary {
   border-color: #22aa77;
   background: #22aa77;

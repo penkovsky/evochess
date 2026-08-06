@@ -1115,6 +1115,7 @@ function App() {
   };
   const puzzleProps: PuzzleProps = {
     onPuzzle: puzzle.puzzle ? openPuzzle : null,
+    puzzleFresh: puzzle.puzzleFresh,
     onPuzzleRetry: openPuzzle,
     puzzleActive: puzzleOnBoard !== null,
     puzzleMateIn: puzzleOnBoard?.mateIn ?? 0,
@@ -1204,6 +1205,7 @@ function App() {
         showInvite={tutorial.showInvite}
         openTutorial={tutorial.openTutorial}
         hasPuzzle={puzzle.puzzle !== null}
+        puzzleFresh={puzzle.puzzleFresh}
         openPuzzle={openPuzzle}
         onShare={share.handleShare}
         controls={controls}

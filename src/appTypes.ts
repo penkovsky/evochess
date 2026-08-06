@@ -129,6 +129,8 @@ export interface BrowseProps {
 export interface PuzzleProps {
   /** Null when there is no puzzle to offer, which hides the bar's button. */
   onPuzzle: (() => void) | null;
+  /** Today's puzzle not opened yet: the button is highlighted. */
+  puzzleFresh: boolean;
   onPuzzleRetry: () => void;
   puzzleActive: boolean;
   puzzleMateIn: number;

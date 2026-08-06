@@ -116,6 +116,28 @@ export function formatPuzzleDate(date: string): string {
   });
 }
 
+// ------------------------------------------------------------------- seen
+
+const SEEN_KEY = "evochess-puzzle-seen-v1";
+
+/** Date of the last puzzle opened here, or null. Highlights the button until then. */
+export function loadPuzzleSeen(): string | null {
+  try {
+    const raw = localStorage.getItem(SEEN_KEY);
+    return raw && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function markPuzzleSeen(date: string): void {
+  try {
+    localStorage.setItem(SEEN_KEY, date);
+  } catch {
+    // Blocked storage: the button just stays highlighted.
+  }
+}
+
 // --------------------------------------------------------------- attempts
 
 /** How many times this date has been loaded in this session. */
