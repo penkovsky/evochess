@@ -13,7 +13,7 @@ function gitSha() {
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/evochess/',
+  base: '/',
   plugins: [react()],
   define: {
     __APP_VERSION__: JSON.stringify(gitSha()),
