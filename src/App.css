@@ -569,6 +569,16 @@
   min-width: 46px;
 }
 
+/* A banked right no piece can spend: that color has no minor left that is
+   eligible, because each one is a downgraded rook (or there is none at all).
+   Greyed and struck rather than hidden, since the right is still real and comes
+   back the moment a fresh minor evolves. Matches the grey dot those pieces
+   carry on the board. */
+.evo-banked.unusable {
+  color: #8a8a8a;
+  text-decoration: line-through;
+}
+
 /* Moves flow across the line rather than one pair per row, so the same 200px
    shows several times as much of the game. Each pair is one flex item and
    never breaks: "3. f4 h4=N" wraps whole or not at all. */
@@ -1126,6 +1136,23 @@
 
 .rook-charge-badge.low {
   background: #d98c00;
+}
+
+/* A minor that was downgraded from a rook, and so is barred from ever becoming
+   one again. Same corner as the charge badge, deliberately: it is the same
+   piece's evolution slot, just spent. Grey and dotless of any number, so it
+   never reads as a count. The ring keeps it visible on both square colors. */
+.rook-locked-dot {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #6b6b6b;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+  z-index: 2;
 }
 
 @keyframes fireworks-fade-out {

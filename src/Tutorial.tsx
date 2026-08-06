@@ -472,11 +472,17 @@ function LessonPlayer({
               onSquareClick,
               squareRenderer: ({ square, children }) => {
                 const charges = game.rookCharges.get(square as Square);
+                const locked = game.rookLocked.has(square as Square);
                 return (
                   <div style={{ width: "100%", height: "100%", position: "relative", ...squareStyles[square] }}>
                     {children}
                     {charges !== undefined && (
                       <span className={`rook-charge-badge ${charges === 1 ? "low" : ""}`}>{charges}</span>
+                    )}
+                    {/* The downgrade lesson leaves a locked minor on the board;
+                        it carries the same grey dot as in the real game. */}
+                    {locked && (
+                      <span className="rook-locked-dot" title="Downgraded rook - cannot become a rook again" />
                     )}
                   </div>
                 );

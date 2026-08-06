@@ -289,11 +289,16 @@ export class EvoChessGame {
    * A lone minor piece isn't literal insufficient material yet, but it could
    * still accumulate moves and promote, so the game shouldn't be declared
    * drawn until every minor piece is locked out of that path.
+   *
+   * With a `color`, restricts the question to that side's minors. The UI asks
+   * it that way to tell a banked rook right that can still be spent from one
+   * that no piece on the board can use.
    */
-  private hasPromotableMinor(): boolean {
+  hasPromotableMinor(color?: Color): boolean {
     for (const row of this.chess.board()) {
       for (const sq of row) {
         if (!sq) continue;
+        if (color && sq.color !== color) continue;
         if ((sq.type === "n" || sq.type === "b") && !this.rookLocked.has(sq.square)) {
           return true;
         }

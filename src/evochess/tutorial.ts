@@ -190,7 +190,7 @@ export const LESSONS: Lesson[] = [
     ],
     outro: [
       "Zero charges, so the Rook never really arrived: it made its move and collapsed into the minor piece you chose, on the same square, on the same turn.",
-      "That piece is permanently barred from becoming a Rook again, so it can never cycle. Rooks are a burst of power to be timed, not a piece you keep.",
+      "The grey dot on it marks that: permanently barred from becoming a Rook again. It can never cycle. Rooks are a burst of power to be timed, not a piece you keep.",
     ],
   },
 ];

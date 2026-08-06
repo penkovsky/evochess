@@ -34,6 +34,10 @@ export function EvoStrip({
         banked={rights.rook}
         bankedGlyph={color === "w" ? "♖" : "♜"}
         label={`${side} minor moves toward a rook promotion`}
+        // Rook rights keep accruing even when every minor of this color came
+        // from a spent rook, and those can never be promoted again. Without
+        // this the strip advertises a right nothing on the board can use.
+        unusable={!game.hasPromotableMinor(color)}
       />
     </div>
   );
@@ -46,6 +50,7 @@ function EvoDots({
   banked,
   bankedGlyph,
   label,
+  unusable = false,
 }: {
   kind: "minor" | "rook";
   value: number;
@@ -53,6 +58,8 @@ function EvoDots({
   banked: number;
   bankedGlyph: string;
   label: string;
+  /** Whether a banked right has no piece on the board that could spend it. */
+  unusable?: boolean;
 }) {
   return (
     <span className="evo-group">
@@ -63,7 +70,16 @@ function EvoDots({
       </span>
       {/* Always rendered, blank at zero: the slot reserves its width so the
           dots don't shift sideways the moment a right is banked. */}
-      <span className="evo-banked" title={banked > 0 ? "Banked unused promotion rights" : undefined}>
+      <span
+        className={`evo-banked${banked > 0 && unusable ? " unusable" : ""}`}
+        title={
+          banked > 0
+            ? unusable
+              ? "Banked, but no minor piece on the board can use it"
+              : "Banked unused promotion rights"
+            : undefined
+        }
+      >
         {banked > 0 ? `×${banked} ${bankedGlyph}` : ""}
       </span>
     </span>

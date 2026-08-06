@@ -89,12 +89,18 @@ export function BoardArea({
             onSquareClick,
             squareRenderer: ({ square, children }) => {
               const charges = displayGame.rookCharges.get(square as Square);
+              const locked = displayGame.rookLocked.has(square as Square);
               return (
                 <div style={{ width: "100%", height: "100%", position: "relative", ...squareStyles[square] }}>
                   {children}
                   {charges !== undefined && (
                     <span className={`rook-charge-badge ${charges === 1 ? "low" : ""}`}>{charges}</span>
                   )}
+                  {/* A minor that came from a spent rook can never become one
+                      again, so it gets the badge slot the rook it used to be
+                      had. The two never collide: a locked square holds a minor,
+                      and only a rook carries charges. */}
+                  {locked && <span className="rook-locked-dot" title="Downgraded rook - cannot become a rook again" />}
                 </div>
               );
             },
