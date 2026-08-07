@@ -325,8 +325,16 @@ function App() {
    * A row that fails to decode, or decodes but fails the legality check, is
    * treated as no puzzle at all. An unverified position locks the engine out
    * (share-links-spec.md §5.2), which would leave an unplayable board.
+   *
+   * A live match refuses outright: the poll would apply the opponent's moves
+   * onto the puzzle. The button is hidden too, so this guards `?daily` and the
+   * fetch that lands later.
    */
   function loadDailyPuzzle(row: DailyPuzzle, saved: ReturnType<typeof loadGame>) {
+    if (liveRef.current) {
+      console.warn(`evochess: daily puzzle ${row.date} refused, a live match is on the board`);
+      return;
+    }
     const decoded = decodeShareLink(row.param);
     if (!decoded.ok) {
       console.warn(`evochess: daily puzzle ${row.date} failed to decode [${decoded.code}]`);
@@ -469,10 +477,12 @@ function App() {
       window.history.replaceState(null, "", url.pathname + url.search + url.hash);
     }
     // After the board is decided, and applied on a timer.
+    // `?lm=` beats `?daily`: the match takes the board when its fetch lands,
+    // and neither claim may depend on which response is first.
     puzzle.bootstrapPuzzle({
-      daily: startup.daily,
+      daily: startup.daily && !startup.match,
       cached: cache,
-      auto: startup.puzzle,
+      auto: startup.match ? null : startup.puzzle,
       saved,
       // gameRef is whichever game took the board above, so this is the ply
       // count the request is racing.
@@ -1137,7 +1147,8 @@ function App() {
     onBrowseLive: browseLive,
   };
   const puzzleProps: PuzzleProps = {
-    onPuzzle: puzzle.puzzle ? openPuzzle : null,
+    // A match owns the board. New Game is the way out of one.
+    onPuzzle: puzzle.puzzle && !liveActive ? openPuzzle : null,
     puzzleFresh: puzzle.puzzleFresh,
     onPuzzleRetry: openPuzzle,
     puzzleActive: puzzleOnBoard !== null,
@@ -1243,7 +1254,7 @@ function App() {
       <AppPanel
         showInvite={tutorial.showInvite}
         openTutorial={tutorial.openTutorial}
-        hasPuzzle={puzzle.puzzle !== null}
+        hasPuzzle={puzzleProps.onPuzzle !== null}
         puzzleFresh={puzzle.puzzleFresh}
         openPuzzle={openPuzzle}
         onShare={share.handleShare}

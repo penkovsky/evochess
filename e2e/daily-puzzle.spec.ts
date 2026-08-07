@@ -107,6 +107,24 @@ async function stubCollector(page: Page, puzzle: object | null): Promise<Collect
   return collector;
 }
 
+/** A match with a free seat, so `?lm=` puts one on the board as an observer. */
+async function stubMatch(page: Page) {
+  await page.route("**/rest/v1/rpc/lm_fetch", (route: Route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "waiting",
+        first_mover: "b",
+        start_payload: LINK_PARAM,
+        joined: false,
+        free_seat: "b",
+        moves: [],
+      }),
+    })
+  );
+}
+
 /** Lands on `path`, past the tutorial, optionally over a seeded autosave. */
 async function open(page: Page, path: string, seed?: Record<string, string>) {
   await page.addInitScript(
@@ -470,6 +488,35 @@ test("New Game leaves the puzzle, and the banner with it", async ({ page }) => {
   // back, and the entry point is still there to go round once more.
   await expect(page.locator(".takeback-btn")).toBeVisible();
   await expect(page.locator(".panel").getByRole("button", { name: "Puzzle of the day" })).toBeVisible();
+});
+
+test("no puzzle entry point while a live match is on the board", async ({ page }) => {
+  // The match owns the position: a puzzle loaded over it would take the
+  // opponent's polled moves, which is an illegal move alert on their every ply.
+  await stubCollector(page, ROW);
+  await stubMatch(page);
+  await open(page, "./?lm=m1");
+  await expect(page.getByRole("button", { name: "Play as Black" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Puzzle of the day" })).toHaveCount(0);
+
+  // New Game is the way out of a match, and the entry point comes back with it.
+  await page.locator(".action-picker .new-game-btn").click();
+  await page.getByRole("button", { name: "Computer" }).click();
+  await expect(page.locator(".panel").getByRole("button", { name: "Puzzle of the day" })).toBeVisible();
+});
+
+test("`?lm=` beats `?daily`, whichever response lands first", async ({ page }) => {
+  const collector = await stubCollector(page, ROW);
+  await stubMatch(page);
+  await open(page, "./?daily&lm=m1");
+
+  // The match takes the board when its fetch lands, and the puzzle never
+  // claims it, whichever of the two responses is first.
+  await expect(page.getByRole("button", { name: "Play as Black" })).toBeVisible();
+  await page.waitForTimeout(1000);
+  await expect(page.getByRole("button", { name: "Play as Black" })).toBeVisible();
+  await expect(page.locator(".puzzle-overlay")).toHaveCount(0);
+  expect(collector.events.some((e) => e.name === "puzzle_open")).toBe(false);
 });
 
 test("a day-stale cached puzzle is replaced by today's when the response lands", async ({ page }) => {
