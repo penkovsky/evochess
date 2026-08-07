@@ -2,7 +2,7 @@ import type { Color } from "chess.js";
 import type { EvoChessGame } from "./evochess/game";
 import type { AiLevel } from "./evochess/ai";
 import type { PuzzleState } from "./evochess/dailyPuzzle";
-import { canMoveNow, type LiveView } from "./liveMatch";
+import { canMoveNow, drawOffered, type LiveOutcome, type LiveView } from "./liveMatch";
 import type { Mode } from "./appTypes";
 
 export interface BoardViewInput {
@@ -66,7 +66,9 @@ export function deriveBoardView(input: BoardViewInput): BoardView {
   // index falls back to it.
   const displayGame = browsing && browsePly! < totalPlies ? history[browsePly!] : game;
   const turnLabel = displayGame.turn === "w" ? "White" : "Black";
-  const gameOver = game.isGameOver() || !!timeUp;
+  // A resignation and an agreed draw end the game as surely as a mate does,
+  // and neither is on the board (docs/live-match.md §Milestone 2c).
+  const gameOver = game.isGameOver() || !!timeUp || !!live?.outcome;
   // A puzzle owns the board until it resolves, at which point the banner over
   // the board carries the news and this line says what it says for any other
   // game.
@@ -129,7 +131,10 @@ export function deriveBoardView(input: BoardViewInput): BoardView {
     humanCanMove:
       !browsing &&
       !(mode === "human-ai" && game.turn === aiColor) &&
-      !game.isGameOver() &&
+      // The board's own game-over, not `isGameOver`: a flag and an agreed
+      // ending are both endings, and clicking a piece after one selected it
+      // and offered moves that `attemptMove` then refused.
+      !gameOver &&
       !puzzleResult &&
       !input.promptOpen,
     allowDragging,
@@ -152,9 +157,24 @@ function liveStatus(input: BoardViewInput, turnLabel: string): string {
     if (!live.joined) status = live.seat ? "Waiting for opponent" : status;
     else status = live.seat ? "Waiting for your opponent's move." : `Watching. ${turnLabel} to move.`;
   }
+  // An offer of ours is the only thing on screen that says so; the opponent's
+  // is also on the board, above the position it is being judged on.
+  const offer = drawOffered(live);
+  if (offer === "mine") status = "Draw offered. Waiting for your opponent.";
+  else if (offer === "theirs") status = "Your opponent offers a draw.";
   // Both outrank it, and out of sync outranks the lot: it is terminal, so
   // saying whose turn it is would be saying the match still works.
   if (input.liveConnectionLost) status = "Connection lost. Still trying...";
+  // An ending the players agreed on outranks the connection: there is nothing
+  // left to read, so a failing poll is no longer news.
+  if (live.outcome) status = endingText(live.outcome, live.seat?.seat ?? null);
   if (live.outOfSync) status = "This match is out of sync. Start a new game to carry on.";
   return status;
+}
+
+/** A resignation or an agreed draw, said from our own side of the board. */
+function endingText(outcome: LiveOutcome, seat: Color | null): string {
+  if (outcome === "d") return "Draw agreed.";
+  if (!seat) return `${outcome === "w" ? "White" : "Black"} wins by resignation.`;
+  return outcome === seat ? "Your opponent resigned. You win!" : "You resigned.";
 }

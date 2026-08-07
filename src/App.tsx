@@ -15,7 +15,7 @@ import {
   resumeMeta,
 } from "./evochess/persistence";
 import { loadProgress } from "./evochess/tutorialProgress";
-import { canMoveNow, inviteUrl, rematchAsks, rematchOffered } from "./liveMatch";
+import { canMoveNow, drawOffered, inviteUrl, rematchAsks, rematchOffered } from "./liveMatch";
 import { formatPuzzleDate, loadCachedPuzzle, type DailyPuzzle } from "./evochess/dailyPuzzle";
 import {
   accruePlyTime,
@@ -526,13 +526,25 @@ function App() {
     // reload, since `logged` is only persisted once the game goes live.
     if (sharedPending) return;
     const game = gameRef.current;
-    if (!game.isGameOver() && !timeUp) return;
+    // A resignation or an agreed draw ends the game without the board showing
+    // it (docs/live-match.md §Milestone 2c). Left out, it would go unreported
+    // here and then be logged as abandoned on the way out of the tab.
+    const liveOutcome = live.live?.outcome ?? null;
+    if (!game.isGameOver() && !timeUp && !liveOutcome) return;
     const meta = gameMetaRef.current;
     if (meta.logged) return;
     meta.logged = true;
-    const humanColor: Color = mode === "human-ai" ? (aiColor === "w" ? "b" : "w") : "w";
+    // In a match the human is whoever holds the seat, not White.
+    const humanColor: Color =
+      live.live?.seat?.seat ?? (mode === "human-ai" ? (aiColor === "w" ? "b" : "w") : "w");
     const outcome = timeUp
       ? "timeout"
+      : liveOutcome
+      ? liveOutcome === "d"
+        ? "draw"
+        : liveOutcome === humanColor
+        ? "win"
+        : "loss"
       : !game.chess.isCheckmate()
       ? "draw"
       : game.turn === humanColor
@@ -568,7 +580,18 @@ function App() {
     );
     rerender(); // persists `logged` now rather than at the next move
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, mode, aiColor, level, fromShared, sharedPending, timeUp, gameRef.current, gameRef.current.moveLog.length]);
+  }, [
+    loaded,
+    mode,
+    aiColor,
+    level,
+    fromShared,
+    sharedPending,
+    timeUp,
+    live.live?.outcome,
+    gameRef.current,
+    gameRef.current.moveLog.length,
+  ]);
 
   // Best-effort game_abandon on tab close: `pagehide` fires on navigation,
   // close and backgrounding alike, and is the one unload event bfcache doesn't
@@ -1127,6 +1150,14 @@ function App() {
   // Ours, finished, and still a match: the rematch is the only thing left to
   // do with it. Out of sync is not a game to play again.
   const rematchMatch = rematchOffered(live.live, view.gameOver) ? live.live : null;
+  // Whose draw offer is standing, ours or theirs. Nothing once the game is
+  // over: an offer outliving the result would be an answer to nothing.
+  const offer = view.gameOver ? null : drawOffered(live.live);
+  // The menu replaces New Game for as long as the match can still be acted on.
+  // A seat, both seats taken, and a game still being played: anything less and
+  // there is no Draw and no Resign to hold.
+  const liveMenu =
+    live.live?.seat && live.live.joined && live.live.status === "live" && !live.live.outOfSync && !view.gameOver;
   const liveProps: LiveProps = {
     liveActive,
     joinSeat: live.live && !live.live.seat && live.live.status !== "over" ? live.live.freeSeat : null,
@@ -1136,6 +1167,14 @@ function App() {
     rematch: rematchMatch
       ? { ...rematchAsks(rematchMatch), onAsk: () => void live.askRematch() }
       : null,
+    onMenu: liveMenu ? () => setConfirmAction({ kind: "live-menu" }) : null,
+    drawOffer:
+      offer === "theirs"
+        ? {
+            onAccept: () => void live.endMatch("draw_accept"),
+            onDecline: () => void live.endMatch("draw_decline"),
+          }
+        : null,
   };
   const scoreProps: ScoreProps = {
     showScoreOverlay: view.showScoreOverlay,
@@ -1240,6 +1279,19 @@ function App() {
         confirmCancelBtnRef={confirmCancelBtnRef}
         onPlayHere={playFromHere}
         onLeaveLive={backToMyGame}
+        // Draw closes the menu and goes out: what it waits on is the opponent,
+        // not another press here. Resign swaps the menu for the dialog that
+        // asks (docs/live-match.md §Milestone 2c).
+        onOfferDraw={() => {
+          setConfirmAction(null);
+          void live.endMatch("draw_offer");
+        }}
+        onAskResign={() => setConfirmAction({ kind: "resign" })}
+        onResign={() => {
+          setConfirmAction(null);
+          void live.endMatch("resign");
+        }}
+        drawPending={offer === "mine"}
         liveActive={liveActive && !view.gameOver}
         onNewGame={chooseNewGame}
         invite={

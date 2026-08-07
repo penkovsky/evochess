@@ -3,7 +3,7 @@
 -- The backend knows no chess: it stores moves, decides whose turn it is by ply
 -- parity, and hands out seat tokens. Both clients run the engine.
 --
--- The anon key gets EXECUTE on the four functions below and nothing else. No
+-- The anon key gets EXECUTE on the functions below and nothing else. No
 -- SELECT, INSERT, UPDATE or DELETE on either table. The insert-only,
 -- read-nothing posture of `events`/`games` is unchanged.
 
@@ -47,6 +47,13 @@ alter table public.lm_matches
   add column if not exists white_rematch boolean not null default false,
   add column if not exists black_rematch boolean not null default false,
   add column if not exists rematch_id uuid references public.lm_matches(id);
+
+-- Draw and resign (docs/live-match.md §Milestone 2c). `outcome` carries only
+-- the endings the players chose: checkmate and stalemate stay local, from the
+-- move list, since the backend cannot check them anyway.
+alter table public.lm_matches
+  add column if not exists outcome    text    check (outcome in ('w', 'b', 'd')),
+  add column if not exists draw_offer char(1) check (draw_offer in ('w', 'b'));
 
 -- No policies and no grants: RLS on with nothing granted is the lockout.
 alter table public.lm_matches enable row level security;
@@ -133,6 +140,54 @@ begin
   if p_ply <> last + 1 then raise exception 'ply gap' using errcode = 'P0001'; end if;
   insert into lm_moves (match_id, ply, from_sq, to_sq, opts)
   values (p_match, p_ply, p_from, p_to, coalesce(p_opts, '{}'::jsonb));
+  -- An unanswered draw offer dies on the offerer's opponent's next move, so a
+  -- stale one cannot be accepted against a position that has changed. Our own
+  -- move leaves our own offer standing.
+  update lm_matches set draw_offer = null
+    where id = p_match and draw_offer = lm_other(seat);
+end $$;
+
+-- Resign, and the three halves of a draw (docs/live-match.md §Milestone 2c).
+-- One function, because all four are the same check: your token, your seat,
+-- a match still being played.
+--
+-- p_action is 'resign', 'draw_offer', 'draw_accept' or 'draw_decline'.
+-- 'draw_offer' against the other seat's standing offer accepts it instead,
+-- which is what makes two offers crossing on the wire an agreement rather than
+-- a race. The row is locked, so two accepts at once still draw once.
+create or replace function public.lm_end(p_match uuid, p_token text, p_action text) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare m lm_matches; seat char(1); other char(1);
+begin
+  select * into m from lm_matches where id = p_match for update;
+  if not found then raise exception 'unknown match' using errcode = 'P0002'; end if;
+  if m.status <> 'live' then raise exception 'match not live' using errcode = 'P0001'; end if;
+  seat := case when m.white_token = p_token then 'w'
+               when m.black_token = p_token then 'b' end;
+  if seat is null then raise exception 'not your seat' using errcode = 'P0001'; end if;
+  other := lm_other(seat);
+
+  if p_action = 'resign' then
+    update lm_matches set outcome = other, draw_offer = null, status = 'over'
+      where id = p_match returning * into m;
+  elsif p_action = 'draw_accept' or (p_action = 'draw_offer' and m.draw_offer = other) then
+    if m.draw_offer is distinct from other then
+      raise exception 'no draw offer' using errcode = 'P0001';
+    end if;
+    update lm_matches set outcome = 'd', draw_offer = null, status = 'over'
+      where id = p_match returning * into m;
+  elsif p_action = 'draw_offer' then
+    update lm_matches set draw_offer = seat where id = p_match returning * into m;
+  elsif p_action = 'draw_decline' then
+    -- Only the other side's offer. Declining our own would be a withdrawal,
+    -- which nothing asks for.
+    update lm_matches set draw_offer = null where id = p_match and draw_offer = other;
+    select * into m from lm_matches where id = p_match;
+  else
+    raise exception 'bad action' using errcode = 'P0001';
+  end if;
+
+  return jsonb_build_object('outcome', m.outcome, 'draw_offer', m.draw_offer, 'status', m.status);
 end $$;
 
 -- The rematch ask. Sets the caller's flag, and once both are set creates the
@@ -195,6 +250,10 @@ language sql security definer set search_path = public, pg_temp as $$
     'rematch_w', m.white_rematch,
     'rematch_b', m.black_rematch,
     'rematch_id', m.rematch_id,
+    -- The endings the players chose, and whose draw offer is standing. Both
+    -- reach the opponent on the poll that carries moves: no new read path.
+    'outcome', m.outcome,
+    'draw_offer', m.draw_offer,
     'moves', coalesce((
       select jsonb_agg(jsonb_build_object('ply', x.ply, 'from', x.from_sq, 'to', x.to_sq, 'opts', x.opts)
                        order by x.ply)
@@ -211,9 +270,11 @@ revoke all on function public.lm_join(uuid)          from public;
 revoke all on function public.lm_play(uuid, text, int, text, text, jsonb) from public;
 revoke all on function public.lm_fetch(uuid, int)    from public;
 revoke all on function public.lm_rematch(uuid, text) from public;
+revoke all on function public.lm_end(uuid, text, text) from public;
 
 grant execute on function public.lm_create(text, char, char) to anon;
 grant execute on function public.lm_join(uuid)               to anon;
 grant execute on function public.lm_play(uuid, text, int, text, text, jsonb) to anon;
 grant execute on function public.lm_fetch(uuid, int)         to anon;
 grant execute on function public.lm_rematch(uuid, text)      to anon;
+grant execute on function public.lm_end(uuid, text, text)    to anon;

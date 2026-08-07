@@ -31,6 +31,13 @@ export interface LiveMove {
   opts: ApplyMoveOptions;
 }
 
+/**
+ * An ending the players chose: a resignation, or an agreed draw. Checkmate and
+ * stalemate are not here. Both clients read those off the move list, which is
+ * where the rules are.
+ */
+export type LiveOutcome = "w" | "b" | "d";
+
 export interface LiveState {
   status: "waiting" | "live" | "over";
   firstMover: Color;
@@ -44,6 +51,10 @@ export interface LiveState {
   rematchB: boolean;
   /** The match this one turned into, once both sides asked. */
   rematchId: string | null;
+  /** The winning seat, `"d"` for an agreed draw, null while it is being played. */
+  outcome: LiveOutcome | null;
+  /** The seat whose draw offer is standing, null when none is. */
+  drawOffer: Color | null;
   moves: LiveMove[];
 }
 
@@ -58,6 +69,8 @@ export interface LiveView {
   rematchW: boolean;
   rematchB: boolean;
   rematchId: string | null;
+  outcome: LiveOutcome | null;
+  drawOffer: Color | null;
   seat: LiveSeat | null;
   /**
    * The two boards have diverged: a replay failed, or the server refused a move
@@ -81,7 +94,7 @@ export function seatForPly(ply: number, firstMover: Color): Color {
  */
 export function canMoveNow(lv: LiveView | null, plies: number): boolean {
   if (!lv) return true;
-  if (!lv.seat || lv.status === "over" || lv.outOfSync) return false;
+  if (!lv.seat || lv.status === "over" || lv.outcome || lv.outOfSync) return false;
   // Nobody to play against yet, and `lm_play` refuses a move before the second
   // seat is taken. Letting one through would put a move on our board that the
   // server never takes, which is the out-of-sync case.
@@ -109,26 +122,37 @@ export function rematchAsks(lv: LiveView): { mine: boolean; theirs: boolean } {
 }
 
 /**
- * Whether a poll is worth issuing. Nothing can arrive on our own turn, while
- * the tab is hidden, or once the match is over. The exception is a match whose
- * other seat is still empty, where the join is the thing being waited for.
+ * Whose draw offer is standing, from our own side of the board. Nothing for an
+ * observer: an offer is not theirs to answer.
+ */
+export function drawOffered(lv: LiveView | null): "mine" | "theirs" | null {
+  if (!lv?.seat || !lv.drawOffer || lv.outcome || lv.outOfSync) return null;
+  return lv.drawOffer === lv.seat.seat ? "mine" : "theirs";
+}
+
+/**
+ * Whether a poll is worth issuing. Not while the tab is hidden, and not once
+ * the match is over.
+ *
+ * Our own turn used to be quiet, since no move can arrive on it. Draw and
+ * resign ended that (docs/live-match.md §Milestone 2c): the opponent may end
+ * the game at any moment, and a board still saying "your move" after they
+ * resigned is the one thing this must not do. So a live match is polled
+ * throughout, which also covers the connection-lost count and a match still
+ * waiting for its second seat.
  *
  * A finished game keeps one thing to wait for: the opponent's rematch ask, and
  * then the match it creates. Once that match exists there is nothing left here.
  */
 export function shouldPoll(
   lv: LiveView | null,
-  plies: number,
+  _plies: number,
   gameOver: boolean,
-  hidden: boolean,
-  connectionLost = false
+  hidden: boolean
 ): boolean {
   if (!lv || hidden || lv.outOfSync) return false;
-  if (gameOver || lv.status === "over") return !!lv.seat && !lv.rematchId;
-  // A lost connection is only cleared by a read that works, so keep reading
-  // even on our own turn. Otherwise the warning outlives the outage.
-  if (!lv.joined || connectionLost) return true;
-  return !(lv.seat && seatForPly(plies + 1, lv.firstMover) === lv.seat.seat);
+  if (gameOver || lv.status === "over" || lv.outcome) return !!lv.seat && !lv.rematchId;
+  return true;
 }
 
 /**
@@ -145,6 +169,8 @@ export function mergeLive(lv: LiveView, state: LiveState): LiveView {
     rematchW: state.rematchW,
     rematchB: state.rematchB,
     rematchId: state.rematchId,
+    outcome: state.outcome,
+    drawOffer: state.drawOffer,
   };
 }
 
@@ -224,6 +250,8 @@ export function newMatchState(startPayload: string | null, firstMover: Color, cr
     rematchW: false,
     rematchB: false,
     rematchId: null,
+    outcome: null,
+    drawOffer: null,
     moves: [],
   };
 }
@@ -239,6 +267,8 @@ export function rematchState(seat: LiveSeat): LiveState {
     rematchW: false,
     rematchB: false,
     rematchId: null,
+    outcome: null,
+    drawOffer: null,
     moves: [],
   };
 }
@@ -289,7 +319,36 @@ export async function lmFetch(matchId: string, sincePly: number): Promise<FetchR
     rematchW: r.rematch_w === true,
     rematchB: r.rematch_b === true,
     rematchId: typeof r.rematch_id === "string" ? r.rematch_id : null,
+    outcome: r.outcome === "w" || r.outcome === "b" || r.outcome === "d" ? r.outcome : null,
+    drawOffer: r.draw_offer === "w" || r.draw_offer === "b" ? r.draw_offer : null,
     moves,
+  };
+}
+
+/** What `lm_end` may be asked to do. */
+export type EndAction = "resign" | "draw_offer" | "draw_accept" | "draw_decline";
+
+/**
+ * Resign, offer, accept or decline (docs/live-match.md §Milestone 2c). Returns
+ * the match's ending and standing offer as the server left them, so the press
+ * shows on our own board without waiting for the next poll. Null is a failure:
+ * nothing happened, and the press can be repeated.
+ */
+export async function lmEnd(
+  seat: LiveSeat,
+  action: EndAction
+): Promise<{ outcome: LiveOutcome | null; drawOffer: Color | null } | null> {
+  let row: unknown;
+  try {
+    row = await rpc("lm_end", { p_match: seat.matchId, p_token: seat.token, p_action: action });
+  } catch (e) {
+    console.warn("evochess: lm_end failed", e);
+    return null;
+  }
+  const r = (row ?? {}) as Record<string, unknown>;
+  return {
+    outcome: r.outcome === "w" || r.outcome === "b" || r.outcome === "d" ? r.outcome : null,
+    drawOffer: r.draw_offer === "w" || r.draw_offer === "b" ? r.draw_offer : null,
   };
 }
 

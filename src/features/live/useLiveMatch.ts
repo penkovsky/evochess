@@ -10,6 +10,7 @@ import {
   isConnectionLost,
   inviteUrl,
   lmCreate,
+  lmEnd,
   lmFetch,
   lmJoin,
   lmRematch,
@@ -22,12 +23,21 @@ import {
   setMatchParam,
   sendMove,
   shouldPoll,
+  type EndAction,
   type FetchResult,
   type LiveSeat,
   type LiveState,
   type LiveView,
 } from "../../liveMatch";
 import type { AdoptOptions } from "../share/useSharedPosition";
+
+/** What a failed `lm_end` says, in the terms of the button that was pressed. */
+const END_FAILED: Record<EndAction, string> = {
+  resign: "Could not reach your opponent. You have not resigned. Try again.",
+  draw_offer: "Could not reach your opponent. The draw was not offered. Try again.",
+  draw_accept: "Could not reach your opponent. The draw was not accepted. Try again.",
+  draw_decline: "Could not reach your opponent. The offer still stands. Try again.",
+};
 
 /** Applies a move to the board. `remote` marks one that arrived from the opponent. */
 export type ApplyMove = (from: Square, to: Square, options: ApplyMoveOptions, remote?: boolean) => void;
@@ -54,6 +64,12 @@ export interface UseLiveMatch {
   sendLocalMove: (game: EvoChessGame, from: Square, to: Square, options: ApplyMoveOptions) => void;
   /** Asks for a rematch, or accepts the opponent's. Both are the same call. */
   askRematch: () => Promise<void>;
+  /**
+   * Resign, or offer, accept or decline a draw (docs/live-match.md §Milestone
+   * 2c). The answer goes onto the board at once, so the press does not wait for
+   * a poll.
+   */
+  endMatch: (action: EndAction) => Promise<void>;
 }
 
 export interface UseLiveMatchArgs {
@@ -107,6 +123,8 @@ export function useLiveMatch({
   // A rematch call is in flight. The press and the poll both make it, and only
   // one of them may.
   const rematchingRef = useRef(false);
+  // Same for an lm_end call: two presses of Resign must not be two calls.
+  const endingRef = useRef(false);
   const [connectionLost, setConnectionLost] = useState(false);
   const failuresRef = useRef(0);
 
@@ -165,6 +183,8 @@ export function useLiveMatch({
       rematchW: state.rematchW,
       rematchB: state.rematchB,
       rematchId: state.rematchId,
+      outcome: state.outcome,
+      drawOffer: state.drawOffer,
       seat: loadSeat(matchId),
       outOfSync: false,
     });
@@ -192,16 +212,18 @@ export function useLiveMatch({
   }
 
   /**
-   * One poll. Silent on the local turn (nothing can arrive), while hidden, and
-   * once the game is over. The interval keeps running and does nothing, which
-   * is cheaper than tearing it down and rebuilding it on every ply.
+   * One poll. Silent while hidden and once the game is over, and otherwise
+   * issued on both players' turns, since either may resign or offer a draw at
+   * any moment. The interval keeps running and does nothing when there is
+   * nothing to read, which is cheaper than tearing it down and rebuilding it on
+   * every ply.
    */
   async function pollLive() {
     const lv = liveRef.current;
     if (!lv) return;
     const game = gameRef.current;
     const plies = game.moveLog.length;
-    if (!shouldPoll(lv, plies, game.isGameOver(), document.hidden, isConnectionLost(failuresRef.current))) return;
+    if (!shouldPoll(lv, plies, game.isGameOver(), document.hidden)) return;
     const state = await lmFetch(lv.matchId, plies);
     if (gameRef.current !== game) return;
     noteRead(state);
@@ -350,9 +372,43 @@ export function useLiveMatch({
     }
   }
 
+  /**
+   * Resign, or one of the three halves of a draw. One call for all four: they
+   * differ only in what the server does with them, and the answer is the same
+   * pair of fields either way.
+   */
+  async function endMatch(action: EndAction) {
+    const lv = liveRef.current;
+    if (!lv?.seat || lv.outcome || endingRef.current) return;
+    endingRef.current = true;
+    try {
+      const result = await lmEnd(lv.seat, action);
+      // Nothing happened, and the only sign of that would otherwise be a
+      // button that did nothing. The press can simply be repeated.
+      if (!result) {
+        setLinkNotice(END_FAILED[action]);
+        return;
+      }
+      setLinkNotice(null);
+      // Straight onto the view, so a resignation ends the game under the hand
+      // that pressed it. The poll is what tells the other side.
+      if (liveRef.current) liveRef.current = { ...liveRef.current, ...result };
+      setLive((v) => (v ? { ...v, ...result } : v));
+    } finally {
+      endingRef.current = false;
+    }
+  }
+
   function sendLocalMove(game: EvoChessGame, from: Square, to: Square, options: ApplyMoveOptions) {
     const lv = liveRef.current;
     if (!lv?.seat) return;
+    // Our move answers the opponent's offer by ending it, which `lm_play` does
+    // server-side. Doing it here too means the buttons go the moment the piece
+    // lands, rather than at the next poll.
+    if (lv.drawOffer && lv.drawOffer !== lv.seat.seat) {
+      liveRef.current = { ...lv, drawOffer: null };
+      setLive((v) => (v ? { ...v, drawOffer: null } : v));
+    }
     // Not awaited: the board never waits on the network, and `sendMove` retries.
     void sendMove(lv.seat, game.moveLog.length, from, to, options).then((sent) => {
       // A gap, a conflict, not-your-seat, or an unconfigured collector. The
@@ -383,5 +439,6 @@ export function useLiveMatch({
     leaveLiveMatch,
     sendLocalMove,
     askRematch,
+    endMatch,
   };
 }

@@ -81,6 +81,13 @@ export type ConfirmState =
   // The one confirmation that is not about discarded moves. The seat is what
   // is lost, and it cannot be reclaimed.
   | { kind: "leave-live" }
+  // Not a confirmation at all: what New Game becomes while a match is live
+  // (docs/live-match.md §Milestone 2c). It rides here so it gets the same
+  // Escape handling and the same blocked flags every other dialog has.
+  | { kind: "live-menu" }
+  // Resign asks first. One misclick should not lose a game, and on a phone
+  // these buttons sit close together under a thumb.
+  | { kind: "resign" }
   | { kind: "restart"; what: RestartReason; mode: Mode; aiColor: Color; level: AiLevel };
 
 export const RESTART_TITLE: Record<RestartReason, string> = {
@@ -153,6 +160,14 @@ export interface LiveProps {
    * there is nothing to offer (docs/live-match.md §Milestone 2b).
    */
   rematch: { mine: boolean; theirs: boolean; onAsk: () => void } | null;
+  /**
+   * Opens the live menu, which is what New Game reads as while a match is being
+   * played (docs/live-match.md §Milestone 2c). Null when there is no match, or
+   * once it is over and New Game is itself again.
+   */
+  onMenu: (() => void) | null;
+  /** The opponent's standing draw offer, for us to answer. Null when there is none. */
+  drawOffer: { onAccept: () => void; onDecline: () => void } | null;
 }
 
 /** The end-of-game overlay: the running record, and the way out of it. */

@@ -10,6 +10,7 @@ export function ActionPicker({
   setConfirmAction,
   puzzleActive,
   liveActive,
+  onLiveMenu,
 }: {
   extraClass: string;
   browse: BrowseProps;
@@ -17,6 +18,13 @@ export function ActionPicker({
   onRestart: () => void;
   onTakeback: () => void;
   setConfirmAction: (action: ConfirmState) => void;
+  /**
+   * The live menu, while a match is being played. New Game is not reachable
+   * then: the menu holds Draw and Resign, and resigning is the way out
+   * (docs/live-match.md §Milestone 2c). Null once the match is over, when the
+   * button is New Game again.
+   */
+  onLiveMenu: (() => void) | null;
   /**
    * A puzzle owns the board, which takes away both of the actions that change
    * the game: takeback makes the failure state unreachable, and "play from
@@ -36,6 +44,10 @@ export function ActionPicker({
       {browsing ? (
         <button className="back-btn" onClick={onBrowseLive} title="Back to the live position">
           Back
+        </button>
+      ) : onLiveMenu ? (
+        <button className="new-game-btn" onClick={onLiveMenu}>
+          Menu
         </button>
       ) : (
         <button className="new-game-btn" onClick={onRestart}>

@@ -17,6 +17,10 @@ function open(onNewGame: (choice: "ai" | "live" | "otb", seat: "w" | "b") => voi
       onNewGame={onNewGame}
       onStartNewGame={() => {}}
       onLeaveLive={() => {}}
+      onOfferDraw={() => {}}
+      onAskResign={() => {}}
+      onResign={() => {}}
+      drawPending={false}
     />
   );
 }

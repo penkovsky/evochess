@@ -13,8 +13,8 @@ The smallest thing two people can play over a link.
 - `live` is not a mode. It is vs-Human with a transport, so `mode` stays
   two-valued and persistence and scoring types are untouched.
 
-Later: takeback, resign, draw, presence, seat reclaim, `beforeunload` guard,
-`lm_end`, the `outcome` column, e2e tests, websockets.
+Later: takeback, presence, seat reclaim, `beforeunload` guard, e2e tests,
+websockets.
 
 Rules the build settled:
 
@@ -274,6 +274,97 @@ Rules the build settled:
 - The offer survives browsing: it is the only sign the opponent asked.
 - Untimed is enforced: a match switches the clock off, since only one side
   would see a flag fall. Auto flip goes with it, the seat orienting the board.
+
+## Milestone 2c: draw and resign
+
+M2b ends a match when the rules do. M2c lets the players end one.
+
+### Menu
+
+While a match is live, the New Game button reads **Menu**: **Draw** and
+**Resign**. Resigning is the only way out. A match still waiting for its
+opponent reads New Game, which is how it is abandoned before anyone arrives.
+
+Once the game is over, Menu reads **New Game** again, and **Rematch** appears as
+it does after a checkmate.
+
+### Draw
+
+The offer stands until answered.
+
+| Seen | You | Opponent |
+|---|---|---|
+| No offer | "Draw" | "Draw" |
+| You offered | Waiting | "Your opponent offers a draw", with Accept and Decline |
+| Accepted | Drawn | Drawn |
+| Declined | "Draw" again | "Draw" |
+
+An unanswered offer dies on the opponent's next move, so a stale offer cannot be
+accepted against a changed position. Decline clears it too. Either side may
+offer again.
+
+Pressing Draw against a standing offer accepts it. Crossing offers agree.
+
+### Resign
+
+Unilateral, and immediate. It asks first, through `ConfirmModal`: one misclick
+should not lose a game.
+
+### Backend
+
+M3's `lm_end` and `outcome`, pulled forward, plus one column for the offer.
+
+```sql
+alter table lm_matches
+  add column outcome    text,    -- null | 'w' | 'b' | 'd'
+  add column draw_offer char(1); -- null | 'w' | 'b': whose offer stands
+```
+
+`lm_end(match_id, token, action)`, where `action` is `resign`, `draw_offer`,
+`draw_accept` or `draw_decline`. Verifies the token owns a seat and
+`status='live'`.
+
+- `resign` sets `outcome` to the other seat, `status='over'`.
+- `draw_offer` records the caller's seat. Against a standing offer from the
+  other seat it accepts instead. That is the crossing case.
+- `draw_accept` requires the other seat's offer, then `outcome='d'`,
+  `status='over'`. One statement on a locked row, so two accepts cannot both win.
+- `draw_decline` clears the offer, and only the other seat's.
+
+`lm_play` clears `draw_offer` when the ply belongs to the seat it was made
+against. That is how an offer dies, in one assignment on a statement that
+already runs.
+
+`lm_fetch` returns `outcome` and `draw_offer`, so endings arrive on the poll
+that carries moves. No new read path.
+
+`outcome` carries only chosen endings. Checkmate and stalemate stay local, from
+the move list. The server is not told what it cannot check.
+
+### Client
+
+- `LiveView` gains the standing offer and the outcome. `canMoveNow` is false once
+  an outcome is in.
+- **The poll now runs on our own turn too.** It used to stop there, since no
+  move can arrive on it. A resignation can, and a board still saying "your move"
+  after the opponent resigned is the one thing this must not do. Reading
+  throughout also subsumes the connection-lost exception M2 needed.
+- A resignation or agreed draw takes the same game-over path as a checkmate, so
+  the overlay, fireworks and move log are unchanged code. Still not scored
+  locally.
+
+Mobile first. Accept and Decline are two full-width buttons, not two words on a
+line.
+
+### Tests
+
+- An offer dies on the opponent's move and cannot then be accepted.
+- Crossing offers draw.
+- Decline clears the offer, the game stays live.
+- Resign sets the other seat, both clients end.
+- Menu shows Draw and Resign while live, New Game and Rematch once over.
+- The poll runs on our own turn, and stops on an outcome unless a rematch is
+  still to be had.
 
 ## Accepted limits
 

@@ -1321,6 +1321,42 @@ button.board-status-invite {
   background: #2565bb;
 }
 
+/* Accept and Decline, side by side under the offer. Both are thumb-sized and
+   share the row evenly, so neither is the easy one to hit by accident. */
+.live-offer-actions {
+  display: flex;
+  gap: 10px;
+  width: min(100%, 320px);
+}
+
+.live-offer-actions .play-again-btn {
+  flex: 1 1 0;
+  min-height: 48px;
+  animation: none;
+}
+
+.play-again-btn.decline-btn {
+  background: #555c66;
+}
+
+.play-again-btn.decline-btn:hover {
+  background: #4a5058;
+}
+
+/* Our own offer is already out, so the button reports it rather than sending
+   a second one. */
+.modal .mode-option:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Resign is the one menu entry that ends the game, so it does not look like
+   the one next to it. */
+.modal .mode-option.resign-option {
+  border-color: #c0392b;
+  color: #c0392b;
+}
+
 .live-join-overlay .play-again-btn:disabled {
   opacity: 0.7;
   cursor: default;

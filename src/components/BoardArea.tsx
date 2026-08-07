@@ -139,6 +139,23 @@ export function BoardArea({
             </button>
           </div>
         )}
+        {/* The opponent's draw offer, in the same slot and for the same reason
+            as the join button: the position is what the offer is being judged
+            on, so it is not dimmed and nothing above or below the board moves
+            to make room (docs/live-match.md §Milestone 2c). */}
+        {live.drawOffer && (
+          <div className="live-join-overlay live-rematch-overlay">
+            <div className="live-rematch-text">Your opponent offers a draw</div>
+            <div className="live-offer-actions">
+              <button className="play-again-btn accept-btn" onClick={live.drawOffer.onAccept}>
+                Accept
+              </button>
+              <button className="play-again-btn decline-btn" onClick={live.drawOffer.onDecline}>
+                Decline
+              </button>
+            </div>
+          </div>
+        )}
         {/* The rematch, in the same slot: the game is over, so the board below
             is only a record of it. One press both asks and accepts
             (docs/live-match.md §Milestone 2b). */}
@@ -191,6 +208,7 @@ export function BoardArea({
         setConfirmAction={setConfirmAction}
         puzzleActive={puzzle.puzzleActive}
         liveActive={live.liveActive}
+        onLiveMenu={live.onMenu}
       />
       <MobileBar
         openTutorial={openTutorial}

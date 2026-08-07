@@ -16,6 +16,8 @@ import {
   readMatchParam,
   replay,
   canMoveNow,
+  drawOffered,
+  lmEnd,
   rematchAsks,
   rematchOffered,
   sanitizeOpts,
@@ -65,6 +67,8 @@ function view(over: Partial<LiveView> = {}): LiveView {
     rematchW: false,
     rematchB: false,
     rematchId: null,
+    outcome: null,
+    drawOffer: null,
     seat,
     outOfSync: false,
     ...over,
@@ -195,12 +199,20 @@ describe("canMoveNow", () => {
 });
 
 describe("polling", () => {
-  it("is silent on the local turn and while hidden", () => {
-    // Ply 1 is White's, and we hold White.
-    expect(shouldPoll(view(), 0, false, false)).toBe(false);
+  it("reads on both turns, since either side may resign or offer a draw", () => {
+    // Ply 1 is White's, and we hold White. Our own turn used to be quiet.
+    // Draw and resign ended that: a board still saying "your move" after the
+    // opponent resigned is the thing this must not do.
+    expect(shouldPoll(view(), 0, false, false)).toBe(true);
     expect(shouldPoll(view(), 1, false, false)).toBe(true); // the opponent's turn
     expect(shouldPoll(view(), 1, false, true)).toBe(false); // hidden
     expect(shouldPoll(null, 1, false, false)).toBe(false);
+  });
+
+  it("stops on an agreed ending, except for the rematch a seat holder can still take", () => {
+    expect(shouldPoll(view({ outcome: "b" }), 1, false, false)).toBe(true);
+    expect(shouldPoll(view({ outcome: "d", rematchId: "m2" }), 1, false, false)).toBe(false);
+    expect(shouldPoll(view({ outcome: "b", seat: null }), 1, false, false)).toBe(false);
   });
 
   it("keeps reading after the game, for the rematch, and stops once it exists", () => {
@@ -220,11 +232,11 @@ describe("polling", () => {
     expect(shouldPoll(view({ seat: null }), 0, false, false)).toBe(true);
   });
 
-  it("keeps reading on our own turn while the connection is lost, since only a read clears it", () => {
-    expect(shouldPoll(view(), 0, false, false, true)).toBe(true);
+  it("keeps reading on our own turn, which is also how a lost connection clears", () => {
+    expect(shouldPoll(view(), 0, false, false)).toBe(true);
     // Everything that stops a poll outright still stops it.
-    expect(shouldPoll(view(), 0, false, true, true)).toBe(false);
-    expect(shouldPoll(view({ outOfSync: true }), 0, false, false, true)).toBe(false);
+    expect(shouldPoll(view(), 0, false, true)).toBe(false);
+    expect(shouldPoll(view({ outOfSync: true }), 0, false, false)).toBe(false);
   });
 });
 
@@ -238,6 +250,8 @@ describe("mergeLive", () => {
     rematchW: false,
     rematchB: false,
     rematchId: null,
+    outcome: null,
+    drawOffer: null,
     moves: [],
   };
 
@@ -261,6 +275,78 @@ describe("out of sync", () => {
     expect(shouldPoll(view({ outOfSync: true }), 1, false, false)).toBe(false);
     // The seat still owns the ply. Only the flag is in the way.
     expect(canMoveNow(view(), 0)).toBe(true);
+  });
+});
+
+describe("draw and resign", () => {
+  it("reads a standing offer from our own side of the board", () => {
+    expect(drawOffered(view({ drawOffer: "w" }))).toBe("mine");
+    expect(drawOffered(view({ drawOffer: "b" }))).toBe("theirs");
+    expect(drawOffered(view())).toBe(null);
+    // An offer is not an observer's to answer.
+    expect(drawOffered(view({ drawOffer: "b", seat: null }))).toBe(null);
+    // Nor is one still standing over a finished game.
+    expect(drawOffered(view({ drawOffer: "b", outcome: "d" }))).toBe(null);
+  });
+
+  it("refuses a move once the players have ended the game themselves", () => {
+    // Ply 1 is ours, so only the outcome is in the way.
+    expect(canMoveNow(view(), 0)).toBe(true);
+    expect(canMoveNow(view({ outcome: "w" }), 0)).toBe(false);
+    expect(canMoveNow(view({ outcome: "d" }), 0)).toBe(false);
+  });
+
+  it("carries the ending and the offer onto the view a poll merges into", () => {
+    const merged = mergeLive(view(), {
+      status: "over",
+      firstMover: "w",
+      startPayload: null,
+      joined: true,
+      freeSeat: null,
+      rematchW: false,
+      rematchB: false,
+      rematchId: null,
+      outcome: "b",
+      drawOffer: null,
+      moves: [],
+    });
+    expect(merged.outcome).toBe("b");
+  });
+
+  it("parses the ending and the offer off the wire", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      ok({ status: "live", first_mover: "w", joined: true, draw_offer: "b", moves: [] })
+    );
+    const state = (await lmFetch("m1", 0)) as LiveState;
+    expect(state.drawOffer).toBe("b");
+    expect(state.outcome).toBe(null);
+    // Nothing but the three known endings and the two seats gets through.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      ok({ status: "over", first_mover: "w", joined: true, outcome: "x", draw_offer: "q", moves: [] })
+    );
+    const bogus = (await lmFetch("m1", 0)) as LiveState;
+    expect(bogus.outcome).toBe(null);
+    expect(bogus.drawOffer).toBe(null);
+  });
+
+  it("posts the action and hands back what the server left", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(ok({ outcome: "b", draw_offer: null, status: "over" }));
+    expect(await lmEnd(seat, "resign")).toEqual({ outcome: "b", drawOffer: null });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://collector.test/rest/v1/rpc/lm_end");
+    expect(JSON.parse(init.body as string)).toEqual({
+      p_match: "m1",
+      p_token: "tok",
+      p_action: "resign",
+    });
+  });
+
+  it("reports a refused call as nothing having happened", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(fail(400, "no draw offer"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await lmEnd(seat, "draw_accept")).toBe(null);
   });
 });
 
@@ -324,6 +410,8 @@ describe("transport", () => {
       rematchW: false,
       rematchB: false,
       rematchId: null,
+      outcome: null,
+      drawOffer: null,
       moves: [{ ply: 1, from: "e7", to: "e5", opts: { minorPromo: "n" } }],
     });
   });
@@ -386,6 +474,8 @@ describe("rematch", () => {
       rematchW: true,
       rematchB: true,
       rematchId: "m2",
+      outcome: null,
+      drawOffer: null,
       moves: [],
     });
     expect(merged.rematchW).toBe(true);

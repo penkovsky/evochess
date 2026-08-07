@@ -23,6 +23,10 @@ export function Dialogs({
   confirmCancelBtnRef,
   onPlayHere,
   onLeaveLive,
+  onOfferDraw,
+  onAskResign,
+  onResign,
+  drawPending,
   liveActive,
   onNewGame,
   onStartNewGame,
@@ -39,6 +43,10 @@ export function Dialogs({
   confirmCancelBtnRef: RefObject<HTMLButtonElement | null>;
   onPlayHere: (ply: number) => void;
   onLeaveLive: () => void;
+  onOfferDraw: () => void;
+  onAskResign: () => void;
+  onResign: () => void;
+  drawPending: boolean;
   liveActive: boolean;
   onNewGame: (choice: NewGameChoice, seat: Color) => void;
   onStartNewGame: () => void;
@@ -71,6 +79,10 @@ export function Dialogs({
           confirmCancelBtnRef={confirmCancelBtnRef}
           onPlayHere={onPlayHere}
           onLeaveLive={onLeaveLive}
+          onOfferDraw={onOfferDraw}
+          onAskResign={onAskResign}
+          onResign={onResign}
+          drawPending={drawPending}
           liveActive={liveActive}
           onNewGame={onNewGame}
           onStartNewGame={onStartNewGame}

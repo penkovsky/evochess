@@ -4,10 +4,16 @@ import { describe, expect, it, vi } from "vitest";
 import { ConfirmModal } from "../ConfirmModal";
 import type { ConfirmState } from "../../appTypes";
 
-function renderModal(confirmAction: ConfirmState, over: { totalPlies?: number; liveActive?: boolean } = {}) {
+function renderModal(
+  confirmAction: ConfirmState,
+  over: { totalPlies?: number; liveActive?: boolean; drawPending?: boolean } = {}
+) {
   const onLeaveLive = vi.fn();
   const onStartNewGame = vi.fn();
   const onNewGame = vi.fn();
+  const onOfferDraw = vi.fn();
+  const onAskResign = vi.fn();
+  const onResign = vi.fn();
   const { container } = render(
     <ConfirmModal
       confirmAction={confirmAction}
@@ -18,10 +24,14 @@ function renderModal(confirmAction: ConfirmState, over: { totalPlies?: number; l
       onNewGame={onNewGame}
       onStartNewGame={onStartNewGame}
       onLeaveLive={onLeaveLive}
+      onOfferDraw={onOfferDraw}
+      onAskResign={onAskResign}
+      onResign={onResign}
+      drawPending={over.drawPending ?? false}
       liveActive={over.liveActive ?? false}
     />,
   );
-  return { container, onLeaveLive, onStartNewGame, onNewGame };
+  return { container, onLeaveLive, onStartNewGame, onNewGame, onOfferDraw, onAskResign, onResign };
 }
 
 const NEW_GAME: ConfirmState = { kind: "restart", what: "new-game", mode: "human-human", aiColor: "b", level: "zen" };
@@ -87,6 +97,37 @@ describe("ConfirmModal", () => {
     fireEvent.click(black);
     fireEvent.click(live);
     expect(onNewGame).toHaveBeenLastCalledWith("live", "b");
+  });
+
+  it("holds Draw and Resign while a match is live, and nothing else", () => {
+    const { container, onOfferDraw, onAskResign } = renderModal({ kind: "live-menu" });
+    const [draw, resign] = options(container);
+    expect([draw.textContent, resign.textContent]).toEqual(["Draw", "Resign"]);
+    // New Game is not in the menu: resigning is the way out of a live match.
+    expect(container.textContent).not.toContain("Computer");
+    expect(container.textContent).not.toContain("Over the board");
+    fireEvent.click(draw);
+    expect(onOfferDraw).toHaveBeenCalledOnce();
+    // Resign only opens the dialog that asks.
+    fireEvent.click(resign);
+    expect(onAskResign).toHaveBeenCalledOnce();
+  });
+
+  it("says an offer of ours is already out rather than sending a second", () => {
+    const { container } = renderModal({ kind: "live-menu" }, { drawPending: true });
+    const [draw] = options(container);
+    expect(draw.textContent).toBe("Draw offered");
+    expect(draw.disabled).toBe(true);
+  });
+
+  it("asks before resigning, since one misclick would lose the game", () => {
+    const { container, onResign } = renderModal({ kind: "resign" });
+    expect(container.textContent).toContain("Resign?");
+    expect(container.textContent).toContain("Your opponent wins");
+    // No move count: resigning discards nothing.
+    expect(container.textContent).not.toContain("Discard the");
+    container.querySelector<HTMLButtonElement>(".danger-btn")!.click();
+    expect(onResign).toHaveBeenCalledOnce();
   });
 
   it("keeps the two-button confirm for a settings switch", () => {

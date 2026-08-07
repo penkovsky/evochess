@@ -66,6 +66,8 @@ const match = (over: Partial<LiveView> = {}): LiveView => ({
   rematchW: false,
   rematchB: false,
   rematchId: null,
+  outcome: null,
+  drawOffer: null,
   seat: null,
   outOfSync: false,
   ...over,
@@ -119,6 +121,38 @@ describe("deriveBoardView status", () => {
     // No token at all: the link only reads.
     const observer = input({ mode: "human-human", live: match() });
     expect(deriveBoardView(observer).status).toBe("Watching. White to move.");
+  });
+
+  it("says a resignation from the side that has to read it", () => {
+    const won = input({ mode: "human-human", live: match({ seat: seat("b"), outcome: "b" }) });
+    expect(deriveBoardView(won).status).toBe("Your opponent resigned. You win!");
+    const lost = input({ mode: "human-human", live: match({ seat: seat("b"), outcome: "w" }) });
+    expect(deriveBoardView(lost).status).toBe("You resigned.");
+    // An observer has no side to say it from.
+    const watching = input({ mode: "human-human", live: match({ outcome: "w" }) });
+    expect(deriveBoardView(watching).status).toBe("White wins by resignation.");
+    expect(deriveBoardView(input({ mode: "human-human", live: match({ seat: seat("w"), outcome: "d" }) })).status).toBe(
+      "Draw agreed."
+    );
+  });
+
+  it("ends the game on an agreed outcome, though the board holds no mate", () => {
+    const view = deriveBoardView(input({ mode: "human-human", live: match({ seat: seat("w"), outcome: "b" }) }));
+    expect(view.gameOver).toBe(true);
+    expect(view.allowDragging).toBe(false);
+  });
+
+  it("says a standing draw offer, from whichever side is looking", () => {
+    const mine = input({ mode: "human-human", live: match({ seat: seat("w"), drawOffer: "w" }) });
+    expect(deriveBoardView(mine).status).toBe("Draw offered. Waiting for your opponent.");
+    const theirs = input({ mode: "human-human", live: match({ seat: seat("w"), drawOffer: "b" }) });
+    expect(deriveBoardView(theirs).status).toBe("Your opponent offers a draw.");
+    // The result outranks it: an offer cannot still be open over a finished game.
+    const settled = input({
+      mode: "human-human",
+      live: match({ seat: seat("w"), drawOffer: "b", outcome: "d" }),
+    });
+    expect(deriveBoardView(settled).status).toBe("Draw agreed.");
   });
 
   it("says a dropped connection outranks whose turn it is", () => {

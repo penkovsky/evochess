@@ -1,8 +1,15 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { ActionPicker } from "../ActionPicker";
 
-function renderPicker(over: { browsing?: boolean; puzzleActive?: boolean; liveActive?: boolean } = {}) {
+function renderPicker(
+  over: {
+    browsing?: boolean;
+    puzzleActive?: boolean;
+    liveActive?: boolean;
+    onLiveMenu?: (() => void) | null;
+  } = {}
+) {
   const { browsing = false, ...rest } = over;
   const { container } = render(
     <ActionPicker
@@ -21,6 +28,7 @@ function renderPicker(over: { browsing?: boolean; puzzleActive?: boolean; liveAc
       setConfirmAction={() => {}}
       puzzleActive={false}
       liveActive={false}
+      onLiveMenu={null}
       {...rest}
     />,
   );
@@ -45,5 +53,16 @@ describe("ActionPicker", () => {
     expect(browsingLive.querySelector(".back-btn")).not.toBeNull();
     // The row keeps its four fixed widths, so nothing moves under the thumb.
     expect(live.querySelectorAll(".action-picker > *")).toHaveLength(4);
+  });
+
+  it("reads New Game as Menu while a match is being played", () => {
+    const onLiveMenu = vi.fn();
+    const live = renderPicker({ liveActive: true, onLiveMenu });
+    const btn = live.querySelector<HTMLButtonElement>(".new-game-btn")!;
+    expect(btn.textContent).toBe("Menu");
+    fireEvent.click(btn);
+    expect(onLiveMenu).toHaveBeenCalledOnce();
+    // Over, so the button is New Game again and the rematch is next to it.
+    expect(renderPicker({ liveActive: true }).querySelector(".new-game-btn")!.textContent).toBe("New Game");
   });
 });
