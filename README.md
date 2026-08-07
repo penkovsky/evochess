@@ -1,4 +1,4 @@
-# Evochess
+# Evolutionary Chess
 
 **A chess variant where pieces evolve mid-game. No starting pieces, you earn them.**
 
@@ -53,6 +53,22 @@ npm run build    # typecheck + production build
 
 Pushing to `main` builds and deploys to GitHub Pages via
 `.github/workflows/deploy.yml`.
+
+
+## A note on the name
+
+I would like to credit Hafsteinn Kjartansson's
+[Evochess](https://www.chessvariants.com/rules/evochess) (2010). A 12x12 board
+with non-standard pieces. There pieces promote not once, but twice.
+
+There also exists a variant from 2001, Jason D. Wittman's
+[Evolution Chess](https://www.chessvariants.com/42.dir/evolution-chess.html).
+It was created for the 42 Squares Chess Variant Contest. Every piece evolves a
+step each time it moves. Knight, bishop, rook, queen.
+
+I invented [my variant](https://www.chessvariants.com/rules/echess)
+in the train in 2016, just after New Year's Eve. I was blissfully unaware of the
+existence of other variants with the same name.
 
 
 ## NNUE Training (optional)
