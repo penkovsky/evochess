@@ -333,12 +333,14 @@ button.board-status-invite {
 
 /* Contents only appear once the dim has finished (see `.revealed`). */
 .score-overlay-text,
+.score-nudge-text,
 .score-overlay .play-again-btn {
   opacity: 0;
   transition: opacity 450ms ease;
 }
 
 .score-overlay.revealed .score-overlay-text,
+.score-overlay.revealed .score-nudge-text,
 .score-overlay.revealed .play-again-btn {
   opacity: 1;
 }
@@ -351,6 +353,34 @@ button.board-status-invite {
   font-size: 28px;
   font-weight: bold;
   letter-spacing: 0.5px;
+}
+
+.score-nudge-text {
+  font-size: 16px;
+  text-align: center;
+  padding: 0 12px;
+}
+
+.score-overlay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 12px;
+}
+
+.score-overlay-actions .play-again-btn {
+  min-height: 48px;
+}
+
+/* With a nudge on offer, it is the one that pulses. */
+.nudge-btn + .play-again-btn {
+  background: #555c66;
+  animation: none;
+}
+
+.nudge-btn + .play-again-btn:hover {
+  background: #4a5058;
 }
 
 /* The puzzle outcome, in the same slot and with the same treatment as the
@@ -758,6 +788,13 @@ button.board-status-invite {
   margin-right: auto;
 }
 
+/* Four levels in the row the other pickers fit three into, so it gets its own
+   width and tighter padding. Each button still clears 44px of touch target
+   vertically; horizontally the widest label ("Chill") sets the floor. */
+.level-picker {
+  width: 240px;
+}
+
 .color-picker,
 .level-picker,
 .action-picker {
@@ -787,6 +824,12 @@ button.board-status-invite {
   cursor: pointer;
 }
 
+/* Four labels in one row: the padding goes, not the label. */
+.level-picker button {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
 .action-picker button {
   flex: 0 0 auto;
   border-radius: 6px;
@@ -807,10 +850,29 @@ button.board-status-invite {
   border-radius: 0 6px 6px 0;
 }
 
+/* The selected level carries its own colour, so the picker reads as a ramp
+   rather than four identical buttons: cool at Chill, warm at Fun. Zen keeps
+   the app's green. All four sit at roughly the same lightness, so white
+   labels hold the same contrast whichever one is on. */
 .level-picker button.active {
   background: #22aa77;
   border-color: #22aa77;
   color: white;
+}
+
+.level-picker button.active[data-level="chill"] {
+  background: #3d9bd6;
+  border-color: #3d9bd6;
+}
+
+.level-picker button.active[data-level="easy"] {
+  background: #1fa8a0;
+  border-color: #1fa8a0;
+}
+
+.level-picker button.active[data-level="fun"] {
+  background: #d4820f;
+  border-color: #d4820f;
 }
 
 /* A puzzle fixes the setup, so the pickers read as locked. */

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Color, Square } from "chess.js";
 import { EvoChessError, type ApplyMoveOptions } from "./evochess/game";
-import type { AiLevel } from "./evochess/ai";
+import { NEXT_LEVEL, type AiLevel } from "./evochess/ai";
 import { planMove } from "./evochess/moveOptions";
 import { decodeShareLink } from "./evochess/shareLink";
 import {
@@ -76,7 +76,7 @@ function App() {
   // never writes into it.
   const [setupMode, setSetupMode] = useState<Mode>("human-ai");
   const [setupAiColor, setSetupAiColor] = useState<Color>("b");
-  const [setupLevel, setSetupLevel] = useState<AiLevel>("easy");
+  const [setupLevel, setSetupLevel] = useState<AiLevel>("chill");
   const [modal, setModal] = useState<PromoModalState | null>(null);
   // The action waiting on confirmation, or null. Both of these throw away
   // moves, and neither can be undone. `play-here` carries its ply rather than
@@ -230,7 +230,7 @@ function App() {
   // What happens when a game ends: the score record, the fireworks, and the
   // delayed reveal of the score overlay. Declared after the live hook because
   // the fireworks need to know which seat is ours.
-  const { scores, scoreOverlayReady, showFireworks, setShowFireworks, scoredGameRef } = useGameOutcome({
+  const { scores, scoreOverlayReady, showFireworks, setShowFireworks, justWonLevel, scoredGameRef } = useGameOutcome({
     gameRef,
     loaded,
     mode,
@@ -1187,12 +1187,22 @@ function App() {
           }
         : null,
   };
+  const nextLevel = justWonLevel === level ? NEXT_LEVEL[level] : undefined;
   const scoreProps: ScoreProps = {
     showScoreOverlay: view.showScoreOverlay,
     scoreOverlayReady,
     levelLabel: view.levelLabel,
     currentRecord: scores[level],
     onPlayAgain: () => startNewGame(setupMode, setupAiColor, setupLevel),
+    nudge: nextLevel
+      ? {
+          label: nextLevel.charAt(0).toUpperCase() + nextLevel.slice(1),
+          onAccept: () => {
+            setSetupLevel(nextLevel);
+            startNewGame(setupMode, setupAiColor, nextLevel);
+          },
+        }
+      : null,
   };
 
   return (

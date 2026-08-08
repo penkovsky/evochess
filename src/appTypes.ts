@@ -177,4 +177,6 @@ export interface ScoreProps {
   levelLabel: string;
   currentRecord: Scores[AiLevel];
   onPlayAgain: () => void;
+  /** Offer to move up a level, after a win. Null when there is nothing to offer. */
+  nudge: { label: string; onAccept: () => void } | null;
 }

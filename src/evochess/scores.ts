@@ -16,11 +16,16 @@ function emptyRecord(): ScoreRecord {
 
 export function loadScores(): Scores {
   const raw = localStorage.getItem(STORAGE_KEY);
-  const scores: Scores = { easy: emptyRecord(), zen: emptyRecord(), fun: emptyRecord() };
+  const scores: Scores = {
+    chill: emptyRecord(),
+    easy: emptyRecord(),
+    zen: emptyRecord(),
+    fun: emptyRecord(),
+  };
   if (!raw) return scores;
   try {
     const parsed = JSON.parse(raw) as Partial<Scores>;
-    for (const level of ["easy", "zen", "fun"] as AiLevel[]) {
+    for (const level of ["chill", "easy", "zen", "fun"] as AiLevel[]) {
       if (parsed[level]) scores[level] = { ...emptyRecord(), ...parsed[level] };
     }
   } catch {

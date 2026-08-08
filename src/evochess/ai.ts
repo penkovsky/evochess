@@ -676,28 +676,36 @@ export function searchRootTimed(
 }
 
 /**
- * UI difficulty level. All three run the same time-budgeted search. Easy also
- * plays a shallow fixed-depth search some of the time (see `EASY_MIX`
- * below). Fun
+ * UI difficulty level. All four run the same time-budgeted search. Chill and
+ * Easy also play a shallow fixed-depth search some of the time (see
+ * `MIX_BY_LEVEL` below); they are the same opponent, differing only in how
+ * much of the time each shallow depth comes up. Fun
  * ponders on the human's time and Zen does not (that gating lives in App.tsx's
  * `maybeStartPonder`, keyed on `level === "fun"`).
  */
-export type AiLevel = "easy" | "zen" | "fun";
+export type AiLevel = "chill" | "easy" | "zen" | "fun";
 
 /**
- * What `searchLevel` accepts: the three UI levels plus `easy-pst`, the
+ * What `searchLevel` accepts: the four UI levels plus `easy-pst`, the
  * fixed-depth-4 PST search Easy used to be. Not offered in the UI. It exists
  * so tests have a search that is deterministic and cheap, which the timed
  * levels are not. Kept out of `AiLevel` so the types that enumerate the UI
- * levels (scores, persistence, the level picker) stay three wide.
+ * levels (scores, persistence, the level picker) stay four wide.
  */
 export type SearchLevel = AiLevel | "easy-pst";
 
+/** The level up from each one, for the post-win nudge. */
+export const NEXT_LEVEL: Partial<Record<AiLevel, AiLevel>> = {
+  chill: "easy",
+  easy: "zen",
+  zen: "fun",
+};
+
 const LEVEL_DEPTH: Record<"easy-pst", number> = { "easy-pst": 4 };
 
-// Easy's difficulty is not a weaker search, it is an inconsistent one. From
-// ply `EASY_EASING_FROM_PLY` on, each move is drawn from `EASY_MIX`; the
-// leftover probability (1 - sum p) plays the full Zen search.
+// Chill's and Easy's difficulty is not a weaker search, it is an inconsistent
+// one. From ply `EASY_EASING_FROM_PLY` on, each move is drawn from the level's
+// mix; the leftover probability (1 - sum p) plays the full Zen search.
 //
 // That gives a beginner something to punish. A shallow search walks into
 // anything past its horizon without playing nonsense, and the real moves keep
@@ -710,6 +718,21 @@ export const EASY_MIX = [
   { p: 0.1, depth: 2 },
   { p: 0.5, depth: 3 },
 ] as const;
+
+// Chill is Easy with the weights moved down: the shallowest arm carries most
+// of the moves, and only a fifth of the turns are the real search, against
+// Easy's four tenths.
+export const CHILL_MIX = [
+  { p: 0.5, depth: 2 },
+  { p: 0.3, depth: 3 },
+] as const;
+
+/** The levels that mix in shallow moves, and what each one mixes. */
+export const MIX_BY_LEVEL = { chill: CHILL_MIX, easy: EASY_MIX } as const;
+
+type MixedLevel = keyof typeof MIX_BY_LEVEL;
+
+const isMixedLevel = (level: SearchLevel): level is MixedLevel => level === "chill" || level === "easy";
 
 // Zen/Fun time management. Two numbers, because one is not enough:
 //
@@ -742,9 +765,9 @@ const TIMED_TIME_MS = 400;
 const TIMED_HARD_MS = 1_200;
 const ABORT_SLACK_MS = 80;
 
-// Easy's own ceiling, in place of `TIMED_HARD_MS`. It gets the same 400ms
-// budget, so this only bounds the iteration already in flight when the budget
-// runs out. A weaker opponent that also answers quickly.
+// Chill's and Easy's own ceiling, in place of `TIMED_HARD_MS`. They get the
+// same 400ms budget, so this only bounds the iteration already in flight when
+// the budget runs out. A weaker opponent that also answers quickly.
 const EASY_HARD_MS = 500;
 
 // Exposed so the latency regression test asserts against the real constants
@@ -780,19 +803,20 @@ export function searchLevel(
 ): RootSearch & { depth: number; shallow?: boolean } {
   engineConfig.backend = "bitboard";
   const keepTT = opts.keepTT ?? false;
-  if (level === "easy" && plyNumber(game) >= EASY_EASING_FROM_PLY) {
+  if (isMixedLevel(level) && plyNumber(game) >= EASY_EASING_FROM_PLY) {
     // Rolled from the same per-search `seed` the root tie-break uses. App.tsx
     // draws a fresh one per move, so the rolls are independent.
     const rng = mulberry32(seed);
     let roll = rng();
-    for (const { p, depth } of EASY_MIX) {
+    for (const { p, depth } of MIX_BY_LEVEL[level]) {
       if (roll >= p) {
         roll -= p; // fall through to the next arm
         continue;
       }
       const result = searchRoot(game, depth, seed, false, keepTT);
       if (result.move) {
-        console.log(`[EvoChess AI] Easy depth-${depth} ${result.move.from}${result.move.to}`);
+        const name = level === "chill" ? "Chill" : "Easy";
+        console.log(`[EvoChess AI] ${name} depth-${depth} ${result.move.from}${result.move.to}`);
       }
       return { ...result, depth, shallow: true };
     }
@@ -809,7 +833,7 @@ export function searchLevel(
   // budgets `TIMED_TIME_MS` and is capped at `TIMED_HARD_MS`, the gap being
   // what lets an iteration already in flight finish and count.
   const timeMs = opts.timeMs ?? TIMED_TIME_MS;
-  const hardMs = level === "easy" ? EASY_HARD_MS : TIMED_HARD_MS;
+  const hardMs = isMixedLevel(level) ? EASY_HARD_MS : TIMED_HARD_MS;
   const ceiling = opts.timeMs !== undefined ? timeMs : hardMs - ABORT_SLACK_MS;
   armSearchDeadline(Date.now() + ceiling);
   try {

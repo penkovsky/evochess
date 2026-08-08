@@ -26,8 +26,8 @@ function midgame(): EvoChessGame {
 describe("timed-level move latency", () => {
   it("returns inside the hard ceiling, with a move, at every timed level", () => {
     const { TIMED_HARD_MS, EASY_HARD_MS } = __timingForTest;
-    for (const level of ["easy", "zen", "fun"] as const) {
-      const ceiling = level === "easy" ? EASY_HARD_MS : TIMED_HARD_MS;
+    for (const level of ["chill", "easy", "zen", "fun"] as const) {
+      const ceiling = level === "chill" || level === "easy" ? EASY_HARD_MS : TIMED_HARD_MS;
       for (const game of [new EvoChessGame(), midgame()]) {
         const t0 = Date.now();
         const r = searchLevel(game, level, 1);

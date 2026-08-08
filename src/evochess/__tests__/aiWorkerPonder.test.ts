@@ -109,9 +109,10 @@ describe("ai.worker ponder protocol (ponder-spec.md §5, milestone 3)", () => {
     expect(s.warm).toBe(true);
     expect(s.evalWasNnue).toBe(false);
     expect(s.mayKeep.fun).toBe(true); // same evaluator: continuing is correct
-    // Easy/Zen must never continue from a warm table however it was filled:
-    // they are deliberately weak fixed-depth searches (§5.5) and must stay
-    // bit-identical to pre-ponder behaviour (§6.4).
+    // Chill/Easy/Zen must never continue from a warm table however it was
+    // filled: they are deliberately weak fixed-depth searches (§5.5) and must
+    // stay bit-identical to pre-ponder behaviour (§6.4).
+    expect(s.mayKeep.chill).toBe(false);
     expect(s.mayKeep.easy).toBe(false);
     expect(s.mayKeep.zen).toBe(false);
 

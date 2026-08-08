@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { material, chooseMove, searchLevel, EASY_MIX, EASY_EASING_FROM_PLY } from "../ai";
+import { material, chooseMove, searchLevel, MIX_BY_LEVEL, EASY_EASING_FROM_PLY } from "../ai";
 import { EvoChessGame, ROOK_CHARGES } from "../game";
 import type { Square } from "chess.js";
 
@@ -62,15 +62,25 @@ describe("chooseMove with a rookLocked minor piece", () => {
   });
 });
 
-describe("EASY_MIX", () => {
+describe.each(Object.entries(MIX_BY_LEVEL))("%s mix", (_level, mix) => {
   it("is a well-formed mix that leaves room for the full search", () => {
-    for (const { p } of EASY_MIX) expect(p).toBeGreaterThan(0);
+    for (const { p } of mix) expect(p).toBeGreaterThan(0);
     // Strictly less than 1: the leftover probability is the full Zen search,
-    // and Easy without any real moves in it just reads as broken.
-    expect(EASY_MIX.reduce((a, { p }) => a + p, 0)).toBeLessThan(1);
+    // and a mixed level without any real moves in it just reads as broken.
+    expect(mix.reduce((a, { p }) => a + p, 0)).toBeLessThan(1);
     // Distinct depths, so the console log and the assertions below can name an
     // arm by its depth alone.
-    expect(new Set(EASY_MIX.map((a) => a.depth)).size).toBe(EASY_MIX.length);
+    expect(new Set(mix.map((a) => a.depth)).size).toBe(mix.length);
+  });
+});
+
+describe("the mixes rank the way the picker does", () => {
+  // Chill is Easy with the weights moved down, so it must spend less of its
+  // moves on the full search than Easy does. Reorder the picker without
+  // reweighting, and this is what says so.
+  const real = (mix: readonly { p: number }[]) => 1 - mix.reduce((a, { p }) => a + p, 0);
+  it("Chill plays fewer real searches than Easy", () => {
+    expect(real(MIX_BY_LEVEL.chill)).toBeLessThan(real(MIX_BY_LEVEL.easy));
   });
 });
 
@@ -109,7 +119,7 @@ function gameAtEasingPly(): EvoChessGame {
   return game;
 }
 
-describe("searchLevel easy mix", () => {
+describe.each(Object.keys(MIX_BY_LEVEL) as (keyof typeof MIX_BY_LEVEL)[])("searchLevel %s mix", (level) => {
   const game = gameAtEasingPly();
 
   it("is set up on the ply the mix switches on", () => {
@@ -120,7 +130,7 @@ describe("searchLevel easy mix", () => {
   // edges is what pins the cumulative walk: drop the running subtraction, or
   // reorder the arms, and a probe lands in the wrong one.
   let cum = 0;
-  for (const { p, depth } of EASY_MIX) {
+  for (const { p, depth } of MIX_BY_LEVEL[level]) {
     const lo = cum;
     const hi = cum + p;
     cum = hi;
@@ -131,7 +141,7 @@ describe("searchLevel easy mix", () => {
         [lo, lo + eps],
         [hi - eps, hi],
       ]) {
-        const r = searchLevel(game, "easy", seedRollingInto(a, b));
+        const r = searchLevel(game, level, seedRollingInto(a, b));
         expect(r.shallow).toBe(true);
         expect(r.depth).toBe(depth);
         expect(r.move).not.toBeNull();
@@ -140,14 +150,15 @@ describe("searchLevel easy mix", () => {
   }
 
   it("plays the full search on the leftover probability", () => {
-    const r = searchLevel(game, "easy", seedRollingInto(cum, 1));
+    const r = searchLevel(game, level, seedRollingInto(cum, 1));
     expect(r.shallow).toBeFalsy();
     expect(r.move).not.toBeNull();
   });
 
   it("plays the opening straight, whatever the roll says", () => {
     // Same seed as the first arm above, but before EASY_EASING_FROM_PLY.
-    const r = searchLevel(new EvoChessGame(), "easy", seedRollingInto(0, Math.min(1e-3, EASY_MIX[0].p)));
+    const first = MIX_BY_LEVEL[level][0].p;
+    const r = searchLevel(new EvoChessGame(), level, seedRollingInto(0, Math.min(1e-3, first)));
     expect(r.shallow).toBeFalsy();
   });
 });

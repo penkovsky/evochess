@@ -45,7 +45,7 @@ create index if not exists games_game_uid_idx on public.games (game_uid);
 
 alter table public.games
   add constraint games_mode_known check (mode in ('human-ai', 'human-human')),
-  add constraint games_level_known check (level is null or level in ('easy', 'zen', 'fun')),
+  add constraint games_level_known check (level is null or level in ('chill', 'easy', 'zen', 'fun')),
   add constraint games_ai_color_known check (ai_color in ('w', 'b')),
   add constraint games_outcome_known check (outcome in ('win', 'loss', 'draw', 'timeout', 'abandoned')),
   -- Plausibility bounds, so one bored person cannot fill the table with junk.

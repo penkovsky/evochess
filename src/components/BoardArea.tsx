@@ -123,9 +123,17 @@ export function BoardArea({
               {score.currentRecord.draws}-
               <span className="score-loss">{score.currentRecord.losses}</span>
             </div>
-            <button className="play-again-btn" onClick={score.onPlayAgain}>
-              Play again?
-            </button>
+            {score.nudge && <div className="score-nudge-text">You won. Ready for {score.nudge.label}?</div>}
+            <div className="score-overlay-actions">
+              {score.nudge && (
+                <button className="play-again-btn nudge-btn" onClick={score.nudge.onAccept}>
+                  Play {score.nudge.label}
+                </button>
+              )}
+              <button className="play-again-btn" onClick={score.onPlayAgain}>
+                Play again?
+              </button>
+            </div>
           </div>
         )}
         {/* The seat offer sits over the board, where "Play again?" does. It

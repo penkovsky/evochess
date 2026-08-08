@@ -228,15 +228,15 @@ let ttEvalWasNnue: boolean | null = null;
 
 // The evaluator `searchLevel` will pick for this level, mirroring its own
 // derivation exactly: every level defaults `useNnue` to `hasNnueWeights()`.
-// Easy's random moves do not enter into it. They skip the search, so they
-// neither read nor write the table.
+// Chill's and Easy's shallow moves do not enter into it. They skip the timed
+// search, so they neither read nor write the table.
 const evalIsNnue = (_level: AiLevel): boolean => hasNnueWeights();
 
 // Whether a search at `level` may continue from the current table.
 // Two conditions, both necessary:
 //  - same evaluator, per `ttEvalWasNnue` above;
 //  - Fun only. §5.5: pondering (and thus TT continuation) only ever happens
-//    at Fun — Easy and Zen never ponder, so a warm TT there would make them
+//    at Fun — Chill, Easy and Zen never ponder, so a warm TT there would make them
 //    stronger than intended, and §6.4 requires them to stay bit-identical to
 //    pre-ponder behaviour.
 const mayKeepTT = (level: AiLevel): boolean =>
@@ -266,7 +266,12 @@ export function __ponderStateForTest(): {
     seq: ponderSeq,
     warm: ttWarm,
     evalWasNnue: ttEvalWasNnue,
-    mayKeep: { fun: mayKeepTT("fun"), easy: mayKeepTT("easy"), zen: mayKeepTT("zen") },
+    mayKeep: {
+      fun: mayKeepTT("fun"),
+      easy: mayKeepTT("easy"),
+      zen: mayKeepTT("zen"),
+      chill: mayKeepTT("chill"),
+    },
     predicted: livePonder?.predicted ?? false,
     ponderedFen: livePonder?.pos.chess.fen() ?? null,
   };

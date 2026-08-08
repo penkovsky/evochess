@@ -80,6 +80,7 @@ export function ControlsPanel({
           <div className="level-picker" role="group" aria-label="AI level">
             {(
               [
+                { label: "Chill", value: "chill" },
                 { label: "Easy", value: "easy" },
                 { label: "Zen", value: "zen" },
                 { label: "Fun", value: "fun" },
@@ -88,6 +89,7 @@ export function ControlsPanel({
               <button
                 key={opt.value}
                 type="button"
+                data-level={opt.value}
                 className={(puzzleActive ? PUZZLE_LEVEL : level) === opt.value ? "active" : ""}
                 disabled={puzzleActive}
                 onClick={() => {

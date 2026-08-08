@@ -12,6 +12,8 @@ export interface UseGameOutcome {
   scoreOverlayReady: boolean;
   showFireworks: boolean;
   setShowFireworks: Dispatch<SetStateAction<boolean>>;
+  /** The level of the last recorded win, null if the last result was not one. */
+  justWonLevel: AiLevel | null;
   /** Which finished game has already been recorded. Set when loading a save
    *  that is already over, so a reload doesn't score it a second time. */
   scoredGameRef: RefObject<EvoChessGame | null>;
@@ -50,6 +52,7 @@ export function useGameOutcome({
 }: UseGameOutcomeArgs): UseGameOutcome {
   const [scores, setScores] = useState<Scores>(loadScores);
   const [showFireworks, setShowFireworks] = useState(false);
+  const [justWonLevel, setJustWonLevel] = useState<AiLevel | null>(null);
   // The score overlay covers the board, so its dim fades in over 2.5s and the
   // score itself is only revealed at the end — long enough to see the final
   // position / mating move.
@@ -103,6 +106,7 @@ export function useGameOutcome({
       ? "loss"
       : "win";
     setScores(recordResult(level, outcome));
+    setJustWonLevel(outcome === "win" ? level : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, mode, aiColor, level, fromShared, gameRef.current, gameRef.current.moveLog.length]);
 
@@ -118,5 +122,5 @@ export function useGameOutcome({
     return () => clearTimeout(id);
   }, [gameIsOver]);
 
-  return { scores, scoreOverlayReady, showFireworks, setShowFireworks, scoredGameRef };
+  return { scores, scoreOverlayReady, showFireworks, setShowFireworks, justWonLevel, scoredGameRef };
 }
