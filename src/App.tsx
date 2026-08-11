@@ -112,7 +112,7 @@ function App() {
   // time. `useHistoryBrowse` cannot be called above `useShareModal`, since it
   // takes `shareModal` as part of `blocked`. Kept in sync just below it.
   const browsePlyRef = useRef<number | null>(null);
-  const share = useShareModal(gameRef, browsePlyRef);
+  const share = useShareModal(gameRef, browsePlyRef, gameMetaRef);
   // Which ply of the current game is on screen, and the ways to step through
   // them. null means live (the actual gameRef.current position); otherwise an
   // index into historyRef, which holds the position after that many plies.

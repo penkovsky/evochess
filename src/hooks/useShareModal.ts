@@ -4,6 +4,7 @@ import { encodeShareLink, encodeShareLinkWithHistory, MAX_SHARE_PARAM_CHARS } fr
 import { deserializeGame } from "../evochess/serialize";
 import { formatMoveLog } from "../evochess/moveLogText";
 import type { ShareModalState, ShareProblem } from "../appTypes";
+import { track, type GameMeta } from "../telemetry";
 
 /** The checkbox's last position, kept for the session only. */
 let lastWithHistory = true;
@@ -33,7 +34,8 @@ export interface UseShareModal {
  */
 export function useShareModal(
   gameRef: RefObject<EvoChessGame>,
-  browsePlyRef: RefObject<number | null>
+  browsePlyRef: RefObject<number | null>,
+  gameMetaRef: RefObject<GameMeta>
 ): UseShareModal {
   const [shareModal, setShareModal] = useState<ShareModalState | null>(null);
   const shareLastFocusRef = useRef<HTMLElement | null>(null);
@@ -79,10 +81,13 @@ export function useShareModal(
 
   // `kind` only picks which section shows the confirmation; the clipboard call
   // is the same either way.
-  async function copyText(text: string, kind: "url" | "log") {
+  // `auto` marks the copies the dialog makes for you, so analysis can separate
+  // them from a pressed button. Only a successful write is reported.
+  async function copyText(text: string, kind: "url" | "log", auto = false) {
     try {
       await navigator.clipboard.writeText(text);
       setShareModal((m) => (m ? { ...m, clipboardOk: true, copiedAt: Date.now(), copiedKind: kind } : m));
+      track("share_copy", { kind, auto }, gameMetaRef.current.uid);
     } catch {
       setShareModal((m) => (m ? { ...m, clipboardOk: false, copiedAt: null, copiedKind: null } : m));
     }
@@ -101,6 +106,7 @@ export function useShareModal(
   async function shareViaSheet(url: string) {
     try {
       await navigator.share?.({ title: "EvoChess position", url });
+      track("share_copy", { kind: "sheet", auto: false }, gameMetaRef.current.uid);
     } catch {
       /* dismissed, or the sheet never happened */
     }
@@ -122,12 +128,19 @@ export function useShareModal(
     const { url, problem } = buildShareUrl(withHistory);
     const canShareSheet = useShareSheet && !!navigator.share;
     const base = { canShareSheet, moveLog, blackFirst, hasHistory, withHistory, copiedAt: null, copiedKind: null };
+    // The top of the share funnel. `problem` rides along: a link the format
+    // could not build is an intent that the app refused, not a lost user.
+    track(
+      "share_open",
+      { surface: useShareSheet ? "mobile" : "panel", problem, with_history: withHistory, browsing: browsePlyRef.current !== null },
+      gameMetaRef.current.uid
+    );
     if (problem) {
       setShareModal({ ...base, url, problem, clipboardOk: false });
       return;
     }
     setShareModal({ ...base, url, problem: null, clipboardOk: true });
-    copyShareUrl(url);
+    copyText(url, "url", true);
   }
 
   // Toggling rebuilds the link and re-copies it, so the clipboard never holds
@@ -136,7 +149,7 @@ export function useShareModal(
     lastWithHistory = on;
     const { url, problem } = buildShareUrl(on);
     setShareModal((m) => (m ? { ...m, url, problem, withHistory: on, clipboardOk: !problem } : m));
-    if (!problem) copyShareUrl(url);
+    if (!problem) copyText(url, "url", true);
   }
 
   function closeShareModal() {

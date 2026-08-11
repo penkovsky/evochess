@@ -9,6 +9,10 @@ import type { Square } from "chess.js";
 import { EvoChessGame } from "../evochess/game";
 import { decodeShareLink, readShareParam } from "../evochess/shareLink";
 import { useShareModal } from "../hooks/useShareModal";
+import type { GameMeta } from "../telemetry";
+
+/** Only the uid is read, to tag the share events. */
+const metaRef = { current: { uid: "test-game" } } as RefObject<GameMeta>;
 
 function push(game: EvoChessGame, uci: string, options = {}) {
   game.applyMove(uci.slice(0, 2) as Square, uci.slice(2, 4) as Square, options);
@@ -30,7 +34,7 @@ function playedGame(): EvoChessGame {
 function share(game: EvoChessGame, browsePly: number | null): string | null {
   const gameRef = { current: game } as RefObject<EvoChessGame>;
   const browsePlyRef = { current: browsePly } as RefObject<number | null>;
-  const { result } = renderHook(() => useShareModal(gameRef, browsePlyRef));
+  const { result } = renderHook(() => useShareModal(gameRef, browsePlyRef, metaRef));
   const event = { currentTarget: { focus() {} } } as unknown as ReactMouseEvent<HTMLButtonElement>;
   act(() => {
     void result.current.handleShare(event, false);
@@ -137,7 +141,7 @@ describe("useShareModal: the history cursor", () => {
     const gameRef = { current: game } as RefObject<EvoChessGame>;
     const browsePlyRef = createRef<number | null>() as RefObject<number | null>;
     browsePlyRef.current = null;
-    const { result } = renderHook(() => useShareModal(gameRef, browsePlyRef));
+    const { result } = renderHook(() => useShareModal(gameRef, browsePlyRef, metaRef));
     const event = { currentTarget: { focus() {} } } as unknown as ReactMouseEvent<HTMLButtonElement>;
     act(() => {
       void result.current.handleShare(event, false);
