@@ -134,10 +134,13 @@ async function open(page: Page, path: string, seed?: Record<string, string>) {
     [TUTORIAL_KEY] as const
   );
   if (seed) {
-    // Written through the page rather than from an init script, which would
-    // re-seed it on every later navigation.
-    await page.goto("./");
-    await page.evaluate((entries) => {
+    // From an init script, so no throwaway load of the app runs first: that
+    // one starts a game of its own, and its autosave lands on top of the seed.
+    // The sentinel keeps it to the first navigation, since a later one is
+    // reading back what the app persisted.
+    await page.addInitScript((entries) => {
+      if (window.localStorage.getItem("__e2e-seeded")) return;
+      window.localStorage.setItem("__e2e-seeded", "1");
       for (const [key, value] of entries) window.localStorage.setItem(key, value);
     }, Object.entries(seed));
   }
@@ -482,7 +485,8 @@ test("New Game leaves the puzzle, and the banner with it", async ({ page }) => {
   await page.getByRole("button", { name: "Computer" }).click();
 
   await expect(page.locator(".puzzle-overlay")).toHaveCount(0);
-  await expect(page.locator(".board-status")).toHaveText("White to move.");
+  // The AI has White, so the new game opens with its move.
+  await expect(page.locator(".board-status")).toHaveText("Black to move.");
   await expect(page.locator(".link-banner")).toHaveCount(0);
   // Out of the puzzle entirely: the board takes moves again and the takeback is
   // back, and the entry point is still there to go round once more.

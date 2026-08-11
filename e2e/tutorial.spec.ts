@@ -7,8 +7,8 @@ import { firstVisitPage, freshGamePage } from "./helpers";
  * lines hold up, but only a real browser proves the learner can click through
  * them — and, just as importantly, ignore them.
  *
- * Black is the Easy AI here, the same opponent the game itself uses, so these
- * tests wait on the tutorial's own state rather than on any particular reply.
+ * The AI here is the same opponent the game itself uses, so these tests wait on
+ * the tutorial's own state rather than on any particular reply.
  */
 
 /** Click-to-move, which the tutorial accepts alongside dragging. */
@@ -49,10 +49,14 @@ test("just starting to play dismisses the invitation", async ({ page }) => {
   await firstVisitPage(page);
   await expect(page.locator(".tutorial-invite")).toBeVisible();
 
+  // The AI opens on a cold start, and its move is not an answer to the offer.
+  await expect(page.locator(".panel .log .log-move")).toHaveCount(1, { timeout: 5000 });
+  await expect(page.locator(".tutorial-invite")).toBeVisible();
+
   // Playing a move is one of the two valid answers to the offer, so the board
   // must be live underneath it.
-  await move(page, "e2", "e4");
-  await expect(page.locator(".log > div")).toHaveCount(1, { timeout: 5000 });
+  await move(page, "e7", "e5");
+  await expect(page.locator(".panel .log .log-move")).toHaveCount(2, { timeout: 5000 });
   await expect(page.locator(".tutorial-invite")).toHaveCount(0);
 
   await page.reload();

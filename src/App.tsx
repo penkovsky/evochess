@@ -68,6 +68,10 @@ import { MobileSheetContent } from "./components/MobileSheetContent";
 import { Dialogs } from "./components/Dialogs";
 import "./App.css";
 
+// A beat on the opening position before the AI answers it, so the player sees
+// the move happen rather than a board that was already played on.
+const AI_OPENING_DELAY_MS = 600;
+
 function App() {
   // The game itself: the position, the line to it, and the telemetry identity.
   const { gameRef, historyRef, gameMetaRef, resumedRef, rerender, resetGame } = useEvoGame();
@@ -75,7 +79,8 @@ function App() {
   // carries. The position on the board can override it (see `play` below), and
   // never writes into it.
   const [setupMode, setSetupMode] = useState<Mode>("human-ai");
-  const [setupAiColor, setSetupAiColor] = useState<Color>("b");
+  // White, so a cold start opens with a move already on the board.
+  const [setupAiColor, setSetupAiColor] = useState<Color>("w");
   const [setupLevel, setSetupLevel] = useState<AiLevel>("chill");
   const [modal, setModal] = useState<PromoModalState | null>(null);
   // The action waiting on confirmation, or null. Both of these throw away
@@ -631,7 +636,15 @@ function App() {
   // goes through the explicit "New Game" button instead.
   useEffect(() => {
     if (!loaded) return;
-    maybeAiMove();
+    // A puzzle or a link can land inside the delay, and each replaces the game
+    // outright. The ply count catches the other case: a resume where the human
+    // moves inside the delay has already started a search of its own.
+    const game = gameRef.current;
+    const plies = game.moveLog.length;
+    const t = setTimeout(() => {
+      if (gameRef.current === game && game.moveLog.length === plies) maybeAiMove();
+    }, AI_OPENING_DELAY_MS);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
@@ -697,7 +710,9 @@ function App() {
     // The AI just moved and it's now the human's turn: start pondering the
     // position the human is looking at (ponder-spec.md §3, §5.3).
     maybeStartPonder(game, { mode: effMode, aiColor: effAiColor, level: effLevel });
-    setTimeout(() => maybeAiMove(overrides), 0);
+    // Same identity check: a search that outlived its game must not drive the
+    // next one, whose settings these overrides are no longer about.
+    if (gameRef.current === game) setTimeout(() => maybeAiMove(overrides), 0);
   }
 
   /** `remote` marks a move that arrived from the opponent, so it is not sent back. */

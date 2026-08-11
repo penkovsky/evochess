@@ -27,15 +27,16 @@ test("takeback during a deep ponder yields a playable position promptly, with no
   });
   page.on("pageerror", (err) => errors.push(err.message));
 
-  // Setup: Human vs AI by default, AI plays Black, level Fun from the
-  // beforeEach, ponder on by default (§5.5). Human (White) moves first via
-  // click-to-move.
-  await page.locator('[data-square="e2"]').click();
-  await page.locator('[data-square="e4"]').click();
+  // Setup: Human vs AI by default, AI plays White and opens, level Fun from
+  // the beforeEach, ponder on by default (§5.5). The human answers as Black
+  // via click-to-move.
+  await expect(page.locator(".panel .log .log-move")).toHaveCount(1, { timeout: 5000 });
+  await page.locator('[data-square="e7"]').click();
+  await page.locator('[data-square="e5"]').click();
 
   // Wait for the AI's reply — it becomes the human's turn again, and the
   // worker (per maybeAiMove) immediately starts pondering that position.
-  await expect(page.locator(".log > div")).toHaveCount(1, { timeout: 5000 });
+  await expect(page.locator(".panel .log .log-move")).toHaveCount(3, { timeout: 5000 });
 
   // Let the ponder chain run for a while so it's genuinely "deep" — several
   // slices of SLICE_MS=60ms each — before interrupting it.
@@ -45,16 +46,16 @@ test("takeback during a deep ponder yields a playable position promptly, with no
   await expect(takebackButton).toBeEnabled();
   await takebackButton.click();
 
-  // The takeback must land promptly: the move log clears (back to the
-  // opening) well within a few seconds, not stalled behind an unbounded
-  // ponder search.
-  await expect(page.locator(".log > div")).toHaveCount(0, { timeout: 2000 });
+  // The takeback must land promptly: the move log rolls back to the AI's
+  // opening, the most recent position with the human to move, well within a
+  // few seconds and not stalled behind an unbounded ponder search.
+  await expect(page.locator(".panel .log .log-move")).toHaveCount(1, { timeout: 2000 });
 
   // The position must still be playable immediately afterward — the worker
   // wasn't left wedged by the interrupted ponder.
-  await page.locator('[data-square="d2"]').click();
-  await page.locator('[data-square="d4"]').click();
-  await expect(page.locator(".log > div")).toHaveCount(1, { timeout: 5000 });
+  await page.locator('[data-square="d7"]').click();
+  await page.locator('[data-square="d5"]').click();
+  await expect(page.locator(".panel .log .log-move")).toHaveCount(3, { timeout: 5000 });
 
   expect(errors).toEqual([]);
 });
@@ -78,9 +79,10 @@ test("takeback restarts pondering on the restored position", async ({ page }) =>
     if (msg.text().startsWith("[EvoChess ponder] phase=")) ponderLines.push(msg.text());
   });
 
-  await page.locator('[data-square="e2"]').click();
-  await page.locator('[data-square="e4"]').click();
-  await expect(page.locator(".log > div")).toHaveCount(1, { timeout: 5000 });
+  await expect(page.locator(".panel .log .log-move")).toHaveCount(1, { timeout: 5000 });
+  await page.locator('[data-square="e7"]').click();
+  await page.locator('[data-square="e5"]').click();
+  await expect(page.locator(".panel .log .log-move")).toHaveCount(3, { timeout: 5000 });
 
   // Let the post-reply chain run long enough that anything it still has to say
   // carries a large elapsed, and so can't be mistaken for a fresh chain.
@@ -90,7 +92,7 @@ test("takeback restarts pondering on the restored position", async ({ page }) =>
   const takebackButton = page.getByRole("button", { name: "Takeback" });
   await expect(takebackButton).toBeEnabled();
   await takebackButton.click();
-  await expect(page.locator(".log > div")).toHaveCount(0, { timeout: 2000 });
+  await expect(page.locator(".panel .log .log-move")).toHaveCount(1, { timeout: 2000 });
 
   ponderLines.length = 0;
   await expect
