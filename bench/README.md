@@ -23,7 +23,7 @@ Some scripts take env overrides: `BUDGET` (ms) for `bench5`/`bench7`,
 
 ## The corpus
 
-`corpus.ts` is shared by every script: 12 middlegame EvoChess positions sampled
+`corpus.ts` is shared by every script: 12 middlegame Evochess positions sampled
 every 4 plies from ply 20 of a seeded (`12345`) random walk. **Do not change
 the seed or sampling casually** — every recorded number is against this corpus,
 and changing it silently invalidates all of them.

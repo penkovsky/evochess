@@ -105,7 +105,7 @@ export function useShareModal(
   // dialog stays open behind it either way.
   async function shareViaSheet(url: string) {
     try {
-      await navigator.share?.({ title: "EvoChess position", url });
+      await navigator.share?.({ title: "Evochess position", url });
       track("share_copy", { kind: "sheet", auto: false }, gameMetaRef.current.uid);
     } catch {
       /* dismissed, or the sheet never happened */

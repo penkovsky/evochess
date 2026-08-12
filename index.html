@@ -2,9 +2,50 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Evolutionary Chess</title>
+
+    <title>evochess.org • Chess where pieces evolve</title>
+    <meta
+      name="description"
+      content="&ldquo;You shall start with only pawns and a king. The pieces shall be earned.&rdquo; Chess that evolves as you play."
+    />
+    <link rel="canonical" href="https://evochess.org/" />
+    <meta name="theme-color" content="#22aa77" />
+
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Evochess" />
+    <meta property="og:title" content="evochess.org • Chess where pieces evolve" />
+    <meta
+      property="og:description"
+      content="&ldquo;You shall start with only pawns and a king. The pieces shall be earned.&rdquo; Chess that evolves as you play."
+    />
+    <meta property="og:url" content="https://evochess.org/" />
+    <meta property="og:image" content="https://evochess.org/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="evochess.org • Chess where pieces evolve" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Game",
+        "name": "Evochess",
+        "alternateName": ["Evolutionary Chess", "EvoChess", "evochess.org"],
+        "url": "https://evochess.org/",
+        "sameAs": ["https://www.chessvariants.com/rules/echess"],
+        "image": "https://evochess.org/og.png",
+        "description": "A chess variant where each side starts with 8 pawns and a king. Pawns earn knights and bishops, minor pieces earn rooks, and rooks last 5 moves before downgrading.",
+        "genre": "Chess variant",
+        "numberOfPlayers": { "@type": "QuantitativeValue", "minValue": 1, "maxValue": 2 },
+        "playMode": ["SinglePlayer", "MultiPlayer"],
+        "gamePlatform": "Web browser",
+        "author": { "@type": "Person", "name": "Bogdan Penkovsky", "url": "https://penkovsky.com" }
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

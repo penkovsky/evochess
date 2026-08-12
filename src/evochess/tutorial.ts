@@ -114,7 +114,7 @@ export const LESSONS: Lesson[] = [
     setup: [],
     steps: [
       {
-        text: "Look at the board: eight Pawns and a King each. No Queen, no Rooks, no Knights, no Bishops. In EvoChess you don't start with an army. You grow one. Start by playing the Pawn to e4.",
+        text: "Look at the board: eight Pawns and a King each. No Queen, no Rooks, no Knights, no Bishops. In Evochess you don't start with an army. You grow one. Start by playing the Pawn to e4.",
         hint: "Move the e2 Pawn two squares forward, to e4.",
         play: { from: "e2", to: "e4" },
         reply: { from: "e7", to: "e5" },

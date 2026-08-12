@@ -16,7 +16,7 @@ remaining decisions can be trusted.
 
 ## 1. Executive summary
 
-Today the EvoChess engine only thinks when it is its turn. On the Fun level it gets an
+Today the Evochess engine only thinks when it is its turn. On the Fun level it gets an
 800 ms budget, plays its move, and then the CPU sits completely idle — often for five or
 ten seconds — while the human decides what to do. That idle time is free strength we are
 throwing away.

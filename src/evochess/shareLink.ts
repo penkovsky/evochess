@@ -123,8 +123,8 @@ export interface ShareDecodeFailure {
 export type ShareDecodeResult = ShareDecodeSuccess | ShareDecodeFailure;
 
 const MESSAGE_INCOMPLETE =
-  "This link looks incomplete or was created with a different version of EvoChess.";
-const MESSAGE_OTHER_VERSION = "This link was created with a different version of EvoChess.";
+  "This link looks incomplete or was created with a different version of Evochess.";
+const MESSAGE_OTHER_VERSION = "This link was created with a different version of Evochess.";
 const MESSAGE_ILLEGAL_BASE =
   "This link's starting position could not have occurred, so its moves cannot be replayed.";
 

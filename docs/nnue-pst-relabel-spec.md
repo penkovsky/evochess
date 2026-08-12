@@ -90,7 +90,7 @@ alone.
 
 ## Cost — the real tradeoff
 
-Depth 5 is materially more expensive per position than depth 3. EvoChess midgames
+Depth 5 is materially more expensive per position than depth 3. Evochess midgames
 have wide branching once rooks/queens evolve, and the documented generation
 throughput is already only ~0.5 pos/sec/shard at depth 3 on the 8-core box. Depth
 5 will be several times slower per position — plan for a multi-hour pass over 520k

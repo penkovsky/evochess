@@ -14,7 +14,7 @@ full format.
 
 ## 1. Goal
 
-Let a player put an EvoChess position, or a whole game, into a URL. The link
+Let a player put an Evochess position, or a whole game, into a URL. The link
 can be pasted into Discord, Reddit, or a chat app. People can then argue about
 a position by pointing at it.
 
@@ -84,7 +84,7 @@ included.
 `0x01` for the format described here.
 
 A decoder that sees any other value stops immediately. It reports "This link
-was created with a different version of EvoChess." It does not try to
+was created with a different version of Evochess." It does not try to
 interpret the rest.
 
 This matters because the rules themselves have been revised. Rook charges were
@@ -208,7 +208,7 @@ value. As with the rights escape, that value must itself be 255 or more;
 anything smaller is a decode error, for the same canonicality reason.
 
 The FEN handed to `chess.load()` is reassembled from steps 1, 2, and 5 to 9.
-The castling field is always `-`, since castling is undefined in EvoChess.
+The castling field is always `-`, since castling is undefined in Evochess.
 
 Step 7 is the one exception to that reassembly. Tag 1 writes the skipped square
 into the FEN's en passant field. Tag 2 must write `-` there and carry the
@@ -357,7 +357,7 @@ has exactly one payload. Without that, §8.1's byte-length and fixture
 assertions would pass on an encoder that wrote junk into the tail.
 
 Nothing coherent can be shown. The app reports the reason, for example "this
-link looks incomplete or was created with a different version of EvoChess". It
+link looks incomplete or was created with a different version of Evochess". It
 then falls back to the normal startup path, which is to resume the autosave or
 start a new game.
 
@@ -456,7 +456,7 @@ anything.
 
 ## 8. Testing
 
-- **Round-trip property test.** Play N random legal EvoChess games, reusing the
+- **Round-trip property test.** Play N random legal Evochess games, reusing the
   random-game harness that validates the bitboard backend against
   `EvoChessGame`. At every ply, encode the position, decode it, and assert the
   result equals `serializeGame()` of the original, after normalizing both sides.

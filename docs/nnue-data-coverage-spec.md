@@ -19,7 +19,7 @@ a material ladder with the trained net shows exactly where it fails:
 | **Black +1 queen** | **+0.46 for White** | wrong sign |
 
 The net is sane on pawns, knights and bishops and **blind on rooks and queens**.
-The cause is the data distribution: EvoChess starts with only pawns and kings
+The cause is the data distribution: Evochess starts with only pawns and kings
 (`START_FEN`), earns minors slowly (every 3 pawn moves), earns rooks slower
 still (every 3 minor moves), and only makes queens via a rare 8th-rank
 promotion. In 40k *short, randomised* games, rook positions are scarce and queen
@@ -135,7 +135,7 @@ augmentation; if play on common positions regresses, raise the natural fraction.
 ## Risks
 
 - **Synthetic positions are off-distribution.** Randomly-placed pieces produce
-  positions that never arise in real EvoChess, and over-training on them can
+  positions that never arise in real Evochess, and over-training on them can
   distort eval of the positions the search *does* reach. Mitigations: keep
   natural self-play the majority; bias the sampler toward realistic piece counts
   and pawn structures; treat augmentation as a minority corrective, not the bulk.

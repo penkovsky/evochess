@@ -370,7 +370,7 @@ line.
 
 - A tampered client can post a move its board never made. The opponent's client
   rejects it and both sides see the match break. Nobody is cheated silently, and
-  server-side rules would mean a second EvoChess implementation.
+  server-side rules would mean a second Evochess implementation.
 - Losing `localStorage` loses the seat. The player can still watch. Reclaiming a
   seat safely needs presence, which is not in this MVP.
 - The link is public once sent. Sending it to the wrong person is the one mistake

@@ -436,7 +436,7 @@ describe("share links: structural failures, spec §5.1", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("BAD_VERSION");
-      expect(result.message).toBe("This link was created with a different version of EvoChess.");
+      expect(result.message).toBe("This link was created with a different version of Evochess.");
     }
   });
 
@@ -948,7 +948,7 @@ describe("share links: history block", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("HISTORY_REPLAY_FAILED");
-      expect(result.message).toBe("This link was created with a different version of EvoChess.");
+      expect(result.message).toBe("This link was created with a different version of Evochess.");
     }
   });
 

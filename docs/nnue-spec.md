@@ -1,9 +1,9 @@
-# Tier 1: a learned evaluation (NNUE-style) for EvoChess
+# Tier 1: a learned evaluation (NNUE-style) for Evochess
 
 ## Context
 
 The engine's evaluation is material plus piece-square tables (`ai.ts`,
-`evaluate()`). That form structurally cannot express EvoChess's central skill,
+`evaluate()`). That form structurally cannot express Evochess's central skill,
 which is *timing*: when to bank a minor right versus spend it, when to burn a
 rook's charges, how to farm the minor-move counter. `rookValue()`'s linear
 charge decay is a good hack, but no hand-crafted term can say "this right is
@@ -47,7 +47,7 @@ labelled position per move played, so:
 Training a net this size is hours on a rented GPU. Generating its data is days
 on CPU. Plan accordingly:
 
-- **Target 1-3M positions for the first net**, not 10M. EvoChess is a small game
+- **Target 1-3M positions for the first net**, not 10M. Evochess is a small game
   (branching factor ≈ 28, measured over 200 random playouts) and the net is
   small; 1M is enough to prove the approach.
 - Generate on CPU (many cores), train on the rented GPU. Never rent a GPU to run
@@ -66,7 +66,7 @@ side-to-move's perspective.
 
 **Piece-square (sparse, ~32 active of ~1536):**
 
-64 squares × 12 piece classes × 2 colours. The 12 classes are EvoChess-specific
+64 squares × 12 piece classes × 2 colours. The 12 classes are Evochess-specific
 and are where most of the design lives:
 
 | Class | Why it is its own class |
@@ -85,7 +85,7 @@ evaluation cannot express, and the whole reason for the exercise.
   (`N_MINOR` and `M_ROOK` are both 3).
 - Whether an evolved en-passant capture is pending (`epEvolved`).
 
-The authoritative list of what constitutes an EvoChess position is already
+The authoritative list of what constitutes an Evochess position is already
 written down: it is exactly what `stateKey()` in `ai.ts` hashes for the
 transposition table. **The feature set must cover the same state.** If the two
 disagree, the net is being asked to evaluate a position it cannot see.
@@ -163,7 +163,7 @@ randomised moves and will drift long.
 
 **Draw labels are partly unsound and must be treated as such.** `chess.js`
 judges repetition on the chess position alone, but two identical boards with
-different `minorRights`/`pawnMoveProgress` are *not* the same EvoChess position.
+different `minorRights`/`pawnMoveProgress` are *not* the same Evochess position.
 So `isThreefoldRepetition()` can declare a draw that isn't one. Either exclude
 repetition-terminated games from the outcome signal, or fix repetition detection
 to key on `stateKey()` first. Do not quietly train on the bad labels.
