@@ -16,7 +16,12 @@ import {
 } from "./evochess/persistence";
 import { loadProgress } from "./evochess/tutorialProgress";
 import { canMoveNow, drawOffered, inviteUrl, rematchAsks, rematchOffered } from "./liveMatch";
-import { formatPuzzleDate, loadCachedPuzzle, type DailyPuzzle } from "./evochess/dailyPuzzle";
+import {
+  formatPuzzleDate,
+  loadCachedPuzzle,
+  loadCachedPuzzleList,
+  type DailyPuzzle,
+} from "./evochess/dailyPuzzle";
 import {
   accruePlyTime,
   initTelemetry,
@@ -46,6 +51,7 @@ import {
   type ScoreProps,
 } from "./appTypes";
 import { deriveBoardView } from "./boardView";
+import { finishedOutcome, gameFinished, humanSeat, shouldReportAbandon } from "./gameOutcome";
 import { buildSquareStyles } from "./boardStyles";
 import { useEvoGame } from "./hooks/useEvoGame";
 import { useShareModal } from "./hooks/useShareModal";
@@ -65,6 +71,7 @@ import { BoardArea } from "./components/BoardArea";
 import { AppPanel } from "./components/AppPanel";
 import { MobileWidgetSheet } from "./components/MobileWidgetSheet";
 import { MobileSheetContent } from "./components/MobileSheetContent";
+import { PuzzleListModal } from "./components/PuzzleListModal";
 import { Dialogs } from "./components/Dialogs";
 import "./App.css";
 
@@ -91,6 +98,9 @@ function App() {
   // Whether the invite dialog is up. The link itself is derived from the match
   // on the board, so closing this loses nothing.
   const [inviteOpen, setInviteOpen] = useState(false);
+  // Whether the puzzle history is up. Reached from the puzzle on the board, so
+  // it needs nothing but the flag.
+  const [puzzleListOpen, setPuzzleListOpen] = useState(false);
   const confirmCancelBtnRef = useRef<HTMLButtonElement>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -109,7 +119,7 @@ function App() {
   // On a phone the side panel is hidden entirely (CSS) and its widgets are
   // reached through the icon bar under the board, which opens one of them in a
   // bottom sheet over the page. null = no sheet open.
-  const { widget, setWidget } = useMobileWidget(!!modal || !!confirmAction || inviteOpen);
+  const { widget, setWidget } = useMobileWidget(!!modal || !!confirmAction || inviteOpen || puzzleListOpen);
   // Click-to-move: square selected by tapping a piece, awaiting a target square
   // tap. Cleared on every move attempt (successful or not).
   const [selected, setSelected] = useState<Square | null>(null);
@@ -372,9 +382,12 @@ function App() {
    * already owns the board, `loadGame()` would return the puzzle itself, so the
    * game already being held is passed through unchanged.
    */
-  function openPuzzle() {
-    if (!puzzle.puzzle) return;
-    loadDailyPuzzle(puzzle.puzzle, puzzle.puzzleRef.current ? savedGameRef.current : loadGame());
+  function openPuzzle(row: DailyPuzzle | null = puzzle.puzzle) {
+    if (!row) return;
+    setPuzzleListOpen(false);
+    // Also covers swapping one puzzle for another from the history: a puzzle on
+    // the board means the game being held is already the player's own.
+    loadDailyPuzzle(row, puzzle.puzzleRef.current ? savedGameRef.current : loadGame());
   }
 
   useEffect(() => {
@@ -388,6 +401,7 @@ function App() {
     const progress = loadProgress();
     const saved = loadGame();
     const cache = loadCachedPuzzle();
+    const cacheList = loadCachedPuzzleList();
     const startup = resolveStartup({ search: window.location.search, saved, cache, progress });
     const { board } = startup;
     if (startup.notice) {
@@ -487,6 +501,7 @@ function App() {
     puzzle.bootstrapPuzzle({
       daily: startup.daily && !startup.match,
       cached: cache,
+      cachedList: cacheList,
       auto: startup.match ? null : startup.puzzle,
       saved,
       // gameRef is whichever game took the board above, so this is the ply
@@ -541,30 +556,19 @@ function App() {
     // reload, since `logged` is only persisted once the game goes live.
     if (sharedPending) return;
     const game = gameRef.current;
-    // A resignation or an agreed draw ends the game without the board showing
-    // it (docs/live-match.md §Milestone 2c). Left out, it would go unreported
-    // here and then be logged as abandoned on the way out of the tab.
     const liveOutcome = live.live?.outcome ?? null;
-    if (!game.isGameOver() && !timeUp && !liveOutcome) return;
+    if (!gameFinished({ isGameOver: game.isGameOver(), timeUp, liveOutcome })) return;
     const meta = gameMetaRef.current;
     if (meta.logged) return;
     meta.logged = true;
-    // In a match the human is whoever holds the seat, not White.
-    const humanColor: Color =
-      live.live?.seat?.seat ?? (mode === "human-ai" ? (aiColor === "w" ? "b" : "w") : "w");
-    const outcome = timeUp
-      ? "timeout"
-      : liveOutcome
-      ? liveOutcome === "d"
-        ? "draw"
-        : liveOutcome === humanColor
-        ? "win"
-        : "loss"
-      : !game.chess.isCheckmate()
-      ? "draw"
-      : game.turn === humanColor
-      ? "loss"
-      : "win";
+    const humanColor = humanSeat({ liveSeat: live.live?.seat?.seat ?? null, mode, aiColor });
+    const outcome = finishedOutcome({
+      timeUp,
+      liveOutcome,
+      isCheckmate: game.chess.isCheckmate(),
+      turn: game.turn,
+      humanColor,
+    });
     logFinishedGame({
       meta,
       mode,
@@ -678,6 +682,15 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [inviteOpen]);
+
+  useEffect(() => {
+    if (!puzzleListOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setPuzzleListOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [puzzleListOpen]);
 
   async function maybeAiMove(overrides?: { mode?: Mode; aiColor?: Color; level?: AiLevel }) {
     const effMode = overrides?.mode ?? mode;
@@ -950,13 +963,9 @@ function App() {
   // analysis reads the last one, so the guess costs a row, not the truth.
   function abandonGame() {
     const meta = gameMetaRef.current;
-    if (!meta.started || meta.logged) return;
     const game = gameRef.current;
     const plies = game.moveLog.length;
-    // Already reported at this exact position: `pagehide` fires again after a
-    // bfcache restore, and a game reopened and left alone would otherwise be
-    // reported once per visit.
-    if (meta.abandonedAtPly === plies) return;
+    if (!shouldReportAbandon(meta, plies)) return;
     meta.abandonedAtPly = plies;
     logFinishedGame({
       meta,
@@ -1161,11 +1170,32 @@ function App() {
     browseNextHoldable: holdable(browseLive, browseNext),
     onBrowseLive: browseLive,
   };
+  // Wrapped, not passed: `openPuzzle` takes a row, and a click handler would
+  // hand it the event.
+  const openTodaysPuzzle = () => openPuzzle();
+  // "Try again" retries what is on the board, which is not today's once the
+  // history can put an older one there. The attempt holds a date, not the row,
+  // so the row comes back from the list it was picked out of.
+  const rowOnBoard = puzzleOnBoard
+    ? (puzzle.history.find((row) => row.date === puzzleOnBoard.date) ?? puzzle.puzzle)
+    : puzzle.puzzle;
+  // The history is reached from the puzzle on the board, so there is nothing to
+  // show before one is loaded, and nothing to show if the list never arrived.
+  const showPuzzleList = puzzle.history.length > 0 ? () => setPuzzleListOpen(true) : null;
+  // Newest first, so a day back is one further along the list. `-1` is a puzzle
+  // the history does not hold, which leaves both steps dead rather than
+  // guessing at a neighbour.
+  const historyAt = puzzleOnBoard ? puzzle.history.findIndex((row) => row.date === puzzleOnBoard.date) : -1;
+  const stepPuzzle = (by: number) => {
+    const next = historyAt < 0 ? undefined : puzzle.history[historyAt + by];
+    return next ? () => openPuzzle(next) : null;
+  };
   const puzzleProps: PuzzleProps = {
     // A match owns the board. New Game is the way out of one.
-    onPuzzle: puzzle.puzzle && !liveActive ? openPuzzle : null,
+    onPuzzle: puzzle.puzzle && !liveActive ? openTodaysPuzzle : null,
     puzzleFresh: puzzle.puzzleFresh,
-    onPuzzleRetry: openPuzzle,
+    onPuzzleRetry: () => openPuzzle(rowOnBoard),
+    onPuzzleList: showPuzzleList,
     puzzleActive: puzzleOnBoard !== null,
     puzzleMateIn: puzzleOnBoard?.mateIn ?? 0,
     puzzleResult: puzzle.puzzleResult,
@@ -1241,6 +1271,9 @@ function App() {
         sharedStatusText={sharedStatusText}
         hasSavedGame={shared.hasSavedGame}
         puzzleActive={puzzleOnBoard !== null}
+        openPuzzleList={puzzleOnBoard ? showPuzzleList : null}
+        onOlderPuzzle={stepPuzzle(1)}
+        onNewerPuzzle={stepPuzzle(-1)}
         setLinkNotice={setLinkNotice}
         backToMyGame={() =>
           // A finished match has no seat worth warning about.
@@ -1281,7 +1314,7 @@ function App() {
         openTutorial={tutorial.openTutorial}
         hasPuzzle={puzzleProps.onPuzzle !== null}
         puzzleFresh={puzzle.puzzleFresh}
-        openPuzzle={openPuzzle}
+        openPuzzle={openTodaysPuzzle}
         onShare={share.handleShare}
         controls={controls}
         moveLog={moveLogProps}
@@ -1302,6 +1335,16 @@ function App() {
             }}
           />
         </MobileWidgetSheet>
+      )}
+
+      {puzzleListOpen && (
+        <PuzzleListModal
+          puzzles={puzzle.history}
+          outcomes={puzzle.outcomes}
+          activeDate={puzzleOnBoard?.date ?? null}
+          onSelect={openPuzzle}
+          onClose={() => setPuzzleListOpen(false)}
+        />
       )}
 
       <Dialogs

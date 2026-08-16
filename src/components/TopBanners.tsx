@@ -5,6 +5,9 @@ export function TopBanners({
   sharedStatusText,
   hasSavedGame,
   puzzleActive,
+  openPuzzleList,
+  onOlderPuzzle,
+  onNewerPuzzle,
   setLinkNotice,
   backToMyGame,
   parked,
@@ -23,6 +26,12 @@ export function TopBanners({
    * said. So the banner has to outlive it too.
    */
   puzzleActive: boolean;
+  /** Opens the history. Null when there is no puzzle on the board to open it from. */
+  openPuzzleList: (() => void) | null;
+  /** A day back. Null at the oldest puzzle the history reaches. */
+  onOlderPuzzle: (() => void) | null;
+  /** A day on. Null on today's, which is always the newest there is. */
+  onNewerPuzzle: (() => void) | null;
   setLinkNotice: (notice: string | null) => void;
   backToMyGame: () => void;
   parked: boolean;
@@ -37,7 +46,40 @@ export function TopBanners({
           push the board under the fold. Non-blocking either way. */}
       {(linkNotice || sharedPending || unverified || puzzleActive) && (
         <div className={`link-banner${unverified ? " unverified" : ""}`} role="status">
-          <p>{linkNotice ?? sharedStatusText}</p>
+          {/* The day it is for doubles as the way to the other days: a step
+              either side for the neighbours, the label itself for the list.
+              This is the only route to them, so it must not disappear behind a
+              notice. */}
+          {!linkNotice && openPuzzleList ? (
+            <div className="puzzle-nav">
+              <button
+                type="button"
+                className="puzzle-step"
+                aria-label="Previous puzzle"
+                disabled={!onOlderPuzzle}
+                onClick={onOlderPuzzle ?? undefined}
+              >
+                ‹
+              </button>
+              <button type="button" className="puzzle-banner-btn" onClick={openPuzzleList}>
+                {sharedStatusText} <span aria-hidden="true">▾</span>
+              </button>
+              {/* Never enabled on today's: there is no tomorrow to reach. The
+                  policy on `puzzles` caps the query at today, which is what
+                  stops anyone reading ahead. */}
+              <button
+                type="button"
+                className="puzzle-step"
+                aria-label="Next puzzle"
+                disabled={!onNewerPuzzle}
+                onClick={onNewerPuzzle ?? undefined}
+              >
+                ›
+              </button>
+            </div>
+          ) : (
+            <p>{linkNotice ?? sharedStatusText}</p>
+          )}
           {linkNotice ? (
             <button className="invite-skip-btn" onClick={() => setLinkNotice(null)}>
               Dismiss

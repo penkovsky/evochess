@@ -6,6 +6,9 @@
  * running. Before `TIMED_HARD_MS` was enforced in-search, a nominally 800ms
  * Fun search was measured at 4552ms in the browser and up to 3.1s over the
  * corpus (bench/bench11_move_latency.ts). This is the guard for that.
+ *
+ * Only the timed path is bounded. Chill's and Easy's shallow mix arms are fixed
+ * depth and arm no deadline, so they have no ceiling to check.
  */
 import { describe, expect, it } from "vitest";
 import { EvoChessGame } from "../game";
@@ -26,18 +29,31 @@ function midgame(): EvoChessGame {
 describe("timed-level move latency", () => {
   it("returns inside the hard ceiling, with a move, at every timed level", () => {
     const { TIMED_HARD_MS, EASY_HARD_MS } = __timingForTest;
+    let bounded = 0;
     for (const level of ["chill", "easy", "zen", "fun"] as const) {
       const ceiling = level === "chill" || level === "easy" ? EASY_HARD_MS : TIMED_HARD_MS;
       for (const game of [new EvoChessGame(), midgame()]) {
         const t0 = Date.now();
         const r = searchLevel(game, level, 1);
         const elapsed = Date.now() - t0;
-        // Generous over the ceiling to absorb CI jitter while still catching
-        // the regression this exists for — the pre-fix path took 3-4.5s.
-        expect(elapsed).toBeLessThan(ceiling + 500);
+        // A shallow mix arm is depth-bounded, not time-bounded: `searchLevel`
+        // returns from the mix branch before it arms a deadline, so there is no
+        // ceiling on that call to assert. Chill's midgame roll draws one; the
+        // other seven cases here still go down the timed path.
+        if (!r.shallow) {
+          bounded++;
+          // Generous over the ceiling to absorb CI jitter while still catching
+          // the regression this exists for — the pre-fix path took 3-4.5s.
+          expect(elapsed).toBeLessThan(ceiling + 500);
+        }
         expect(r.move).not.toBeNull();
       }
     }
+    // The skip above must not be able to hollow the test out. Six of the eight
+    // cases take the timed path whatever the mixes hold: Zen and Fun never mix,
+    // and the fresh board is ply 1, before `EASY_EASING_FROM_PLY`. Only the two
+    // mixed levels at midgame can roll shallow.
+    expect(bounded).toBeGreaterThanOrEqual(6);
   }, 30_000);
 
   it("still returns a legal move when the ceiling fires before any iteration completes", () => {

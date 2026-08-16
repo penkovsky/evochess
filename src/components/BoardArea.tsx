@@ -193,11 +193,19 @@ export function BoardArea({
                 ? `Solved! Mate in ${puzzle.puzzleMateIn}.`
                 : `Not mate in ${puzzle.puzzleMateIn}.`}
             </div>
-            {puzzle.puzzleResult === "failed" && (
-              <button className="play-again-btn" onClick={puzzle.onPuzzleRetry}>
-                Try again
-              </button>
-            )}
+            <div className="puzzle-overlay-actions">
+              {puzzle.puzzleResult === "failed" && (
+                <button className="play-again-btn" onClick={puzzle.onPuzzleRetry}>
+                  Try again
+                </button>
+              )}
+              {/* Just finished one is exactly when the next one is wanted. */}
+              {puzzle.onPuzzleList && (
+                <button className="play-again-btn secondary" onClick={puzzle.onPuzzleList}>
+                  More puzzles
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

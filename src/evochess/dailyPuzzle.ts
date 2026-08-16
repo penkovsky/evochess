@@ -22,10 +22,17 @@ export interface DailyPuzzle {
 }
 
 /**
- * The newest row visible to `anon`, which the policy caps at today. These three
+ * How far back the history reaches. A row count, not a date range: the client's
+ * clock is not trusted anywhere else here and must not start being trusted to
+ * build a filter. A gap in the publish dates just reaches further back.
+ */
+export const HISTORY_LIMIT = 30;
+
+/**
+ * The newest rows visible to `anon`, which the policy caps at today. These three
  * columns are the only ones granted; asking for `solution` fails with 42501.
  */
-const QUERY = "/rest/v1/puzzles?select=publish_date,param,mate_in&order=publish_date.desc&limit=1";
+const QUERY = `/rest/v1/puzzles?select=publish_date,param,mate_in&order=publish_date.desc&limit=${HISTORY_LIMIT}`;
 
 function parseRow(row: unknown): DailyPuzzle | null {
   if (!row || typeof row !== "object") return null;
@@ -36,21 +43,25 @@ function parseRow(row: unknown): DailyPuzzle | null {
   return { date, param, mateIn };
 }
 
-export async function fetchDailyPuzzle(): Promise<DailyPuzzle | null> {
+/**
+ * Newest first, so `[0]` is today's. One request serves both the puzzle of the
+ * day and the history. A malformed row is dropped rather than failing the list.
+ */
+export async function fetchPuzzles(): Promise<DailyPuzzle[]> {
   // Read per call rather than at module load, so a test can vary the config.
   const endpoint = import.meta.env.VITE_TELEMETRY_URL ?? "";
   const key = import.meta.env.VITE_TELEMETRY_KEY ?? "";
-  if (!endpoint || !key) return null;
+  if (!endpoint || !key) return [];
   try {
     const res = await fetch(`${endpoint}${QUERY}`, {
       headers: { apikey: key, Authorization: `Bearer ${key}` },
     });
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const rows = await res.json();
-    if (!Array.isArray(rows) || rows.length === 0) return null;
-    return parseRow(rows[0]);
+    if (!Array.isArray(rows)) return [];
+    return rows.map(parseRow).filter((row): row is DailyPuzzle => row !== null);
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -97,6 +108,95 @@ function parseCached(entry: unknown): DailyPuzzle | null {
   return { date, param, mateIn };
 }
 
+// ------------------------------------------------------------- list cache
+
+const LIST_KEY = "evochess-puzzle-list-v1";
+
+/**
+ * The history, so the list paints offline and before the response lands.
+ *
+ * A second key rather than a wider `CACHE_KEY`, so an existing install keeps
+ * the single row that puts the button on the first paint. Same rules as that
+ * one: nothing expires it, every failure is silent.
+ */
+export function loadCachedPuzzleList(): DailyPuzzle[] {
+  try {
+    const raw = localStorage.getItem(LIST_KEY);
+    if (!raw) return [];
+    const entries = JSON.parse(raw);
+    if (!Array.isArray(entries)) return [];
+    return entries.map(parseCached).filter((row): row is DailyPuzzle => row !== null);
+  } catch {
+    return [];
+  }
+}
+
+export function cachePuzzleList(rows: DailyPuzzle[]): void {
+  try {
+    localStorage.setItem(LIST_KEY, JSON.stringify(rows));
+  } catch {
+    // A full or blocked store costs the list one paint, nothing more.
+  }
+}
+
+// ---------------------------------------------------------------- outcomes
+
+const OUTCOMES_KEY = "evochess-puzzle-outcomes-v1";
+
+/** How many dates the map keeps. Storage must not grow a row per day forever. */
+const OUTCOMES_KEPT = 90;
+
+export type PuzzleOutcome = "solved" | "failed";
+
+/** What happened on each date, so the list can show it. Local only, never sent. */
+export type PuzzleOutcomes = Record<string, PuzzleOutcome>;
+
+export function loadPuzzleOutcomes(): PuzzleOutcomes {
+  try {
+    const raw = localStorage.getItem(OUTCOMES_KEY);
+    if (!raw) return {};
+    return parseOutcomes(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Records the outcome and hands back the new map.
+ *
+ * A solve is never overwritten by a later failure on the same date: retrying a
+ * solved puzzle must not take the tick away.
+ */
+export function recordPuzzleOutcome(date: string, outcome: PuzzleOutcome): PuzzleOutcomes {
+  const outcomes = loadPuzzleOutcomes();
+  if (outcomes[date] === "solved") return outcomes;
+  const next = prune({ ...outcomes, [date]: outcome });
+  try {
+    localStorage.setItem(OUTCOMES_KEY, JSON.stringify(next));
+  } catch {
+    // Blocked storage: the list just shows nothing against the date.
+  }
+  return next;
+}
+
+function parseOutcomes(entry: unknown): PuzzleOutcomes {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return {};
+  const out: PuzzleOutcomes = {};
+  for (const [date, outcome] of Object.entries(entry as Record<string, unknown>)) {
+    if (outcome === "solved" || outcome === "failed") out[date] = outcome;
+  }
+  return out;
+}
+
+/** Newest dates kept. The keys are ISO dates, so a string sort is a date sort. */
+function prune(outcomes: PuzzleOutcomes): PuzzleOutcomes {
+  const dates = Object.keys(outcomes).sort();
+  if (dates.length <= OUTCOMES_KEPT) return outcomes;
+  const out: PuzzleOutcomes = {};
+  for (const date of dates.slice(-OUTCOMES_KEPT)) out[date] = outcomes[date];
+  return out;
+}
+
 /**
  * "1 August 2026", from the row's own date string.
  *
@@ -111,6 +211,18 @@ export function formatPuzzleDate(date: string): string {
   return parsed.toLocaleDateString("en-GB", {
     day: "numeric",
     month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** "1 Aug 2026", for a list of them. Same UTC rule as `formatPuzzleDate`. */
+export function formatPuzzleDateShort(date: string): string {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return parsed.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
     year: "numeric",
     timeZone: "UTC",
   });

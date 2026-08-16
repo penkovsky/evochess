@@ -71,7 +71,8 @@
     gap: 6px 10px;
   }
 
-  .link-banner p {
+  .link-banner p,
+  .link-banner .puzzle-nav {
     flex: 1 1 160px;
     font-size: 12px;
   }
@@ -417,6 +418,140 @@ button.board-status-invite {
    and a button that never sits still is one the thumb has to chase. */
 .puzzle-overlay .play-again-btn {
   animation: none;
+}
+
+/* Wraps rather than shrinks: two buttons at a thumb-sized width do not fit
+   side by side on a narrow phone. */
+.puzzle-overlay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+/* Secondary, so "Try again" stays the one the eye lands on when both are up. */
+.play-again-btn.secondary {
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.play-again-btn.secondary:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* The dated banner is also the way to the other days, so it has to read as a
+   control without turning the banner into a button strip. */
+.puzzle-banner-btn {
+  /* Takes the room left between the two steps, so the tap target is the label
+     and the space around it rather than just the words. */
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  /* Vertical padding only: the banner sits above the board on a phone and buys
+     its height from it, so the tap target grows sideways instead. */
+  padding: 5px 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* A day either side. Square and thumb-sized: these are the controls most likely
+   to be tapped repeatedly, and they sit above the board where space is tight,
+   so they get width and height rather than a label. */
+.puzzle-step {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(128, 128, 128, 0.08);
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.puzzle-step:hover:not(:disabled) {
+  border-color: #999;
+}
+
+/* Kept in place rather than hidden: the row must not shift under the thumb when
+   stepping onto today's puzzle takes one of them away. */
+.puzzle-step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Wide enough that the three columns do not crowd, and still inside the
+   `.modal` 90vw cap on a phone. */
+.puzzle-list-modal {
+  width: 340px;
+}
+
+.puzzle-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* Scrolls inside the dialog so the page never does. */
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.modal .puzzle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  /* Thumb-sized, and the same at every width: this is the primary surface. */
+  min-height: 44px;
+  margin: 0;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.modal .puzzle-row:hover {
+  background: var(--code-bg);
+}
+
+.modal .puzzle-row.active {
+  font-weight: bold;
+  color: var(--text-h);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.puzzle-row-date {
+  flex: 1;
+}
+
+.puzzle-row-mate {
+  opacity: 0.7;
+}
+
+/* Fixed width, so the dates and the mate lengths stay in their columns whether
+   or not a row has a mark. */
+.puzzle-row-mark {
+  width: 1.2em;
+  text-align: center;
+}
+
+.puzzle-row-mark.solved {
+  color: #22aa77;
+}
+
+.puzzle-row-mark.failed {
+  color: #b04a4a;
 }
 
 .score-win {
@@ -1258,12 +1393,20 @@ button.board-status-invite {
   text-align: left;
 }
 
-.link-banner p {
+.link-banner p,
+.link-banner .puzzle-nav {
   flex: 1 1 260px;
   margin: 0;
   min-width: 0;
   font-size: 13px;
   line-height: 1.45;
+}
+
+/* The label takes the room, the steps take what they need either side. */
+.puzzle-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* A full-width row so the button gets its own line in the wrapping layout,

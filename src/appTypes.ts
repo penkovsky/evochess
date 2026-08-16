@@ -139,6 +139,8 @@ export interface PuzzleProps {
   /** Today's puzzle not opened yet: the button is highlighted. */
   puzzleFresh: boolean;
   onPuzzleRetry: () => void;
+  /** Opens the history, from the overlay. Null when there is none to show. */
+  onPuzzleList: (() => void) | null;
   puzzleActive: boolean;
   puzzleMateIn: number;
   puzzleResult: null | "solved" | "failed";

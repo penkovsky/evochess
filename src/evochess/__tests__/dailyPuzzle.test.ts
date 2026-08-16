@@ -8,22 +8,30 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   cachePuzzle,
+  cachePuzzleList,
   countAttempt,
-  fetchDailyPuzzle,
+  fetchPuzzles,
   formatPuzzleDate,
+  formatPuzzleDateShort,
+  HISTORY_LIMIT,
   loadCachedPuzzle,
+  loadCachedPuzzleList,
+  loadPuzzleOutcomes,
   loadPuzzleSeen,
   markPuzzleSeen,
   puzzleOutcome,
+  recordPuzzleOutcome,
   resolvePuzzle,
 } from "../dailyPuzzle";
 
 const CACHE_KEY = "evochess-puzzle-v1";
+const OUTCOMES_KEY = "evochess-puzzle-outcomes-v1";
 
 const URL_BASE = "https://collector.example";
 const KEY = "anon-key";
 
 const ROW = { publish_date: "2026-08-01", param: "AQABBB", mate_in: 2 };
+const OLDER = { publish_date: "2026-07-31", param: "AQABCC", mate_in: 3 };
 
 /** A fetch that answers with one JSON body, and records the call. */
 function stubFetch(body: unknown, init: { ok?: boolean; status?: number } = {}) {
@@ -36,7 +44,7 @@ function stubFetch(body: unknown, init: { ok?: boolean; status?: number } = {}) 
   return fn;
 }
 
-describe("fetchDailyPuzzle", () => {
+describe("fetchPuzzles", () => {
   beforeEach(() => {
     vi.stubEnv("VITE_TELEMETRY_URL", URL_BASE);
     vi.stubEnv("VITE_TELEMETRY_KEY", KEY);
@@ -47,24 +55,24 @@ describe("fetchDailyPuzzle", () => {
     vi.unstubAllGlobals();
   });
 
-  it("returns a well-formed row", async () => {
-    stubFetch([ROW]);
-    expect(await fetchDailyPuzzle()).toEqual({
-      date: "2026-08-01",
-      param: "AQABBB",
-      mateIn: 2,
-    });
+  it("returns well-formed rows, newest first", async () => {
+    stubFetch([ROW, OLDER]);
+    expect(await fetchPuzzles()).toEqual([
+      { date: "2026-08-01", param: "AQABBB", mateIn: 2 },
+      { date: "2026-07-31", param: "AQABCC", mateIn: 3 },
+    ]);
   });
 
-  it("asks for the newest row and sends no date", async () => {
+  it("asks for the history in one request and sends no date", async () => {
     const fn = stubFetch([ROW]);
-    await fetchDailyPuzzle();
+    await fetchPuzzles();
     const [url, options] = fn.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(
-      `${URL_BASE}/rest/v1/puzzles?select=publish_date,param,mate_in&order=publish_date.desc&limit=1`
+      `${URL_BASE}/rest/v1/puzzles?select=publish_date,param,mate_in&order=publish_date.desc&limit=${HISTORY_LIMIT}`
     );
     // Nothing that could name a day: no date, no filter on publish_date beyond
-    // the ordering, and no client clock in the request at all.
+    // the ordering, and no client clock in the request at all. The history is a
+    // row count for exactly this reason.
     expect(url).not.toMatch(/\d{4}-\d{2}-\d{2}/);
     expect(url).not.toContain("publish_date=");
     expect(options.headers).toMatchObject({ apikey: KEY, Authorization: `Bearer ${KEY}` });
@@ -72,27 +80,33 @@ describe("fetchDailyPuzzle", () => {
     expect(options.body).toBeUndefined();
   });
 
-  it("returns null on a network error", async () => {
+  it("asks for one request, not one per day", async () => {
+    const fn = stubFetch([ROW, OLDER]);
+    await fetchPuzzles();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns empty on a network error", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
         throw new Error("offline");
       })
     );
-    expect(await fetchDailyPuzzle()).toBeNull();
+    expect(await fetchPuzzles()).toEqual([]);
   });
 
-  it("returns null on a non-2xx", async () => {
+  it("returns empty on a non-2xx", async () => {
     stubFetch([ROW], { ok: false, status: 401 });
-    expect(await fetchDailyPuzzle()).toBeNull();
+    expect(await fetchPuzzles()).toEqual([]);
   });
 
-  it("returns null on an empty array", async () => {
+  it("returns empty on an empty array", async () => {
     stubFetch([]);
-    expect(await fetchDailyPuzzle()).toBeNull();
+    expect(await fetchPuzzles()).toEqual([]);
   });
 
-  it("returns null on a malformed row", async () => {
+  it("drops a malformed row and keeps the rest", async () => {
     for (const row of [
       {},
       { publish_date: "2026-08-01", param: "", mate_in: 2 },
@@ -101,21 +115,23 @@ describe("fetchDailyPuzzle", () => {
       { publish_date: "2026-08-01", param: "AQABBB", mate_in: "2" },
       null,
     ]) {
-      stubFetch([row]);
-      expect(await fetchDailyPuzzle()).toBeNull();
+      // One bad row must not cost the whole list, which is the difference from
+      // the single-row fetch this replaced.
+      stubFetch([row, OLDER]);
+      expect(await fetchPuzzles()).toEqual([{ date: "2026-07-31", param: "AQABCC", mateIn: 3 }]);
     }
     // Not even an array.
     stubFetch({ message: "permission denied" });
-    expect(await fetchDailyPuzzle()).toBeNull();
+    expect(await fetchPuzzles()).toEqual([]);
   });
 
-  it("returns null without a request when the env config is missing", async () => {
+  it("returns empty without a request when the env config is missing", async () => {
     const fn = stubFetch([ROW]);
     vi.stubEnv("VITE_TELEMETRY_URL", "");
-    expect(await fetchDailyPuzzle()).toBeNull();
+    expect(await fetchPuzzles()).toEqual([]);
     vi.stubEnv("VITE_TELEMETRY_URL", URL_BASE);
     vi.stubEnv("VITE_TELEMETRY_KEY", "");
-    expect(await fetchDailyPuzzle()).toBeNull();
+    expect(await fetchPuzzles()).toEqual([]);
     expect(fn).not.toHaveBeenCalled();
   });
 });
@@ -153,8 +169,8 @@ describe("the cache", () => {
 
   it("takes a fetched row, so the next load has the entry point at once", async () => {
     stubFetch([ROW]);
-    const row = await fetchDailyPuzzle();
-    cachePuzzle(row!);
+    const rows = await fetchPuzzles();
+    cachePuzzle(rows[0]);
     expect(loadCachedPuzzle()).toEqual({ date: "2026-08-01", param: "AQABBB", mateIn: 2 });
   });
 
@@ -173,9 +189,34 @@ describe("the cache", () => {
   it("is left alone by a failed request", async () => {
     cachePuzzle({ date: "2026-07-31", param: "AQABBB", mateIn: 3 });
     stubFetch(null, { ok: false, status: 500 });
-    expect(await fetchDailyPuzzle()).toBeNull();
+    expect(await fetchPuzzles()).toEqual([]);
     // Nothing expires it: a stale entry reads as an old puzzle, not a wrong one.
     expect(loadCachedPuzzle()).toEqual({ date: "2026-07-31", param: "AQABBB", mateIn: 3 });
+  });
+
+  it("keeps the history in its own key, so an existing install keeps today's", () => {
+    cachePuzzle({ date: "2026-08-01", param: "AQABBB", mateIn: 2 });
+    cachePuzzleList([
+      { date: "2026-08-01", param: "AQABBB", mateIn: 2 },
+      { date: "2026-07-31", param: "AQABCC", mateIn: 3 },
+    ]);
+    expect(loadCachedPuzzle()).toEqual({ date: "2026-08-01", param: "AQABBB", mateIn: 2 });
+    expect(loadCachedPuzzleList()).toHaveLength(2);
+  });
+
+  it("reads an absent or malformed history as an empty list", () => {
+    expect(loadCachedPuzzleList()).toEqual([]);
+    localStorage.setItem("evochess-puzzle-list-v1", "{not json");
+    expect(loadCachedPuzzleList()).toEqual([]);
+    // An object where a list belongs.
+    localStorage.setItem("evochess-puzzle-list-v1", JSON.stringify({ date: "2026-08-01" }));
+    expect(loadCachedPuzzleList()).toEqual([]);
+    // One bad entry costs that entry, not the list.
+    localStorage.setItem(
+      "evochess-puzzle-list-v1",
+      JSON.stringify([{ date: "2026-08-01" }, { date: "2026-07-31", param: "AQABCC", mateIn: 3 }])
+    );
+    expect(loadCachedPuzzleList()).toEqual([{ date: "2026-07-31", param: "AQABCC", mateIn: 3 }]);
   });
 
   it("remembers the last puzzle opened, per date", () => {
@@ -185,6 +226,74 @@ describe("the cache", () => {
     // A new date is unseen again, which lights the button back up.
     markPuzzleSeen("2026-08-02");
     expect(loadPuzzleSeen()).toBe("2026-08-02");
+  });
+});
+
+describe("the outcome map", () => {
+  let store: Record<string, string> = {};
+
+  beforeEach(() => {
+    store = {};
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => {
+        store[k] = v;
+      },
+      removeItem: (k: string) => {
+        delete store[k];
+      },
+    });
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reads back what was written, per date", () => {
+    expect(loadPuzzleOutcomes()).toEqual({});
+    recordPuzzleOutcome("2026-08-01", "solved");
+    recordPuzzleOutcome("2026-07-31", "failed");
+    expect(loadPuzzleOutcomes()).toEqual({ "2026-08-01": "solved", "2026-07-31": "failed" });
+  });
+
+  it("hands back the new map, so the caller need not read it again", () => {
+    expect(recordPuzzleOutcome("2026-08-01", "failed")).toEqual({ "2026-08-01": "failed" });
+  });
+
+  it("never downgrades a solve to a failure", () => {
+    recordPuzzleOutcome("2026-08-01", "solved");
+    // Retrying a solved puzzle and running out of moves must not take the tick
+    // away.
+    expect(recordPuzzleOutcome("2026-08-01", "failed")).toEqual({ "2026-08-01": "solved" });
+    expect(loadPuzzleOutcomes()).toEqual({ "2026-08-01": "solved" });
+  });
+
+  it("does upgrade a failure to a solve", () => {
+    recordPuzzleOutcome("2026-08-01", "failed");
+    expect(recordPuzzleOutcome("2026-08-01", "solved")).toEqual({ "2026-08-01": "solved" });
+  });
+
+  it("keeps the newest 90 dates and no more", () => {
+    // 100 consecutive days, oldest first, so the pruning has something to sort.
+    for (let i = 0; i < 100; i++) {
+      const date = new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10);
+      recordPuzzleOutcome(date, "solved");
+    }
+    const outcomes = loadPuzzleOutcomes();
+    const dates = Object.keys(outcomes).sort();
+    expect(dates).toHaveLength(90);
+    // Day 100 is 2026-04-10, day 11 (the oldest kept) is 2026-01-11.
+    expect(dates[0]).toBe("2026-01-11");
+    expect(dates[89]).toBe("2026-04-10");
+  });
+
+  it("reads an absent or malformed entry as an empty map, and throws nothing", () => {
+    expect(loadPuzzleOutcomes()).toEqual({});
+    store[OUTCOMES_KEY] = "{not json";
+    expect(loadPuzzleOutcomes()).toEqual({});
+    store[OUTCOMES_KEY] = JSON.stringify([]);
+    expect(loadPuzzleOutcomes()).toEqual({});
+    // An unknown value is dropped, the rest survives.
+    store[OUTCOMES_KEY] = JSON.stringify({ "2026-08-01": "cheated", "2026-07-31": "solved" });
+    expect(loadPuzzleOutcomes()).toEqual({ "2026-07-31": "solved" });
   });
 });
 
@@ -198,6 +307,12 @@ describe("formatPuzzleDate", () => {
 
   it("hands back anything it cannot parse", () => {
     expect(formatPuzzleDate("not-a-date")).toBe("not-a-date");
+  });
+
+  it("shortens the month for a list of them, still in UTC", () => {
+    expect(formatPuzzleDateShort("2026-08-01")).toBe("1 Aug 2026");
+    expect(formatPuzzleDateShort("2026-01-01")).toBe("1 Jan 2026");
+    expect(formatPuzzleDateShort("not-a-date")).toBe("not-a-date");
   });
 });
 

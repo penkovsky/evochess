@@ -40,6 +40,10 @@ const PUZZLE_PARAM = encodeShareLink(game1(12));
 const LINK_PARAM = encodeShareLink(game1(11));
 
 const ROW = { publish_date: "2026-08-01", param: PUZZLE_PARAM, mate_in: 2 };
+/** Yesterday's, for the history. Black to move, so the board says which is on it. */
+const OLDER_ROW = { publish_date: "2026-07-31", param: LINK_PARAM, mate_in: 3 };
+/** Newest first, as the collector orders them. */
+const ROWS = [ROW, OLDER_ROW];
 
 /** An autosave for the player's own in-progress game, one move deep. */
 function ownGameSave(): string {
@@ -83,9 +87,11 @@ interface Collector {
 
 /**
  * Stubs the three endpoints. `puzzle` null answers the puzzle query with a
- * 500, which is the "failed request" case; otherwise the row is returned.
+ * 500, which is the "failed request" case; otherwise the rows are returned. One
+ * row and a list of them are both accepted, since the same request serves the
+ * puzzle of the day and the history.
  */
-async function stubCollector(page: Page, puzzle: object | null): Promise<Collector> {
+async function stubCollector(page: Page, puzzle: object | object[] | null): Promise<Collector> {
   const collector: Collector = { events: [], games: [], puzzleRequests: [] };
   await page.route("**/rest/v1/puzzles*", (route: Route) => {
     collector.puzzleRequests.push(route.request().url());
@@ -93,7 +99,7 @@ async function stubCollector(page: Page, puzzle: object | null): Promise<Collect
     return route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify([puzzle]),
+      body: JSON.stringify(Array.isArray(puzzle) ? puzzle : [puzzle]),
     });
   });
   await page.route("**/rest/v1/events", (route: Route) => {
@@ -259,8 +265,8 @@ test("solving the puzzle reports it solved and tags the game row", async ({ page
   expect(collector.events.some((e) => e.name === "puzzle_failed")).toBe(false);
 
   // …and the board says so, over the board itself, with no way onward but New
-  // Game or "back to my game", both already on screen.
-  await expect(page.locator(".puzzle-overlay")).toHaveText("Solved! Mate in 2.");
+  // Game or "back to my game", both already on screen, and the history.
+  await expect(page.locator(".puzzle-overlay-text")).toHaveText("Solved! Mate in 2.");
   await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
 
   // The attempt is a real game down the shared-position path, so the tag is
@@ -426,6 +432,106 @@ test("a line that runs out of moves fails, and Try again starts it over", async 
   const opens = await eventsNamed(page, collector, "puzzle_open");
   expect(opens).toHaveLength(2);
   expect(opens[1].props).toMatchObject({ date: "2026-08-01", attempts: 2 });
+});
+
+test("the banner opens the history, and a past puzzle takes the board", async ({ page }) => {
+  const collector = await stubCollector(page, ROWS);
+  await open(page, "./?daily");
+  await expect(page.locator(".link-banner")).toHaveText(/Puzzle of 1 August 2026 \(UTC\)/);
+
+  // The dated banner is the only route to the other days, so it is what opens
+  // the list.
+  await page.locator(".puzzle-banner-btn").click();
+  const rows = page.locator(".puzzle-row");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("Today");
+  await expect(rows.nth(1)).toContainText("31 Jul 2026");
+  // The one on the board says so.
+  await expect(rows.nth(0)).toHaveAttribute("aria-current", "true");
+
+  await rows.nth(1).click();
+  await expect(page.locator(".puzzle-list-modal")).toHaveCount(0);
+  await expect(page.locator(".link-banner")).toHaveText(/Puzzle of 31 July 2026 \(UTC\)/);
+  await expect(page.locator(".board-status")).toHaveText("Black to play, mate in 3");
+  // The board is the older row's position, not today's.
+  await expect(page.locator(".panel .log > div")).toHaveCount(0);
+
+  const opens = await eventsNamed(page, collector, "puzzle_open");
+  expect(opens).toHaveLength(2);
+  expect(opens[1].props).toMatchObject({ date: "2026-07-31", mate_in: 3, attempts: 1 });
+});
+
+test("the steps either side walk the history a day at a time", async ({ page }) => {
+  await stubCollector(page, ROWS);
+  await open(page, "./?daily");
+  await expect(page.locator(".link-banner")).toHaveText(/Puzzle of 1 August 2026 \(UTC\)/);
+
+  const older = page.getByRole("button", { name: "Previous puzzle" });
+  const newer = page.getByRole("button", { name: "Next puzzle" });
+  // Today's is always the newest there is: the policy caps the query at today,
+  // so there is no tomorrow to step onto.
+  await expect(newer).toBeDisabled();
+  await expect(older).toBeEnabled();
+
+  await older.click();
+  await expect(page.locator(".link-banner")).toHaveText(/Puzzle of 31 July 2026 \(UTC\)/);
+  await expect(page.locator(".board-status")).toHaveText("Black to play, mate in 3");
+  // The end of what the history holds, so there is nothing further back either.
+  await expect(older).toBeDisabled();
+  await expect(newer).toBeEnabled();
+
+  await newer.click();
+  await expect(page.locator(".link-banner")).toHaveText(/Puzzle of 1 August 2026 \(UTC\)/);
+  await expect(newer).toBeDisabled();
+});
+
+test("Try again retries the puzzle on the board, not today's", async ({ page }) => {
+  // The past row is today's position under an older date, so the known failing
+  // line applies to it and the only thing under test is which date comes back.
+  await stubCollector(page, [ROW, { publish_date: "2026-07-31", param: PUZZLE_PARAM, mate_in: 2 }]);
+  await open(page, "./?daily");
+  await page.locator(".puzzle-banner-btn").click();
+  await page.locator(".puzzle-row").nth(1).click();
+  await expect(page.locator(".link-banner")).toHaveText(/Puzzle of 31 July 2026 \(UTC\)/);
+
+  // The same two king shuffles as above: the attempt runs out without ever
+  // threatening the mate.
+  await page.locator('[data-square="e1"]').click();
+  await page.locator('[data-square="f1"]').click();
+  await expect(page.locator(".panel .log .log-move")).toHaveCount(2);
+  await page.locator('[data-square="f1"]').click();
+  await page.locator('[data-square="g1"]').click();
+  await expect(page.locator(".puzzle-overlay")).toHaveText(/Not mate in 2\./);
+
+  await page.getByRole("button", { name: "Try again" }).click();
+  // It has to come back to 31 July. Defaulting to today's would swap the puzzle
+  // out from under the player on the one button that promises not to.
+  await expect(page.locator(".link-banner")).toHaveText(/Puzzle of 31 July 2026 \(UTC\)/);
+  await expect(page.locator(".panel .log > div")).toHaveCount(0);
+});
+
+test("the history marks what has been solved, and remembers it", async ({ page }) => {
+  await stubCollector(page, ROWS);
+  await open(page, "./?daily");
+  // Bb8=R#, the mate in today's puzzle.
+  await page.locator('[data-square="c7"]').click();
+  await page.locator('[data-square="b8"]').click();
+  await page.locator('.promo-icon[title="Promote moved minor piece → Rook"]').click();
+  await expect(page.locator(".puzzle-overlay")).toHaveText(/Solved! Mate in 2\./);
+
+  // The overlay is the second route to the list, and the moment it matters
+  // most: someone who has just solved one is who wants the next.
+  await page.getByRole("button", { name: "More puzzles" }).click();
+  await expect(page.locator(".puzzle-row").nth(0).locator(".puzzle-row-mark")).toHaveText("✓");
+  await expect(page.locator(".puzzle-row").nth(1).locator(".puzzle-row-mark")).toHaveText("");
+
+  // And it outlives the page, which is the whole point of keeping it.
+  await page.reload();
+  // A reload drops the attempt, so the way back in is the entry point, not the
+  // banner: the banner only exists while a puzzle is on the board.
+  await page.locator(".panel").getByRole("button", { name: "Puzzle of the day" }).click();
+  await page.locator(".puzzle-banner-btn").click();
+  await expect(page.locator(".puzzle-row").nth(0).locator(".puzzle-row-mark")).toHaveText("✓");
 });
 
 test("a retry does not park itself over the player's own game", async ({ page }) => {

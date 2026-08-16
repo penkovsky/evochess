@@ -4,13 +4,17 @@ import type { EvoChessGame } from "../../evochess/game";
 import type { LoadedGame } from "../../evochess/persistence";
 import {
   cachePuzzle,
+  cachePuzzleList,
   countAttempt,
-  fetchDailyPuzzle,
+  fetchPuzzles,
+  loadPuzzleOutcomes,
   loadPuzzleSeen,
   markPuzzleSeen,
+  recordPuzzleOutcome,
   resolvePuzzle,
   type DailyPuzzle,
   type PuzzleAttempts,
+  type PuzzleOutcomes,
   type PuzzleState,
 } from "../../evochess/dailyPuzzle";
 import { track } from "../../telemetry";
@@ -23,6 +27,13 @@ export interface UseDailyPuzzle {
    * it was before this existed.
    */
   puzzle: DailyPuzzle | null;
+  /**
+   * The published puzzles, newest first, for the history list. Same source as
+   * `puzzle`, which is its first row. Empty until a response or a cache lands.
+   */
+  history: DailyPuzzle[];
+  /** What happened on each date here, which the list shows against the rows. */
+  outcomes: PuzzleOutcomes;
   /** True until the offered puzzle has been opened once. Highlights the button. */
   puzzleFresh: boolean;
   /**
@@ -48,6 +59,8 @@ export interface BootstrapPuzzleOptions {
   daily: boolean;
   /** The cached puzzle, which is what puts the entry point on the first paint. */
   cached: DailyPuzzle | null;
+  /** The cached history, so the list is not empty before the response lands. */
+  cachedList: DailyPuzzle[];
   /**
    * The cached puzzle `?daily` asked to have put on the board, or null. Decided
    * by `resolveStartup`, so the precedence lives in one place.
@@ -75,6 +88,8 @@ export interface UseDailyPuzzleArgs {
  */
 export function useDailyPuzzle({ gameRef }: UseDailyPuzzleArgs): UseDailyPuzzle {
   const [puzzle, setPuzzle] = useState<DailyPuzzle | null>(null);
+  const [history, setHistory] = useState<DailyPuzzle[]>([]);
+  const [outcomes, setOutcomes] = useState<PuzzleOutcomes>(() => loadPuzzleOutcomes());
   const [puzzleResult, setPuzzleResult] = useState<null | "solved" | "failed">(null);
   // Date of the last puzzle opened, persisted so the highlight survives a reload.
   const [seen, setSeen] = useState<string | null>(() => loadPuzzleSeen());
@@ -128,6 +143,9 @@ export function useDailyPuzzle({ gameRef }: UseDailyPuzzleArgs): UseDailyPuzzle 
     });
     if (!outcome) return null;
     setPuzzleResult(outcome);
+    // Kept per date, so the history list shows what has been done here. Local
+    // only: the events below are what leaves the browser.
+    setOutcomes(recordPuzzleOutcome(attempt.date, outcome));
     track(outcome === "solved" ? "puzzle_solved" : "puzzle_failed", {
       date: attempt.date,
       mate_in: attempt.mateIn,
@@ -147,8 +165,9 @@ export function useDailyPuzzle({ gameRef }: UseDailyPuzzleArgs): UseDailyPuzzle 
    * awaited: the client cannot tell whether its own idea of today is right, and
    * one request per load is cheap.
    */
-  function bootstrapPuzzle({ daily, cached, auto, saved, plyAtLoad, load, heldGame }: BootstrapPuzzleOptions) {
+  function bootstrapPuzzle({ daily, cached, cachedList, auto, saved, plyAtLoad, load, heldGame }: BootstrapPuzzleOptions) {
     if (cached) setPuzzle(cached);
+    if (cachedList.length > 0) setHistory(cachedList);
     // Deferred rather than applied here, so it lands at the same point in the
     // life of the page the response's own load does. The startup path is still
     // applying what the board holds, and swapping the position in before that
@@ -156,9 +175,14 @@ export function useDailyPuzzle({ gameRef }: UseDailyPuzzleArgs): UseDailyPuzzle 
     // the game the puzzle displaced, which is the engine taking the solver's
     // first move.
     if (auto) setTimeout(() => load(auto, saved), 0);
-    void fetchDailyPuzzle().then((row) => {
-      // Null: keep whatever the cache held.
-      if (!row) return;
+    void fetchPuzzles().then((rows) => {
+      // Empty: keep whatever the cache held.
+      if (rows.length === 0) return;
+      setHistory(rows);
+      cachePuzzleList(rows);
+      // Newest first, so this is today's, and everything below is unchanged:
+      // the history rides along on the same request but decides nothing.
+      const row = rows[0];
       cachePuzzle(row);
       // A response that lands while a puzzle is already on the board stops
       // here: it must not swap the position out from under a player who is
@@ -189,6 +213,8 @@ export function useDailyPuzzle({ gameRef }: UseDailyPuzzleArgs): UseDailyPuzzle 
 
   return {
     puzzle,
+    history,
+    outcomes,
     puzzleFresh: puzzle !== null && seen !== puzzle.date,
     puzzleRef,
     puzzleResult,
