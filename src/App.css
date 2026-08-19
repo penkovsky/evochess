@@ -1447,7 +1447,8 @@ button.board-status-invite {
   line-height: 14px;
   text-align: center;
   border-radius: 7px;
-  background: #2a7;
+  /* Blue, not the evo green for better contrast with the board */
+  background: #37c;
   color: #fff;
   pointer-events: none;
   z-index: 2;

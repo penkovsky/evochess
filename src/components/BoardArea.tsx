@@ -16,6 +16,7 @@ import type {
   PuzzleProps,
   ScoreProps,
 } from "../appTypes";
+import { boardSkin } from "../boardSkin";
 import { EvoStrip } from "../EvoStrip";
 import { ActionPicker } from "./ActionPicker";
 import { ClockDisplay } from "./ClockDisplay";
@@ -114,6 +115,7 @@ export function BoardArea({
             },
             boardOrientation: board.boardOrientation,
             allowDragging,
+            ...boardSkin,
           }}
         />
         {score.showScoreOverlay && (
