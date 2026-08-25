@@ -97,6 +97,7 @@ interface EventRow {
   anon_id: string;
   session_id: string;
   app_version: string;
+  platform: "web";
   name: EventName;
   game_uid: string | null;
   props: Props;
@@ -326,6 +327,7 @@ export function track(name: EventName, props: Props = {}, gameUid?: string) {
       anon_id: anonId(),
       session_id: sessionId(),
       app_version: __APP_VERSION__,
+      platform: "web",
       name,
       game_uid: gameUid ?? null,
       props,

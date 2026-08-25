@@ -9,6 +9,7 @@ create table if not exists public.events (
   anon_id      uuid not null,          -- per-browser, from localStorage
   session_id   uuid not null,          -- per-tab, from sessionStorage
   app_version  text not null,          -- git sha
+  platform     text not null default 'web',  -- 'web' | 'android' | 'ios'
   name         text not null,
   game_uid     uuid,                   -- null for events not about a game
   props        jsonb not null default '{}'
@@ -46,7 +47,7 @@ create policy events_anon_insert on public.events
 -- Column-level, for the reasons spelled out in `games.sql`: a bare
 -- `grant insert` would hand the browser `id` and `created_at` as well.
 revoke all on public.events from anon;
-grant insert (event_uid, client_ts, anon_id, session_id, app_version, name, game_uid, props)
+grant insert (event_uid, client_ts, anon_id, session_id, app_version, platform, name, game_uid, props)
   on public.events to anon;
 -- `usage` alone: the client never reads the sequence back.
 grant usage on sequence public.events_id_seq to anon;
