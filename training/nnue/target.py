@@ -35,13 +35,10 @@ from .position import Position
 #: Default blend weight from the spec: mostly search score, some outcome.
 DEFAULT_LAMBDA = 0.7
 
-#: The search returns ±(MATE - ply) ≈ ±100000 for a forced mate. Those are
-#: sentinels, not pawn-unit evaluations, and must be kept out of the training
-#: signal: a static evaluator is not meant to reproduce mate distances, and
-#: sigmoid(±1e5 / K) saturates to 0/1 regardless of K, which would corrupt the
-#: K fit. Real material never approaches this — the observed non-mate maximum is
-#: ~20 pawns — so any score past it is unambiguously a mate.
-MATE_SCORE_THRESHOLD = 1000.0
+#: A mate is a sentinel, not an evaluation: sigmoid(mate / K) saturates and
+#: corrupts the K fit. searchRoot divides MATE = 100_000 by 100, so stored mates
+#: are ±(1000 - ply/100). At 1000.0 this never fired. Material tops out near 20.
+MATE_SCORE_THRESHOLD = 990.0
 
 
 def is_mate_score(score: float | None) -> bool:

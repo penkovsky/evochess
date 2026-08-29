@@ -135,13 +135,20 @@ class TestMateScoreFiltering:
     def test_recognises_mate_scores(self, score):
         assert is_mate_score(score)
 
+    @pytest.mark.parametrize("score", [999.99, -999.99, 999.9, 999.5, -990.0])
+    def test_recognises_mate_scores_in_pawn_units(self, score):
+        # The values records actually carry: `searchRoot` divides MATE by 100
+        # before writing, so a stored mate is never 1000 itself. A threshold of
+        # 1000.0 matched none of these.
+        assert is_mate_score(score)
+
     @pytest.mark.parametrize("score", [0.0, 5.0, -20.0, 30.0, None])
     def test_ordinary_scores_are_not_mate(self, score):
         assert not is_mate_score(score)
 
     def test_threshold_is_far_above_any_real_evaluation(self):
         # Real material never approaches this; the observed non-mate max is ~20.
-        assert MATE_SCORE_THRESHOLD > 100
+        assert 100 < MATE_SCORE_THRESHOLD < 999.9
 
     def test_trainable_requires_a_non_mate_score(self):
         assert is_trainable(_scored(START_FEN, 5.0, 1.0))
@@ -158,6 +165,14 @@ class TestMateScoreFiltering:
         ]
         scores, _ = sound_label_pairs(positions)
         assert list(scores) == [3.0, -2.0]
+
+    def test_pawn_unit_mate_is_excluded_from_k_fit(self):
+        positions = [_scored(START_FEN, 3.0, 1.0), _scored(START_FEN, 999.97, 1.0)]
+        scores, _ = sound_label_pairs(positions)
+        assert list(scores) == [3.0]
+
+    def test_pawn_unit_mate_is_not_trainable(self):
+        assert not is_trainable(_scored(START_FEN, 999.97, 1.0))
 
 
 class TestSoundLabelPairs:
