@@ -24,7 +24,7 @@
 import { describe, expect, it } from "vitest";
 import { fromFen } from "../bitboard";
 import { generateEvoTurns, applyEvoTurn, undoEvoTurn, type EvoPos, type EvoState } from "../evoBitboard";
-import { searchEvoTT } from "../evoSearch";
+import { searchEvoTT, setCheckExtension } from "../evoSearch";
 import { activeIndicesFromEvoPos } from "../nnueAccum";
 import { seededNet, setNnueWeights, evaluateActive, DEFAULT_HIDDEN1, DEFAULT_HIDDEN2 } from "../nnue";
 import { FEATURE_SIZE } from "../nnueFeatures";
@@ -52,6 +52,9 @@ describe("NNUE accumulator: search-wiring integration, spec §8/§12", () => {
     // untouched.
     const net = seededNet(4040, FEATURE_SIZE, DEFAULT_HIDDEN1, DEFAULT_HIDDEN2, /* scale */ 1.0);
     setNnueWeights(net);
+    // Off: many queen moves here give check, and the extension would search
+    // those children a ply deeper than the depth-1 score computed below.
+    const wasExt = setCheckExtension(false);
     try {
       // Black's king sits in the centre, not a corner: with only a queen and
       // king to attack with, neither checkmate nor stalemate is reachable in
@@ -84,6 +87,7 @@ describe("NNUE accumulator: search-wiring integration, spec §8/§12", () => {
       expect(result.score).toBe(expectedScoreCp);
     } finally {
       setNnueWeights(null);
+      setCheckExtension(wasExt);
     }
   });
 });

@@ -390,6 +390,27 @@ let rootHint: { key: bigint; turn: EvoTurn } | null = null;
 const EXACT = 1, LOWER = 2, UPPER = 3;
 const MATE_THRESHOLD = MATE - 1000;
 
+// -- check extension ---------------------------------------------------------
+//
+// On. Equal-time A/B, same net both sides (`match.ts --challenger-check-ext`):
+// +108 Elo at 200ms, +74 at 400ms, 100 games each. It wins on half a ply less
+// depth. Don't retune without a fresh equal-time match.
+let CHECK_EXT = true;
+
+// A ceiling on where extensions may happen at all, so a perpetual-check line
+// cannot deepen forever. Ply-based rather than a per-branch counter because it
+// costs one comparison and needs no state threaded through the recursion. 24 is
+// past any depth this search reaches in a 1.2s budget, so it binds only on
+// pathological lines, and it stays inside `ACC_STACK_SIZE`.
+const EXT_PLY_CAP = 24;
+
+/** Turn the check extension on or off. Returns the previous setting. */
+export function setCheckExtension(on: boolean): boolean {
+  const was = CHECK_EXT;
+  CHECK_EXT = on;
+  return was;
+}
+
 const sameTurn = (a: EvoTurn, b: EvoTurn): boolean =>
   a.from === b.from && a.to === b.to && a.forced === b.forced &&
   a.minor === b.minor && a.rook === b.rook && a.down === b.down;
@@ -407,6 +428,17 @@ function orderTurnsHint(s: EvoPos, turns: EvoTurn[], hint: EvoTurn | null): EvoT
 function negamaxTT(s: EvoPos, depth: number, alpha: number, beta: number, ply: number): number {
   NODES++;
   if (checkAbort()) return 0;
+
+  // Check extension
+  // Quiescence extends captures only, so a mating attack made of checks is
+  // invisible past the horizon. Giving a check one extra ply is the cheap way
+  // to see it.
+  //
+  // Deterministic in the position, so the TT stays coherent: an entry stored
+  // at the extended depth is re-probed at the same extended depth, because
+  // `inCheck` cannot disagree with itself about the same position.
+  if (CHECK_EXT && ply < EXT_PLY_CAP && inCheck(s.pos)) depth++;
+
   if (depth === 0) return quiesce(s, alpha, beta, ply);
 
   const h = hashEvo(s);
