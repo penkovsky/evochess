@@ -61,26 +61,36 @@ function EvoDots({
   /** Whether a banked right has no piece on the board that could spend it. */
   unusable?: boolean;
 }) {
+  // The game resets progress to 0 on the very move that banks a right, so drawn
+  // straight the dots empty on the move that earned something and the last dot
+  // is never seen filled. Show the pair one step behind: (banked, 0) borrows the
+  // right back as a full group of dots, so with N_MINOR=3 counter 3 reads three
+  // dots and no badge, 4 reads ×1 and one dot, 6 reads ×1 and three dots. A
+  // shift of the (banked, value) pair rather than a running total, so it
+  // survives a right being spent. Display only.
+  const lag = value === 0 && banked > 0;
+  const dots = lag ? max : value;
+  const badge = lag ? banked - 1 : banked;
   return (
     <span className="evo-group">
-      <span className="evo-dots" role="progressbar" aria-label={label} aria-valuenow={value} aria-valuemax={max}>
+      <span className="evo-dots" role="progressbar" aria-label={label} aria-valuenow={dots} aria-valuemax={max}>
         {Array.from({ length: max }, (_, i) => (
-          <span key={i} className={`evo-dot ${kind} ${i < value ? "filled" : ""}`} />
+          <span key={i} className={`evo-dot ${kind} ${i < dots ? "filled" : ""}`} />
         ))}
       </span>
       {/* Always rendered, blank at zero: the slot reserves its width so the
           dots don't shift sideways the moment a right is banked. */}
       <span
-        className={`evo-banked${banked > 0 && unusable ? " unusable" : ""}`}
+        className={`evo-banked${badge > 0 && unusable ? " unusable" : ""}`}
         title={
-          banked > 0
+          badge > 0
             ? unusable
               ? "Banked, but no minor piece on the board can use it"
               : "Banked unused promotion rights"
             : undefined
         }
       >
-        {banked > 0 ? `×${banked} ${bankedGlyph}` : ""}
+        {badge > 0 ? `×${badge} ${bankedGlyph}` : ""}
       </span>
     </span>
   );
