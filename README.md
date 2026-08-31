@@ -55,6 +55,65 @@ Pushing to `main` builds and deploys to GitHub Pages via
 `.github/workflows/deploy.yml`.
 
 
+## Clips (optional)
+
+Renders a game or a position as a 1080x1920 mp4.
+
+```bash
+npx esbuild scripts/makeClip.ts --bundle --platform=node --format=esm \
+  --packages=external --outfile=scripts/makeClip.bundle.mjs
+node scripts/makeClip.bundle.mjs clips/tutorial-2.json
+```
+
+Needs `ffmpeg` on the path. Starts and stops a dev server itself, unless
+`--base <url>` points at one. Output lands in `clips/out/`.
+
+One JSON manifest per clip, in `clips/`. `clips/game2.json` is a logged game
+with an eval bar, `clips/tutorial-2.json` a short mate from a set-up position:
+
+```json
+{
+  "out": "out/game2.mp4",
+  "moves": "../data/games/game2.txt",
+  "evals": "../data/games/game2-annotated.tsv",
+  "evalColumn": "net-relab4-d5.search",
+  "captions": { "26": "The knight evolved to a rook, with check." },
+  "speed": 1.4,
+  "speeds": { "40-43": 0.7 },
+  "titleCard": "A knight that arrives as a rook",
+  "endCard": "evochess.org"
+}
+```
+
+A share link can stand in for the start position and the moves, so a clip of
+something you hit in the app is a paste:
+
+```json
+{ "out": "out/that-game.mp4", "p": "https://evochess.org/?p=AQEI_wAA..." }
+```
+
+If the link carries history it brings the move line with it. A link shared
+while browsing starts the clip at that ply; a whole-game link starts at the
+opening.
+
+Pictures can be cut in as full-screen cards, anchored to a ply:
+
+```json
+"images": [ { "src": "img/cat-shock.png", "at": 2, "when": "after" } ]
+```
+
+`"titleGradient": true` and `"endGradient": true` put a generated colour
+background behind the two cards, `"titleGlyph": "♟"` with an optional
+`"titleGlyphColor"` sets a large glyph under the title, and `"logo": true`
+brands the end and image cards with the site mark.
+
+`node scripts/gradientSheet.bundle.mjs 100` writes `clips/out/gradients.html`,
+a sheet of numbered gradient swatches to pick a seed from.
+
+Every field, the pacing rules and the animation are in
+`docs/clip-tool-spec.md`.
+
+
 ## A note on the name
 
 I would like to credit Hafsteinn Kjartansson's

@@ -1,0 +1,16 @@
+{
+  "out": "out/game2.mp4",
+  "moves": "../data/games/game2.txt",
+  "evals": "../data/games/game2-annotated.tsv",
+  "evalColumn": "net-r3.search",
+  "speed": 1.4,
+  "speeds": { "0-38": 5, "40-43": 0.7 },
+  "captions": {
+    "39": "Got you",
+    "43": "Mate."
+  },
+  "finalHold": 2000,
+  "endCard": "evochess.org",
+  "endGradient": 9,
+  "logo": true
+}

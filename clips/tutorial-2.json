@@ -1,0 +1,22 @@
+{
+  "out": "out/tutorial-2.mp4",
+  "logo": true,
+  "fen": "5k2/4ppp1/6q1/8/8/8/3r2B1/4K3 w - - 0 1",
+  "evo": { "minorMoveProgress": { "w": 2 }, "rookCharges": { "d2": 4 } },
+  "line": "1. Ba8=R+ Rd8 2. Rxd8#",
+  "titleCard": "Situation critical...",
+  "titleGradient": 33,
+  "endGradient": 9,
+  "titleGlyph": "♕ ♖ ♝",
+  "titleGlyphColor": "#eefeee",
+  "dwell": 1400,
+  "captions": {
+    "0": "Bishop <> ♛ + Rook",
+    "1": "Landed a Rook. WTF?!",
+    "2": "Me block",
+    "3": "Boom!"
+  },
+  "captionHold": 950,
+  "finalHold": 200,
+  "endCard": "evochess.org"
+}

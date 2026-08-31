@@ -40,3 +40,9 @@ training/*.mjs
 
 # Benchmark bundles (see bench/README.md); the .ts sources are tracked
 bench/*.mjs
+
+# Clip renders; the manifests in clips/ are tracked
+clips/out/
+
+# esbuild bundles — generated from the sibling .ts, never edited by hand
+scripts/*.bundle.mjs
