@@ -305,6 +305,177 @@ button.board-status-invite {
   position: relative;
 }
 
+/* 1000ms: 300ms of flight, matching the board's piece animation, then 700ms
+   going out. Under the score overlay. */
+.burn {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+/* Anchored at the origin and rotated along the flight: width is distance. */
+.burn-streak {
+  position: absolute;
+  left: var(--burn-ax);
+  top: var(--burn-ay);
+  height: 8.5%;
+  width: 0;
+  transform-origin: 0 50%;
+  transform: translateY(-50%) rotate(var(--burn-angle));
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(22, 14, 10, 0.55) 0%,
+    rgba(28, 18, 13, 0.8) 16%,
+    rgba(50, 28, 17, 0.76) 48%,
+    rgba(158, 54, 15, 0.66) 78%,
+    rgba(255, 148, 38, 0.58) 95%,
+    rgba(255, 214, 130, 0) 100%
+  );
+  mask-image: linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent);
+  animation: burn-streak 1000ms linear forwards;
+}
+
+@keyframes burn-streak {
+  0% {
+    width: 0;
+    opacity: 1;
+    filter: blur(2px);
+  }
+  30% {
+    width: var(--burn-len);
+    opacity: 1;
+  }
+  /* Then away as smoke, thinning and spreading. */
+  45% {
+    opacity: 0.9;
+  }
+  100% {
+    width: var(--burn-len);
+    opacity: 0;
+    filter: blur(9px);
+  }
+}
+
+/* Soft and wide, so the piece is lit rather than hidden. */
+.burn-glow {
+  position: absolute;
+  width: 30%;
+  height: 30%;
+  margin: -15% 0 0 -15%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 236, 190, 0.5) 0%,
+    rgba(255, 168, 48, 0.36) 28%,
+    rgba(224, 84, 18, 0.22) 50%,
+    rgba(150, 34, 6, 0) 72%
+  );
+  animation: burn-fly 1000ms linear forwards, burn-glow 1000ms ease-out forwards;
+}
+
+/* Offset up and back, so the square stays readable. */
+.burn-flame {
+  position: absolute;
+  width: 17%;
+  height: 17%;
+  margin: -11.5% 0 0 -8.5%;
+  border-radius: 50%;
+  filter: blur(3px);
+  background:
+    radial-gradient(circle at 50% 62%, rgba(255, 252, 224, 0.95) 0%, rgba(255, 168, 40, 0.6) 38%, rgba(214, 62, 12, 0) 66%),
+    radial-gradient(circle at 32% 34%, rgba(255, 214, 110, 0.8) 0%, rgba(226, 88, 18, 0) 58%),
+    radial-gradient(circle at 68% 30%, rgba(255, 196, 80, 0.7) 0%, rgba(200, 54, 8, 0) 56%);
+  animation: burn-fly 1000ms linear forwards, burn-flame 1000ms ease-out forwards;
+}
+
+/* Shared, so the two cannot drift apart. */
+@keyframes burn-fly {
+  0% {
+    left: var(--burn-ax);
+    top: var(--burn-ay);
+  }
+  30% {
+    left: var(--burn-bx);
+    top: var(--burn-by);
+  }
+  100% {
+    left: var(--burn-bx);
+    top: var(--burn-by);
+  }
+}
+
+/* Out before the smoke. The uneven stops are the flicker. */
+@keyframes burn-flame {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.8);
+  }
+  9% {
+    opacity: 1;
+    transform: scale(1.14);
+  }
+  17% {
+    transform: scale(0.96);
+  }
+  26% {
+    transform: scale(1.1);
+  }
+  34% {
+    opacity: 0.95;
+    transform: scale(0.9);
+  }
+  55% {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes burn-glow {
+  0% {
+    opacity: 0.85;
+  }
+  30% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* No travel, no flicker: the streak appears and fades. */
+@media (prefers-reduced-motion: reduce) {
+  .burn-streak {
+    width: var(--burn-len);
+    filter: none;
+    animation: burn-quiet 700ms linear forwards;
+  }
+  .burn-glow,
+  .burn-flame {
+    left: var(--burn-bx);
+    top: var(--burn-by);
+    animation: burn-quiet 700ms linear forwards;
+  }
+  @keyframes burn-quiet {
+    0%,
+    40% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+}
+
 .score-overlay {
   position: absolute;
   inset: 0;

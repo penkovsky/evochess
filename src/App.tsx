@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Color, Square } from "chess.js";
 import { EvoChessError, type ApplyMoveOptions } from "./evochess/game";
 import { NEXT_LEVEL, type AiLevel } from "./evochess/ai";
+import { isBurningMove, type Burn } from "./evochess/burn";
 import { planMove } from "./evochess/moveOptions";
 import { decodeShareLink } from "./evochess/shareLink";
 import {
@@ -104,6 +105,9 @@ function App() {
   const confirmCancelBtnRef = useRef<HTMLButtonElement>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // The move on fire (`evochess/burn.ts`). Set only on a move actually played.
+  const [burn, setBurn] = useState<Burn | null>(null);
+  const burnId = useRef(0);
   // In human-vs-human, flip the board after every move so the side to move sees
   // their pieces at the bottom. Off by default: more intuitive behavior.
   const [autoFlip, setAutoFlip] = useState(false);
@@ -751,6 +755,10 @@ function App() {
       maybeStartPonder(game);
       return;
     }
+    // Both sides.
+    if (isBurningMove(snapshot, game, from, to)) {
+      setBurn({ from, to, id: ++burnId.current });
+    }
     if (!remote) live.sendLocalMove(game, from, to, options);
     tutorial.dismissInvite();
     // The top of the funnel. Only this path, and only a move of this player's
@@ -808,6 +816,7 @@ function App() {
     const hist = historyRef.current;
     const clockHist = clockHistoryRef.current;
     if (hist.length === 0) return;
+    setBurn(null);
     let restored: ReturnType<typeof hist.pop>;
     let restoredClock: Record<Color, number> | undefined;
     if (mode === "human-ai") {
@@ -858,6 +867,7 @@ function App() {
     const snapshot = hist[ply];
     setConfirmAction(null);
     if (!snapshot) return;
+    setBurn(null);
     const restoredClock = clockHist[ply];
     gameRef.current = snapshot.copy();
     historyRef.current = hist.slice(0, ply);
@@ -1001,6 +1011,7 @@ function App() {
   function startNewGame(newMode: Mode, newAiColor: Color, newLevel: AiLevel) {
     abandonGame();
     resetGame();
+    setBurn(null);
     clockHistoryRef.current = [];
     resetPonder(); // new game discards the old position (ponder-spec.md §5.3, §6.2)
     // A fresh game is a well-formed position, so the engine is allowed back.
@@ -1161,6 +1172,9 @@ function App() {
     topColor: view.topColor,
     bottomColor: view.bottomColor,
     rightsFor: view.rightsFor,
+    // The trail belongs to the live move, not to whatever is being browsed.
+    burn: browsing ? null : burn,
+    onBurnDone: () => setBurn(null),
   };
   const browseProps: BrowseProps = {
     browsing,

@@ -2,6 +2,7 @@ import type { CSSProperties, HTMLAttributes } from "react";
 import type { Color } from "chess.js";
 import type { Square } from "chess.js";
 import type { AiLevel } from "./evochess/ai";
+import type { Burn } from "./evochess/burn";
 import type { EvoChessGame, Rights } from "./evochess/game";
 import type { Scores } from "./evochess/scores";
 
@@ -119,6 +120,9 @@ export interface BoardViewProps {
   topColor: Color;
   bottomColor: Color;
   rightsFor: Record<Color, Rights>;
+  /** The move currently burning, or null. */
+  burn: Burn | null;
+  onBurnDone: () => void;
 }
 
 /** History browsing: where in the line the board is, and how to move. */

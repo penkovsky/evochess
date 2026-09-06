@@ -17,6 +17,7 @@ import type {
   ScoreProps,
 } from "../appTypes";
 import { boardSkin } from "../boardSkin";
+import BurnTrail from "./BurnTrail";
 import { EvoStrip } from "../EvoStrip";
 import { ActionPicker } from "./ActionPicker";
 import { ClockDisplay } from "./ClockDisplay";
@@ -118,6 +119,9 @@ export function BoardArea({
             ...boardSkin,
           }}
         />
+        {board.burn && (
+          <BurnTrail burn={board.burn} orientation={board.boardOrientation} onDone={board.onBurnDone} />
+        )}
         {score.showScoreOverlay && (
           <div className={`score-overlay${score.scoreOverlayReady ? " revealed" : ""}`}>
             <div className="score-overlay-text">
