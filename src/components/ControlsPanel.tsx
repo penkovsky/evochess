@@ -16,6 +16,7 @@ export interface ControlsPanelProps {
    */
   liveActive: boolean;
   autoFlip: boolean;
+  soundEnabled: boolean;
   timerEnabled: boolean;
   timerMinutes: number;
   /** Disables the color/timer settings that only make sense before the first move. */
@@ -24,6 +25,7 @@ export interface ControlsPanelProps {
   setAiColor: (color: Color) => void;
   setLevel: (level: AiLevel) => void;
   setAutoFlip: Dispatch<SetStateAction<boolean>>;
+  setSoundEnabled: (on: boolean) => void;
   setTimerEnabled: (enabled: boolean) => void;
   setTimerMinutes: (minutes: number) => void;
   setTimeUp: (color: Color | null) => void;
@@ -37,6 +39,7 @@ export function ControlsPanel({
   puzzleActive,
   liveActive,
   autoFlip,
+  soundEnabled,
   timerEnabled,
   timerMinutes,
   hasHistory,
@@ -44,6 +47,7 @@ export function ControlsPanel({
   setAiColor,
   setLevel,
   setAutoFlip,
+  setSoundEnabled,
   setTimerEnabled,
   setTimerMinutes,
   setTimeUp,
@@ -104,6 +108,17 @@ export function ControlsPanel({
           </div>
         </>
       )}
+      {/* Every mode has sound, unlike the rows below. */}
+      <div className="controls-row">
+        <button
+          type="button"
+          className={`toggle-btn ${soundEnabled ? "pressed" : ""}`}
+          aria-pressed={soundEnabled}
+          onClick={() => setSoundEnabled(!soundEnabled)}
+        >
+          Sound
+        </button>
+      </div>
       {/* Neither switch has anything to say in a match. The board is oriented
           by the seat, and a match is untimed: the clock is local, so a flag
           only one side sees would split the two boards

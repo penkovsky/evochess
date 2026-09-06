@@ -11,6 +11,7 @@ function panel(over: Partial<ControlsPanelProps> = {}) {
       puzzleActive={false}
       liveActive={false}
       autoFlip={false}
+      soundEnabled={true}
       timerEnabled={false}
       timerMinutes={10}
       hasHistory={false}
@@ -18,6 +19,7 @@ function panel(over: Partial<ControlsPanelProps> = {}) {
       setAiColor={() => {}}
       setLevel={() => {}}
       setAutoFlip={() => {}}
+      setSoundEnabled={() => {}}
       setTimerEnabled={() => {}}
       setTimerMinutes={() => {}}
       setTimeUp={() => {}}

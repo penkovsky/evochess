@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { Color, Square } from "chess.js";
-import { EvoChessError, type ApplyMoveOptions } from "./evochess/game";
+import { EvoChessError, type ApplyMoveOptions, type EvoChessGame } from "./evochess/game";
 import { NEXT_LEVEL, type AiLevel } from "./evochess/ai";
 import { isBurningMove, type Burn } from "./evochess/burn";
 import { planMove } from "./evochess/moveOptions";
+import { playSound, setSoundEnabled } from "./sound";
 import { decodeShareLink } from "./evochess/shareLink";
 import {
   saveGame,
@@ -116,6 +117,7 @@ function App() {
   // (docs/ponder-spec.md). Only takes effect at Fun level; persisted like the
   // other settings, default on.
   const [ponderEnabled, setPonderEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled_] = useState(true);
   const boardWrapRef = useRef<HTMLDivElement>(null);
   // Rules summary and move log share panel space, so only one is expanded at a
   // time — opening one collapses the other.
@@ -440,6 +442,8 @@ function App() {
       setTimerMinutes(s.timerMinutes);
       clockRef.current = s.clock;
       setPonderEnabled(s.ponderEnabled);
+      setSoundEnabled_(s.soundEnabled);
+      setSoundEnabled(s.soundEnabled);
     }
     if (board.kind === "shared") {
       const { link, param } = board;
@@ -542,6 +546,7 @@ function App() {
       timerMinutes,
       clock: clockRef.current,
       ponderEnabled,
+      soundEnabled,
       fromShared,
       unverified,
       telemetry: meta,
@@ -696,6 +701,18 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [puzzleListOpen]);
 
+  /** The effect and sounds a move earns. Both move paths call this. */
+  function announceMove(before: EvoChessGame, from: Square, to: Square) {
+    const game = gameRef.current;
+    const burning = isBurningMove(before, game, from, to);
+    if (burning) setBurn({ from, to, id: ++burnId.current });
+    playSound("move");
+    if (burning) playSound("burn");
+    // Behind the move: its consequence.
+    if (game.chess.isCheckmate()) playSound("mate", 0.09);
+    else if (game.chess.isCheck()) playSound("check", 0.09);
+  }
+
   async function maybeAiMove(overrides?: { mode?: Mode; aiColor?: Color; level?: AiLevel }) {
     const effMode = overrides?.mode ?? mode;
     const effAiColor = overrides?.aiColor ?? aiColor;
@@ -715,9 +732,11 @@ function App() {
     // gameRef.current is reassigned (not mutated) by takeback/new game, so an
     // identity check here catches a search that's now stale.
     if (candidate && gameRef.current === game && !game.isGameOver() && game.turn === effAiColor) {
-      historyRef.current.push(game.copy());
+      const before = game.copy();
+      historyRef.current.push(before);
       clockHistoryRef.current.push({ ...clockRef.current });
       game.applyMove(candidate.from, candidate.to, candidate.options);
+      announceMove(before, candidate.from, candidate.to);
     }
     setAiThinking(false);
     // The engine's own move can end the game too: mating the solver, or
@@ -755,10 +774,7 @@ function App() {
       maybeStartPonder(game);
       return;
     }
-    // Both sides.
-    if (isBurningMove(snapshot, game, from, to)) {
-      setBurn({ from, to, id: ++burnId.current });
-    }
+    announceMove(snapshot, from, to);
     if (!remote) live.sendLocalMove(game, from, to, options);
     tutorial.dismissInvite();
     // The top of the funnel. Only this path, and only a move of this player's
@@ -1143,6 +1159,7 @@ function App() {
     puzzleActive: puzzleOnBoard !== null,
     liveActive,
     autoFlip,
+    soundEnabled,
     timerEnabled,
     timerMinutes,
     hasHistory: totalPlies > 0,
@@ -1150,6 +1167,10 @@ function App() {
     setAiColor: setSetupAiColor,
     setLevel: setSetupLevel,
     setAutoFlip,
+    setSoundEnabled: (on: boolean) => {
+      setSoundEnabled_(on);
+      setSoundEnabled(on);
+    },
     setTimerEnabled,
     setTimerMinutes,
     setTimeUp,

@@ -58,6 +58,7 @@ const SAVE_SETTINGS = {
   timerMinutes: 10,
   clock: { w: 600, b: 600 },
   ponderEnabled: true,
+  soundEnabled: true,
   fromShared: false,
   unverified: false,
 } as const;

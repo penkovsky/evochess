@@ -23,6 +23,8 @@ export interface SavedState extends SerializedGame {
   // in-progress clock cannot be reconstructed from the position.
   clock: Record<Color, number>;
   ponderEnabled: boolean;
+  // Absent from saves predating the switch, which default to on.
+  soundEnabled?: boolean;
   // True when this game began from a shared `?p=` position rather than from the
   // opening. Persisted because the flag has to survive a reload: the result of
   // a game played from someone else's position is not recorded against the
@@ -58,6 +60,7 @@ export interface SaveOptions {
   timerMinutes: number;
   clock: Record<Color, number>;
   ponderEnabled: boolean;
+  soundEnabled: boolean;
   fromShared: boolean;
   unverified: boolean;
   telemetry: GameMeta;
@@ -99,6 +102,7 @@ export interface LoadedGame {
   timerMinutes: number;
   clock: Record<Color, number>;
   ponderEnabled: boolean;
+  soundEnabled: boolean;
   fromShared: boolean;
   unverified: boolean;
   telemetry: GameMeta;
@@ -125,6 +129,7 @@ function parseSave(raw: string | null): LoadedGame | null {
       timerMinutes: saved.timerMinutes,
       clock: saved.clock,
       ponderEnabled: saved.ponderEnabled,
+      soundEnabled: saved.soundEnabled ?? true,
       fromShared: saved.fromShared,
       unverified: saved.unverified,
       telemetry: saved.telemetry,

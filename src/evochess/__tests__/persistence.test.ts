@@ -17,6 +17,7 @@ const baseOptions: Omit<SaveOptions, "game"> = {
   aiColor: "b",
   level: "zen",
   autoFlip: false,
+  soundEnabled: true,
   timerEnabled: false,
   timerMinutes: 5,
   clock: { w: 0, b: 0 },
