@@ -476,6 +476,169 @@ button.board-status-invite {
   }
 }
 
+/* 1200ms: ice closes over the square, then melts. Under the score overlay,
+   like the burn. */
+.ice {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+/* One square, placed by its corner. */
+.ice > * {
+  position: absolute;
+  left: var(--ice-x);
+  top: var(--ice-y);
+  width: 12.5%;
+  height: 12.5%;
+}
+
+/* Over the piece: blued through, not covered. The inset spread closes the
+   frost edges in, so the middle goes under last. */
+.ice-slab {
+  border-radius: 14%;
+  background: linear-gradient(
+    148deg,
+    rgba(236, 251, 255, 0.62),
+    rgba(132, 196, 240, 0.34) 42%,
+    rgba(206, 240, 255, 0.5) 70%,
+    rgba(96, 166, 222, 0.42)
+  );
+  animation: ice-slab 1200ms ease-out forwards;
+}
+
+@keyframes ice-slab {
+  0% {
+    opacity: 0;
+    box-shadow: inset 0 0 0 0 rgba(240, 252, 255, 0);
+    filter: blur(0);
+  }
+  12% {
+    opacity: 0.4;
+    box-shadow: inset 0 0 6px 1px rgba(240, 252, 255, 0.85);
+  }
+  /* Closed. */
+  38% {
+    opacity: 1;
+    box-shadow: inset 0 0 14px 8px rgba(240, 252, 255, 0.7);
+  }
+  55% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    box-shadow: inset 0 0 10px 3px rgba(240, 252, 255, 0);
+    filter: blur(4px);
+  }
+}
+
+/* Placed up front, revealed by per-crystal delay, so the frost grows. */
+.ice-crystal {
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.9) 0%,
+    rgba(190, 232, 255, 0.46) 46%,
+    rgba(150, 205, 240, 0) 74%
+  );
+  filter: blur(2px);
+  opacity: 0;
+  animation: ice-crystal 900ms ease-out forwards;
+}
+
+@keyframes ice-crystal {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  22% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.1);
+  }
+}
+
+/* Out of the middle, delayed until there is ice to crack. */
+.ice-crack {
+  height: 0.5%;
+  margin: 6% 0 0 6.25%;
+  transform-origin: 0 50%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.95), rgba(226, 246, 255, 0.12));
+  animation: ice-crack 700ms 460ms ease-out forwards;
+}
+
+@keyframes ice-crack {
+  0% {
+    opacity: 0;
+    clip-path: inset(0 100% 0 0);
+  }
+  20% {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+  100% {
+    opacity: 0;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* The only moving part: drifts off while the rest holds still. */
+.ice-vapour {
+  border-radius: 50%;
+  margin-top: 4%;
+  background: rgba(232, 248, 255, 0.22);
+  filter: blur(4px);
+  opacity: 0;
+  animation: ice-vapour 800ms ease-out forwards;
+}
+
+@keyframes ice-vapour {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.7);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-90%) scale(1.5);
+  }
+}
+
+/* No growth, no drift: glaze over and melt. */
+@media (prefers-reduced-motion: reduce) {
+  .ice-slab {
+    box-shadow: inset 0 0 12px 5px rgba(240, 252, 255, 0.6);
+    animation: ice-quiet 900ms linear forwards;
+  }
+  .ice-crystal,
+  .ice-crack,
+  .ice-vapour {
+    display: none;
+  }
+  @keyframes ice-quiet {
+    0% {
+      opacity: 0;
+    }
+    25%,
+    55% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+}
+
 .score-overlay {
   position: absolute;
   inset: 0;

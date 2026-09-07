@@ -18,6 +18,7 @@ import type {
 } from "../appTypes";
 import { boardSkin } from "../boardSkin";
 import BurnTrail from "./BurnTrail";
+import IceOver from "./IceOver";
 import { EvoStrip } from "../EvoStrip";
 import { ActionPicker } from "./ActionPicker";
 import { ClockDisplay } from "./ClockDisplay";
@@ -121,6 +122,9 @@ export function BoardArea({
         />
         {board.burn && (
           <BurnTrail burn={board.burn} orientation={board.boardOrientation} onDone={board.onBurnDone} />
+        )}
+        {board.freeze && (
+          <IceOver freeze={board.freeze} orientation={board.boardOrientation} onDone={board.onFreezeDone} />
         )}
         {score.showScoreOverlay && (
           <div className={`score-overlay${score.scoreOverlayReady ? " revealed" : ""}`}>

@@ -3,10 +3,13 @@
  * to license. Errors are swallowed, so no audio costs only the sound.
  */
 
-export type SoundName = "move" | "burn" | "check" | "mate";
+export type SoundName = "move" | "burn" | "freeze" | "check" | "mate";
 
 /** The burn animation's length (App.css). */
 const BURN_MS = 1000;
+
+/** The ice animation's length (App.css). */
+const FREEZE_MS = 1200;
 
 let enabled = true;
 let ctx: AudioContext | null = null;
@@ -75,6 +78,49 @@ function burn(sr: number): Float32Array {
   return out;
 }
 
+/**
+ * Ice: a thin shimmer ticking as it sets. Three high detuned partials make it
+ * glass rather than noise, a tone sags underneath as the water stiffens, and
+ * the ticks thin out, so the ice settles.
+ */
+function freeze(sr: number): Float32Array {
+  const n = Math.round((sr * FREEZE_MS) / 1000);
+  const out = new Float32Array(n);
+  const rand = rng(0x1b873593);
+  let lp = 0;
+  let dc = 0;
+  let tick = 0;
+  let tickDecay = 0;
+  let ringPhase = 0;
+  let ringStep = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const u = i / n;
+    // Frost, not wind: band-passed noise.
+    lp += pole(9000, sr) * (rand() * 2 - 1 - lp);
+    dc += pole(2600, sr) * (lp - dc);
+    const air = (lp - dc) * (0.35 + 0.65 * Math.sin(Math.PI * Math.min(1, u * 1.2)));
+    const glass =
+      0.32 * Math.sin(2 * Math.PI * 2090 * t) +
+      0.2 * Math.sin(2 * Math.PI * 3168 * t) +
+      0.12 * Math.sin(2 * Math.PI * 4637 * t);
+    // Water stiffening: a tone sagging over the first half.
+    const sag = 0.22 * Math.sin(2 * Math.PI * (760 - 520 * Math.min(1, u * 2)) * t);
+    // A struck resonance rather than a click.
+    if (rand() < 0.0016 * (1 - u) + 0.00025) {
+      tick = 0.5 + 0.5 * rand();
+      tickDecay = Math.exp(-1 / (sr * (0.004 + rand() * 0.016)));
+      ringStep = (2 * Math.PI * (1500 + rand() * 3400)) / sr;
+      ringPhase = 0;
+    }
+    tick *= tickDecay;
+    ringPhase += ringStep;
+    const env = Math.min(1, i / (sr * 0.06)) * Math.pow(1 - u, 1.1);
+    out[i] = Math.tanh((air * 2.2 + (glass + sag) * env + tick * Math.sin(ringPhase) * 0.8) * env * 1.3) * 0.34;
+  }
+  return out;
+}
+
 /** Inharmonic partials, each decaying at its own rate. Mate low, check high. */
 function bell(sr: number, hz: number, seconds: number, partials: number[][], gain: number) {
   const out = new Float32Array(Math.round(sr * seconds));
@@ -96,6 +142,7 @@ function bell(sr: number, hz: number, seconds: number, partials: number[][], gai
 function samples(name: SoundName, sr: number): Float32Array {
   if (name === "move") return click(sr);
   if (name === "burn") return burn(sr);
+  if (name === "freeze") return freeze(sr);
   if (name === "check") {
     return bell(sr, 742, 0.55, [[1, 0.42, 0.3], [2.04, 0.26, 0.17], [3.11, 0.15, 0.09], [4.6, 0.08, 0.05]], 0.4);
   }

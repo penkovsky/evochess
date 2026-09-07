@@ -3,6 +3,7 @@ import type { Color } from "chess.js";
 import type { Square } from "chess.js";
 import type { AiLevel } from "./evochess/ai";
 import type { Burn } from "./evochess/burn";
+import type { Freeze } from "./evochess/freeze";
 import type { EvoChessGame, Rights } from "./evochess/game";
 import type { Scores } from "./evochess/scores";
 
@@ -123,6 +124,9 @@ export interface BoardViewProps {
   /** The move currently burning, or null. */
   burn: Burn | null;
   onBurnDone: () => void;
+  /** The square currently freezing, or null. */
+  freeze: Freeze | null;
+  onFreezeDone: () => void;
 }
 
 /** History browsing: where in the line the board is, and how to move. */

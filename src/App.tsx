@@ -3,6 +3,7 @@ import type { Color, Square } from "chess.js";
 import { EvoChessError, type ApplyMoveOptions, type EvoChessGame } from "./evochess/game";
 import { NEXT_LEVEL, type AiLevel } from "./evochess/ai";
 import { isBurningMove, type Burn } from "./evochess/burn";
+import { isFreezingMove, type Freeze } from "./evochess/freeze";
 import { planMove } from "./evochess/moveOptions";
 import { playSound, setSoundEnabled } from "./sound";
 import { decodeShareLink } from "./evochess/shareLink";
@@ -109,6 +110,9 @@ function App() {
   // The move on fire (`evochess/burn.ts`). Set only on a move actually played.
   const [burn, setBurn] = useState<Burn | null>(null);
   const burnId = useRef(0);
+  // The square under ice (`evochess/freeze.ts`). Played moves only, like burn.
+  const [freeze, setFreeze] = useState<Freeze | null>(null);
+  const freezeId = useRef(0);
   // In human-vs-human, flip the board after every move so the side to move sees
   // their pieces at the bottom. Off by default: more intuitive behavior.
   const [autoFlip, setAutoFlip] = useState(false);
@@ -706,8 +710,11 @@ function App() {
     const game = gameRef.current;
     const burning = isBurningMove(before, game, from, to);
     if (burning) setBurn({ from, to, id: ++burnId.current });
+    const freezing = isFreezingMove(before, game, from, to);
+    if (freezing) setFreeze({ square: to, id: ++freezeId.current });
     playSound("move");
     if (burning) playSound("burn");
+    if (freezing) playSound("freeze");
     // Behind the move: its consequence.
     if (game.chess.isCheckmate()) playSound("mate", 0.09);
     else if (game.chess.isCheck()) playSound("check", 0.09);
@@ -833,6 +840,7 @@ function App() {
     const clockHist = clockHistoryRef.current;
     if (hist.length === 0) return;
     setBurn(null);
+    setFreeze(null);
     let restored: ReturnType<typeof hist.pop>;
     let restoredClock: Record<Color, number> | undefined;
     if (mode === "human-ai") {
@@ -884,6 +892,7 @@ function App() {
     setConfirmAction(null);
     if (!snapshot) return;
     setBurn(null);
+    setFreeze(null);
     const restoredClock = clockHist[ply];
     gameRef.current = snapshot.copy();
     historyRef.current = hist.slice(0, ply);
@@ -1028,6 +1037,7 @@ function App() {
     abandonGame();
     resetGame();
     setBurn(null);
+    setFreeze(null);
     clockHistoryRef.current = [];
     resetPonder(); // new game discards the old position (ponder-spec.md §5.3, §6.2)
     // A fresh game is a well-formed position, so the engine is allowed back.
@@ -1196,6 +1206,8 @@ function App() {
     // The trail belongs to the live move, not to whatever is being browsed.
     burn: browsing ? null : burn,
     onBurnDone: () => setBurn(null),
+    freeze: browsing ? null : freeze,
+    onFreezeDone: () => setFreeze(null),
   };
   const browseProps: BrowseProps = {
     browsing,
