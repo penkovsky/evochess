@@ -233,6 +233,7 @@ export function BoardArea({
         extraClass="action-picker-below-board"
         browse={browse}
         aiThinking={aiThinking}
+        gameOver={gameOver}
         onRestart={onRestart}
         onTakeback={onTakeback}
         setConfirmAction={setConfirmAction}

@@ -5,6 +5,7 @@ export function ActionPicker({
   extraClass,
   browse,
   aiThinking,
+  gameOver,
   onRestart,
   onTakeback,
   setConfirmAction,
@@ -15,6 +16,7 @@ export function ActionPicker({
   extraClass: string;
   browse: BrowseProps;
   aiThinking: boolean;
+  gameOver: boolean;
   onRestart: () => void;
   onTakeback: () => void;
   setConfirmAction: (action: ConfirmState) => void;
@@ -75,7 +77,7 @@ export function ActionPicker({
           onClick={onTakeback}
           aria-label="Takeback"
           title="Takeback"
-          disabled={totalPlies === 0 || aiThinking}
+          disabled={totalPlies === 0 || aiThinking || gameOver}
         >
           <UndoIcon />
         </button>

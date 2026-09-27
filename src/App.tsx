@@ -836,6 +836,8 @@ function App() {
     // it already holds: rewinding here would diverge the two boards for good.
     // The button is hidden too. This guards the keyboard and confirm paths.
     if (liveRef.current) return;
+    // The result stands: a finished game is not rewound, only replaced.
+    if (gameRef.current.isGameOver() || timeUp) return;
     const hist = historyRef.current;
     const clockHist = clockHistoryRef.current;
     if (hist.length === 0) return;

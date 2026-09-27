@@ -5,6 +5,7 @@ import { ActionPicker } from "../ActionPicker";
 function renderPicker(
   over: {
     browsing?: boolean;
+    gameOver?: boolean;
     puzzleActive?: boolean;
     liveActive?: boolean;
     onLiveMenu?: (() => void) | null;
@@ -23,6 +24,7 @@ function renderPicker(
         onBrowseLive: () => {},
       }}
       aiThinking={false}
+      gameOver={false}
       onRestart={() => {}}
       onTakeback={() => {}}
       setConfirmAction={() => {}}
@@ -39,6 +41,11 @@ describe("ActionPicker", () => {
   it("offers takeback in an ordinary game, and play-from-here while browsing", () => {
     expect(renderPicker().querySelector(".takeback-btn")).not.toBeNull();
     expect(renderPicker({ browsing: true }).querySelector(".play-here-btn")).not.toBeNull();
+  });
+
+  it("disables takeback once the game is over", () => {
+    const btn = renderPicker({ gameOver: true }).querySelector<HTMLButtonElement>(".takeback-btn")!;
+    expect(btn.disabled).toBe(true);
   });
 
   it("holds the slot empty during a live match, since the line cannot rewind", () => {
