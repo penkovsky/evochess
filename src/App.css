@@ -1130,7 +1130,7 @@ button.board-status-invite {
 /* A banked right no piece can spend: that color has no minor left that is
    eligible, because each one is a downgraded rook (or there is none at all).
    Greyed and struck rather than hidden, since the right is still real and comes
-   back the moment a fresh minor evolves. Matches the grey dot those pieces
+   back the moment a fresh minor evolves. Matches the dead battery those pieces
    carry on the board. */
 .evo-banked.unusable {
   color: #8a8a8a;
@@ -1797,21 +1797,112 @@ button.board-status-invite {
   background: #d98c00;
 }
 
-/* A minor that was downgraded from a rook, and so is barred from ever becoming
-   one again. Same corner as the charge badge, deliberately: it is the same
-   piece's evolution slot, just spent. Grey and dotless of any number, so it
-   never reads as a count. The ring keeps it visible on both square colors. */
-.rook-locked-dot {
+/* The battery (boardSkin.tsx). --evo-top/--evo-span put the fill line on the
+   glyph's body, not the square; --evo-flip is the same line from the bottom.
+   aspect-ratio, not height 100%: that chain does not resolve, and the layers
+   are absolute, so they collapse. */
+.evo-battery {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+}
+
+.evo-battery svg {
   position: absolute;
-  bottom: 3px;
-  right: 3px;
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: #6b6b6b;
-  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.85);
-  pointer-events: none;
-  z-index: 2;
+  inset: 0;
+}
+
+.evo-pawn {
+  --evo-top: 87.78%;
+  --evo-span: 67.78%;
+  --evo-flip: 80%;
+}
+
+.evo-knight {
+  --evo-top: 88.67%;
+  --evo-span: 73.11%;
+  --evo-flip: 84.44%;
+}
+
+.evo-bishop {
+  --evo-top: 85.56%;
+  --evo-span: 73.33%;
+  --evo-flip: 87.78%;
+}
+
+.board-container {
+  --evo-p-w: 0.3333;
+  --evo-p-b: 0.3333;
+  --evo-m-w: 0.3333;
+  --evo-m-b: 0.3333;
+}
+
+.evo-pawn.evo-white .evo-full {
+  clip-path: inset(calc(var(--evo-top) - var(--evo-span) * var(--evo-p-w)) 0 0 0);
+}
+
+.evo-pawn.evo-black .evo-full {
+  clip-path: inset(calc(var(--evo-top) - var(--evo-span) * var(--evo-p-b)) 0 0 0);
+}
+
+/* :not, rather than an override below: a locked minor has to escape the level,
+   the flip and the aura, and each of those outranks a plain .evo-locked-piece
+   rule. */
+.evo-knight.evo-white:not(.evo-locked-piece) .evo-full,
+.evo-bishop.evo-white:not(.evo-locked-piece) .evo-full {
+  clip-path: inset(calc(var(--evo-top) - var(--evo-span) * var(--evo-m-w)) 0 0 0);
+}
+
+.evo-knight.evo-black:not(.evo-locked-piece) .evo-full,
+.evo-bishop.evo-black:not(.evo-locked-piece) .evo-full {
+  clip-path: inset(calc(var(--evo-top) - var(--evo-span) * var(--evo-m-b)) 0 0 0);
+}
+
+/* Over the board the black svg is rotated: clip from the other side. */
+.board-container.flip-black .evo-pawn.evo-black .evo-full {
+  clip-path: inset(0 0 calc(var(--evo-flip) - var(--evo-span) * var(--evo-p-b)) 0);
+}
+
+.board-container.flip-black .evo-knight.evo-black:not(.evo-locked-piece) .evo-full,
+.board-container.flip-black .evo-bishop.evo-black:not(.evo-locked-piece) .evo-full {
+  clip-path: inset(0 0 calc(var(--evo-flip) - var(--evo-span) * var(--evo-m-b)) 0);
+}
+
+/* A banked right lights every piece that could spend it. */
+.board-container.evo-aura-p-w .evo-pawn.evo-white,
+.board-container.evo-aura-p-b .evo-pawn.evo-black,
+.board-container.evo-aura-m-w .evo-knight.evo-white:not(.evo-locked-piece),
+.board-container.evo-aura-m-w .evo-bishop.evo-white:not(.evo-locked-piece),
+.board-container.evo-aura-m-b .evo-knight.evo-black:not(.evo-locked-piece),
+.board-container.evo-aura-m-b .evo-bishop.evo-black:not(.evo-locked-piece) {
+  filter: drop-shadow(0 0 2px rgba(255, 220, 120, 0.95))
+    drop-shadow(0 0 5px rgba(255, 195, 60, 0.8));
+}
+
+/* Downgraded from a rook: solid, with a dead-battery bolt. */
+.evo-locked-piece .evo-empty {
+  display: none;
+}
+
+/* In the charge badge's corner, which a locked minor never uses. The white
+   halo keeps it on both square colours. */
+.evo-battery .evo-dead {
+  inset: auto 1px 1px auto;
+  width: 42%;
+  height: 42%;
+}
+
+.evo-dead path {
+  fill: #6b6b6b;
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
+
+/* Upright even when the piece faces its player. */
+.board-container.flip-black [data-piece^="b"] svg.evo-dead {
+  transform: none;
 }
 
 @keyframes fireworks-fade-out {

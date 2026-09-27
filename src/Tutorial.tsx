@@ -15,6 +15,7 @@ import {
 } from "./evochess/tutorial";
 import { loadProgress, markCompleted, markSeen, trackTutorialOpened } from "./evochess/tutorialProgress";
 import { EvoStrip } from "./EvoStrip";
+import { boardSkin, batteryProps } from "./boardSkin";
 import { PIECE_GLYPH } from "./pieceGlyph";
 import "./Tutorial.css";
 
@@ -418,16 +419,16 @@ function LessonPlayer({
 
   const squareStyles: Record<string, CSSProperties> = {};
   if (suggestionLive && !modal) {
-    squareStyles[step.play.from] = { boxShadow: "inset 0 0 0 4px rgba(34, 170, 119, 0.85)" };
+    squareStyles[step.play.from] = { boxShadow: "inset 0 0 0 4px rgba(27, 154, 170, 0.85)" };
     // A filled dot would sit behind the piece on an occupied square, so a
     // capture is marked with a ring around it instead. Same convention
     // the game itself uses for legal-move hints.
     squareStyles[step.play.to] = game.chess.get(step.play.to)
-      ? { background: "radial-gradient(circle, transparent 55%, rgba(34, 170, 119, 0.55) 55%)" }
-      : { background: "radial-gradient(circle, rgba(34, 170, 119, 0.55) 22%, transparent 23%)" };
+      ? { background: "radial-gradient(circle, transparent 55%, rgba(27, 154, 170, 0.55) 55%)" }
+      : { background: "radial-gradient(circle, rgba(27, 154, 170, 0.55) 22%, transparent 23%)" };
   }
   if (selected) {
-    squareStyles[selected] = { background: "rgba(255, 255, 0, 0.4)" };
+    squareStyles[selected] = { background: "rgba(27, 154, 170, 0.3)" };
     for (const m of game.legalMoves()) {
       if (m.from !== selected || squareStyles[m.to]) continue;
       squareStyles[m.to] = {
@@ -445,6 +446,7 @@ function LessonPlayer({
   const finalRecap = lesson.steps[lesson.steps.length - 1].recap;
 
   const rights = { w: game.rightsFor("w"), b: game.rightsFor("b") };
+  const battery = batteryProps(game, rights);
   // Reads through the reply rather than blinking "Black to move" and back for
   // the moment Easy takes to answer: the learner is White, and the turn is
   // coming back to them either way.
@@ -463,7 +465,7 @@ function LessonPlayer({
           <span className="tutorial-lesson-title">{lesson.title}</span>
         </div>
         <EvoStrip color="b" game={game} rights={rights.b} active={game.turn === "b"} />
-        <div className="board-container">
+        <div className={`board-container${battery.aura}`} style={battery.style}>
           <Chessboard
             options={{
               position: game.chess.fen(),
@@ -474,21 +476,20 @@ function LessonPlayer({
                 const charges = game.rookCharges.get(square as Square);
                 const locked = game.rookLocked.has(square as Square);
                 return (
-                  <div style={{ width: "100%", height: "100%", position: "relative", ...squareStyles[square] }}>
+                  <div
+                    style={{ width: "100%", height: "100%", position: "relative", ...squareStyles[square] }}
+                    title={locked ? "Downgraded rook - cannot become a rook again" : undefined}
+                  >
                     {children}
                     {charges !== undefined && (
                       <span className={`rook-charge-badge ${charges === 1 ? "low" : ""}`}>{charges}</span>
-                    )}
-                    {/* The downgrade lesson leaves a locked minor on the board;
-                        it carries the same grey dot as in the real game. */}
-                    {locked && (
-                      <span className="rook-locked-dot" title="Downgraded rook - cannot become a rook again" />
                     )}
                   </div>
                 );
               },
               boardOrientation: "white",
               allowDragging: boardLive && !modal,
+              ...boardSkin,
             }}
           />
         </div>

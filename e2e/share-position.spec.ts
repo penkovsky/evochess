@@ -181,7 +181,7 @@ test("opening a shared position offers g4, g4=N and g4=B", async ({ page }) => {
 
 test("closing the optional-promotion dialog cancels the move", async ({ page }) => {
   await openShareLink(page, VECTOR_A);
-  const pawn = '[data-square="g5"] img, [data-square="g5"] svg';
+  const pawn = '[data-square="g5"] [data-piece]';
 
   // Escape first. "Skip" is how to play the move unpromoted, so the two ways
   // out of the dialog take the move back instead.
@@ -213,7 +213,7 @@ test("closing the optional-promotion dialog cancels the move", async ({ page }) 
   await expect(page.locator(".modal")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(pawn)).toBeVisible();
-  await expect(page.locator('[data-square="g4"] img, [data-square="g4"] svg')).toHaveCount(0);
+  await expect(page.locator('[data-square="g4"] [data-piece]')).toHaveCount(0);
 
   // The cancelled move is still there to play.
   await page.locator('[data-square="g5"]').click();
@@ -228,7 +228,7 @@ test("a shared position leaves the recipient's own game saved and restorable", a
 
   // The shared position is on the board...
   await expect(page.locator(".board-status")).toHaveText("White to move.");
-  await expect(page.locator('[data-square="c7"] img, [data-square="c7"] svg')).toBeVisible();
+  await expect(page.locator('[data-square="c7"] [data-piece]')).toBeVisible();
   // ...and the recipient's autosave is untouched, byte for byte (spec §6.4).
   expect(await page.evaluate((key) => window.localStorage.getItem(key), SAVE_KEY)).toBe(save);
   // The parameter stays in the address bar until the shared game goes live,
@@ -374,7 +374,7 @@ test("an unverified position renders with the engine locked out", async ({ page 
 
   // The board is shown: a position someone wants to argue about is worth
   // showing even if it was hand-built (spec §5.2).
-  await expect(page.locator('[data-square="e7"] img, [data-square="e7"] svg')).toBeVisible();
+  await expect(page.locator('[data-square="e7"] [data-piece]')).toBeVisible();
   await expect(page.locator(".link-banner.unverified")).toContainText(
     "computer opponent is unavailable"
   );

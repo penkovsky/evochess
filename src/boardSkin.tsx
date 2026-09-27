@@ -1,14 +1,17 @@
+import type { CSSProperties, SVGProps } from "react";
+import type { Color } from "chess.js";
 import { defaultPieces } from "react-chessboard";
 import type { PieceRenderObject } from "react-chessboard";
+import type { EvoChessGame, Rights } from "./evochess/game";
 
 /**
  * The board skin. `BOARD_SKIN` is the only switch: set it to "classic" to get
  * the stock react-chessboard look back, pieces, squares and move markers all
  * at once.
  *
- * "evo" keeps the stock set and swaps two black pieces for traced outlines of
- * the Unicode chess glyphs, normalised into the same 45x45 box the stock pieces
- * use and scaled to 90%:
+ * "evo" keeps the stock set, gives pawns and minors the battery (below), and
+ * swaps two black pieces for traced outlines of the Unicode chess glyphs,
+ * normalised into the same 45x45 box the stock pieces use and scaled to 90%:
  *
  *   N from Droid Sans Fallback, Apache 2.0
  *   Q from Symbola, released free of restrictions
@@ -45,10 +48,124 @@ function glyph(d: string) {
   );
 }
 
+/**
+ * The battery: pawns and minors drawn twice, drained over charged, the solid copy
+ * clipped to the side's progress toward its next promotion. Only body parts
+ * take the drained colour, so ink stays crisp. Levels come from `--evo-p-*`/`--evo-m-*`
+ * on `.board-container`.
+ */
+type Part = { d: string; ink?: string; a?: SVGProps<SVGPathElement> };
+
+const EMPTY_W = "#f2c14e";
+const EMPTY_OPACITY_W = 0.75;
+const EMPTY_B = "#3b5f8a";
+
+/** Dead battery: the marker on a minor that can never be a rook again. */
+const DEAD_BOLT = "M9.5 0.8 L3 8.8 H7.2 L6.3 15.2 L13 7.2 H8.6 Z";
+
+const BODY_STROKE = {
+  stroke: "#000000",
+  strokeWidth: 1.5,
+  strokeLinejoin: "round",
+  strokeLinecap: "round",
+} as const;
+
+const PAWN: Part[] = [
+  { d: "m 22.5,9 c -2.21,0 -4,1.79 -4,4 0,0.89 0.29,1.71 0.78,2.38 C 17.33,16.5 16,18.59 16,21 c 0,2.03 0.94,3.84 2.41,5.03 C 15.41,27.09 11,31.58 11,39.5 H 34 C 34,31.58 29.59,27.09 26.59,26.03 28.06,24.84 29,23.03 29,21 29,18.59 27.67,16.5 25.72,15.38 26.21,14.71 26.5,13.89 26.5,13 c 0,-2.21 -1.79,-4 -4,-4 z" },
+];
+
+const KNIGHT_W: Part[] = [
+  { d: "M 22,10 C 32.5,11 38.5,18 38,39 L 15,39 C 15,30 25,32.5 23,18" },
+  { d: "M 24,18 C 24.38,20.91 18.45,25.37 16,27 C 13,29 13.18,31.34 11,31 C 9.958,30.06 12.41,27.96 11,28 C 10,28 11.19,29.23 10,30 C 9,30 5.997,31 6,26 C 6,24 12,14 12,14 C 12,14 13.89,12.1 14,10.5 C 13.27,9.506 13.5,8.5 13.5,7.5 C 14.5,6.5 16.5,10 16.5,10 L 18.5,10 C 18.5,10 19.28,8.008 21,7 C 22,7 22,10 22,10" },
+  { d: "M 9.5 25.5 A 0.5 0.5 0 1 1 8.5,25.5 A 0.5 0.5 0 1 1 9.5 25.5 z", ink: "#000000" },
+  { d: "M 15 15.5 A 0.5 1.5 0 1 1  14,15.5 A 0.5 1.5 0 1 1  15 15.5 z", ink: "#000000",
+    a: { transform: "matrix(0.866,0.5,-0.5,0.866,9.693,-5.173)" } },
+];
+
+const BISHOP_BODY: Part[] = [
+  { d: "M 9,36 C 12.39,35.03 19.11,36.43 22.5,34 C 25.89,36.43 32.61,35.03 36,36 C 36,36 37.65,36.54 39,38 C 38.32,38.97 37.35,38.99 36,38.5 C 32.61,37.53 25.89,38.96 22.5,37.5 C 19.11,38.96 12.39,37.53 9,38.5 C 7.65,38.99 6.68,38.97 6,38 C 7.35,36.54 9,36 9,36 z" },
+  { d: "M 15,32 C 17.5,34.5 27.5,34.5 30,32 C 30.5,30.5 30,30 30,30 C 30,27.5 27.5,26 27.5,26 C 33,24.5 33.5,14.5 22.5,10.5 C 11.5,14.5 12,24.5 17.5,26 C 17.5,26 15,27.5 15,30 C 15,30 14.5,30.5 15,32 z" },
+  { d: "M 25 8 A 2.5 2.5 0 1 1  20,8 A 2.5 2.5 0 1 1  25 8 z" },
+];
+const bishop = (ink: string): Part[] => [
+  ...BISHOP_BODY,
+  { d: "M 17.5,26 L 27.5,26 M 15,30 L 30,30 M 22.5,15.5 L 22.5,20.5 M 20,18 L 25,18",
+    ink, a: { fill: "none", strokeLinejoin: "miter" } },
+];
+
+function layer(parts: Part[], fill: string, cls: string, flat: boolean, opacity?: number) {
+  return (
+    <svg className={cls} viewBox="0 0 45 45" width="100%" height="100%">
+      {parts.map((p, i) =>
+        p.ink ? (
+          <path key={i} d={p.d} fill={p.ink} stroke={p.ink} strokeWidth={1.5} strokeLinecap="round" {...p.a} />
+        ) : (
+          <path key={i} d={p.d} fill={fill} fillOpacity={opacity} {...(flat ? {} : BODY_STROKE)} {...p.a} />
+        ),
+      )}
+    </svg>
+  );
+}
+
+/** Locked squares. On the piece, not the square: the drag clone renders
+ *  outside the grid. */
+let lockedSquares: ReadonlySet<string> = new Set();
+
+/** Battery level per progress count. */
+const FILL = [1 / 3, 2 / 3, 1];
+
+/** What `.board-container` needs for the batteries. Banked reads full; the count
+ *  is the strip's job. */
+export function batteryProps(game: EvoChessGame, rights: Record<Color, Rights>) {
+  lockedSquares = game.rookLocked;
+  const level = (progress: number, banked: number) => (banked > 0 ? 1 : FILL[progress]);
+  return {
+    style: {
+      "--evo-p-w": level(game.pawnMoveProgress.w, rights.w.minor),
+      "--evo-p-b": level(game.pawnMoveProgress.b, rights.b.minor),
+      "--evo-m-w": level(game.minorMoveProgress.w, rights.w.rook),
+      "--evo-m-b": level(game.minorMoveProgress.b, rights.b.rook),
+    } as CSSProperties,
+    aura:
+      (rights.w.minor > 0 ? " evo-aura-p-w" : "") +
+      (rights.b.minor > 0 ? " evo-aura-p-b" : "") +
+      (rights.w.rook > 0 ? " evo-aura-m-w" : "") +
+      (rights.b.rook > 0 ? " evo-aura-m-b" : ""),
+  };
+}
+
+function battery(parts: Part[], kind: "pawn" | "knight" | "bishop", color: "w" | "b") {
+  // The evo black knight is a silhouette: no stroke.
+  const flat = color === "b" && kind === "knight";
+  const solid = color === "w" ? "#ffffff" : PIECE_FILL;
+  const empty = color === "w" ? EMPTY_W : EMPTY_B;
+  const opacity = color === "w" ? EMPTY_OPACITY_W : undefined;
+  const cls = `evo-battery evo-${kind} ${color === "w" ? "evo-white" : "evo-black"}`;
+  return (props?: { square?: string }) => {
+    const locked = !!props?.square && lockedSquares.has(props.square);
+    return (
+      <div className={locked ? `${cls} evo-locked-piece` : cls}>
+        {layer(parts, empty, "evo-empty", flat, opacity)}
+        {layer(parts, solid, "evo-full", flat)}
+        {locked && (
+          <svg className="evo-dead" viewBox="0 0 16 16">
+            <path d={DEAD_BOLT} />
+          </svg>
+        )}
+      </div>
+    );
+  };
+}
+
 const evoPieces: PieceRenderObject = {
   ...defaultPieces,
-  bN: glyph(GLYPHS.N),
   bQ: glyph(GLYPHS.Q),
+  wP: battery(PAWN, "pawn", "w"),
+  bP: battery(PAWN, "pawn", "b"),
+  wN: battery(KNIGHT_W, "knight", "w"),
+  bN: battery([{ d: GLYPHS.N }], "knight", "b"),
+  wB: battery(bishop("#000000"), "bishop", "w"),
+  bB: battery(bishop("#ffffff"), "bishop", "b"),
 };
 
 const evoSkin = {

@@ -16,7 +16,7 @@ import type {
   PuzzleProps,
   ScoreProps,
 } from "../appTypes";
-import { boardSkin } from "../boardSkin";
+import { boardSkin, batteryProps } from "../boardSkin";
 import BurnTrail from "./BurnTrail";
 import IceOver from "./IceOver";
 import { EvoStrip } from "../EvoStrip";
@@ -74,6 +74,7 @@ export function BoardArea({
   onShare: (e: ReactMouseEvent<HTMLButtonElement>, useShareSheet: boolean) => void;
 }) {
   const { displayGame, topColor, bottomColor, squareStyles, rightsFor } = board;
+  const battery = batteryProps(displayGame, rightsFor);
   return (
     <div className="board-wrap" ref={boardWrapRef}>
       {mode === "human-human" && clock.timerEnabled && (
@@ -93,7 +94,8 @@ export function BoardArea({
       />
       <EvoStrip color={topColor} game={displayGame} rights={rightsFor[topColor]} active={displayGame.turn === topColor} />
       <div
-        className={`board-container${board.flipBlackPieces ? " flip-black" : ""}`}
+        className={`board-container${board.flipBlackPieces ? " flip-black" : ""}${battery.aura}`}
+        style={battery.style}
         onTouchStart={onBoardTouchStart}
         onTouchEnd={onBoardTouchEnd}
       >
@@ -106,16 +108,14 @@ export function BoardArea({
               const charges = displayGame.rookCharges.get(square as Square);
               const locked = displayGame.rookLocked.has(square as Square);
               return (
-                <div style={{ width: "100%", height: "100%", position: "relative", ...squareStyles[square] }}>
+                <div
+                  style={{ width: "100%", height: "100%", position: "relative", ...squareStyles[square] }}
+                  title={locked ? "Downgraded rook - cannot become a rook again" : undefined}
+                >
                   {children}
                   {charges !== undefined && (
                     <span className={`rook-charge-badge ${charges === 1 ? "low" : ""}`}>{charges}</span>
                   )}
-                  {/* A minor that came from a spent rook can never become one
-                      again, so it gets the badge slot the rook it used to be
-                      had. The two never collide: a locked square holds a minor,
-                      and only a rook carries charges. */}
-                  {locked && <span className="rook-locked-dot" title="Downgraded rook - cannot become a rook again" />}
                 </div>
               );
             },

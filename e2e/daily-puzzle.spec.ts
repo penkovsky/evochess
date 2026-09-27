@@ -170,7 +170,7 @@ test("?daily loads today's puzzle and takes the parameter out of the address bar
   // The bishop on c7 is the piece the puzzle exists for, and the solver moves
   // first, so loading it must not start an engine search.
   await expect(page.locator(".board-status")).toHaveText("White to play, mate in 2");
-  await expect(page.locator('[data-square="c7"] img, [data-square="c7"] svg')).toBeVisible();
+  await expect(page.locator('[data-square="c7"] [data-piece]')).toBeVisible();
 
   // Stripped immediately, so a reload cannot re-enter the puzzle over a game
   // in progress. `?p=` is not put in its place either: the puzzle is held in
@@ -399,7 +399,7 @@ test("a line that runs out of moves fails, and Try again starts it over", async 
   // ever threatening it.
   await page.locator('[data-square="e1"]').click();
   await page.locator('[data-square="f1"]').click();
-  await expect(page.locator('[data-square="f1"] img, [data-square="f1"] svg')).toBeVisible();
+  await expect(page.locator('[data-square="f1"] [data-piece]')).toBeVisible();
   // The label is the solver's colour and it holds still while the engine
   // answers, rather than telling them Black is to play and to mate in 2. Read
   // once rather than polled: the point is what it says at this instant, and the

@@ -65,7 +65,7 @@ test("a link shared while browsing opens at that ply, with the line either side"
   // The recipient lands on the ply the sharer was looking at, not on the end
   // of the line.
   await expect(page.locator(".board-status")).toContainText("Move 2 of 4");
-  await expect(page.locator('[data-square="d4"] img, [data-square="d4"] svg')).toHaveCount(0);
+  await expect(page.locator('[data-square="d4"] [data-piece]')).toHaveCount(0);
   await expectNoScrolling(page);
 
   // The whole line is there, both ways.
@@ -76,7 +76,7 @@ test("a link shared while browsing opens at that ply, with the line either side"
   await expect(page.locator(".board-status")).toContainText("Move 3 of 4");
   await page.keyboard.press("End");
   await expect(page.locator(".log > div")).toHaveCount(2);
-  await expect(page.locator('[data-square="d5"] img, [data-square="d5"] svg')).toBeVisible();
+  await expect(page.locator('[data-square="d5"] [data-piece]')).toBeVisible();
 });
 
 test("a link shared from the live position arrives live and playable", async ({ page }) => {
