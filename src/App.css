@@ -305,6 +305,11 @@ button.board-status-invite {
   position: relative;
 }
 
+/* The svg, not the piece div: that div's transform carries the move animation. */
+.board-container.flip-black [data-piece^="b"] svg {
+  transform: rotate(180deg);
+}
+
 /* 1000ms: 300ms of flight, matching the board's piece animation, then 700ms
    going out. Under the score overlay. */
 .burn {

@@ -117,6 +117,8 @@ export interface BoardViewProps {
   displayGame: EvoChessGame;
   boardPosition: string;
   boardOrientation: "white" | "black";
+  /** Turn black's pieces to face the other seat. */
+  flipBlackPieces: boolean;
   squareStyles: Record<string, CSSProperties>;
   topColor: Color;
   bottomColor: Color;

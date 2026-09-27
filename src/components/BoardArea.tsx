@@ -92,7 +92,11 @@ export function BoardArea({
         className={`board-status-underline${aiThinking ? " thinking" : nnueReady ? " nnue-ready" : ""}`}
       />
       <EvoStrip color={topColor} game={displayGame} rights={rightsFor[topColor]} active={displayGame.turn === topColor} />
-      <div className="board-container" onTouchStart={onBoardTouchStart} onTouchEnd={onBoardTouchEnd}>
+      <div
+        className={`board-container${board.flipBlackPieces ? " flip-black" : ""}`}
+        onTouchStart={onBoardTouchStart}
+        onTouchEnd={onBoardTouchEnd}
+      >
         <Chessboard
           options={{
             position: board.boardPosition,

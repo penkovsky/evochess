@@ -1199,6 +1199,7 @@ function App() {
     displayGame: view.displayGame,
     boardPosition: view.displayGame.chess.fen(),
     boardOrientation: view.boardOrientation,
+    flipBlackPieces: view.flipBlackPieces,
     squareStyles: buildSquareStyles(game, selected),
     topColor: view.topColor,
     bottomColor: view.bottomColor,

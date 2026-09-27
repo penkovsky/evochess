@@ -39,6 +39,8 @@ export interface BoardView {
   status: string;
   gameOver: boolean;
   boardOrientation: "white" | "black";
+  /** Black's pieces face the other side of the table. */
+  flipBlackPieces: boolean;
   topColor: Color;
   bottomColor: Color;
   rightsFor: Record<Color, ReturnType<EvoChessGame["rightsFor"]>>;
@@ -100,6 +102,9 @@ export function deriveBoardView(input: BoardViewInput): BoardView {
     : "white";
   const bottomColor: Color = boardOrientation === "white" ? "w" : "b";
 
+  // A match seat or Auto flip already orients the board.
+  const flipBlackPieces = mode === "human-human" && !live?.seat && !input.autoFlip;
+
   // Suppressed for a game played from a shared position: that result was never
   // recorded, so the score would be the running total of unrelated games, and
   // "play again" would start from the opening rather than from the position.
@@ -123,6 +128,7 @@ export function deriveBoardView(input: BoardViewInput): BoardView {
     status,
     gameOver,
     boardOrientation,
+    flipBlackPieces,
     topColor: bottomColor === "w" ? "b" : "w",
     bottomColor,
     rightsFor: { w: displayGame.rightsFor("w"), b: displayGame.rightsFor("b") },
