@@ -849,6 +849,17 @@ function plyNumber(game: EvoChessGame): number {
 }
 
 /**
+ * A random legal pawn turn, or null if the side to move has none. Used for the
+ * engine's first move of a game: the opening position is the same every time,
+ * so the search would always answer it with the same move.
+ */
+export function randomPawnTurn(game: EvoChessGame, seed: number): CandidateTurn | null {
+  const pawnTurns = legalTurns(game).filter((t) => game.chess.get(t.from)?.type === "p");
+  if (!pawnTurns.length) return null;
+  return pawnTurns[Math.floor(mulberry32(seed)() * pawnTurns.length)];
+}
+
+/**
  * Every legal compound turn (base move plus any evolutionary-promotion choice)
  * for the side to move, unordered. Reuses the search's own candidate generator
  * so the data generator's random moves cover exactly the same move space the

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Color, Square } from "chess.js";
-import { EvoChessError, type ApplyMoveOptions, type EvoChessGame } from "./evochess/game";
-import { NEXT_LEVEL, type AiLevel } from "./evochess/ai";
+import { EvoChessError, START_FEN, type ApplyMoveOptions, type EvoChessGame } from "./evochess/game";
+import { NEXT_LEVEL, randomPawnTurn, type AiLevel } from "./evochess/ai";
 import { isBurningMove, type Burn } from "./evochess/burn";
 import { isFreezingMove, type Freeze } from "./evochess/freeze";
 import { planMove } from "./evochess/moveOptions";
@@ -720,6 +720,12 @@ function App() {
     else if (game.chess.isCheck()) playSound("check", 0.09);
   }
 
+  /** The engine's own first move of a game that began at the standard start. */
+  function isAiOpeningMove(game: EvoChessGame): boolean {
+    if (game.moveLog.length === 0) return game.chess.fen() === START_FEN;
+    return game.moveLog.length === 1 && historyRef.current[0]?.chess.fen() === START_FEN;
+  }
+
   async function maybeAiMove(overrides?: { mode?: Mode; aiColor?: Color; level?: AiLevel }) {
     const effMode = overrides?.mode ?? mode;
     const effAiColor = overrides?.aiColor ?? aiColor;
@@ -735,7 +741,9 @@ function App() {
     // Let the UI paint the "thinking" state before blocking the main thread
     // with the search.
     await new Promise((r) => setTimeout(r, 30));
-    const candidate = await searchInWorker(game, effLevel, Math.floor(Math.random() * 1_000_000));
+    const seed = Math.floor(Math.random() * 1_000_000);
+    const opening = isAiOpeningMove(game) ? randomPawnTurn(game, seed) : null;
+    const candidate = opening ?? (await searchInWorker(game, effLevel, seed));
     // gameRef.current is reassigned (not mutated) by takeback/new game, so an
     // identity check here catches a search that's now stale.
     if (candidate && gameRef.current === game && !game.isGameOver() && game.turn === effAiColor) {
